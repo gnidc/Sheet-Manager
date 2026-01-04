@@ -73,3 +73,30 @@ The `shared/` directory contains code used by both frontend and backend:
 - Tailwind CSS for styling
 - Lucide React for icons
 - Recharts for potential data visualization
+
+## Data Synchronization
+
+Development and production databases are separate in Replit. Use these API endpoints to sync data:
+
+### Export Data (from any environment)
+```
+GET /api/export
+```
+Returns all ETF data as JSON. Use this on the production site to get the current data.
+
+### Import Data (to any environment)
+```
+POST /api/import
+Content-Type: application/json
+
+{ "data": [...] }
+```
+Imports ETF data from JSON. This will **replace all existing data** in the database.
+
+### Workflow for Syncing Production to Development:
+1. Go to production site and call `GET /api/export`
+2. Copy the `data` array from the response
+3. Call `POST /api/import` on development with `{ "data": [copied data] }`
+
+### Auto-Seed Feature
+When the app starts with fewer than 50 ETFs in the database, it automatically seeds with the default ETF data from the seed script.

@@ -119,6 +119,64 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/export", async (req, res) => {
+    try {
+      const etfs = await storage.getEtfs();
+      const exportData = etfs.map(etf => {
+        const { id, currentPrice, dailyChangeRate, lastUpdated, trendScore, isRecommended, ...data } = etf;
+        return data;
+      });
+      res.json({ 
+        exportedAt: new Date().toISOString(),
+        count: exportData.length,
+        data: exportData 
+      });
+    } catch (err) {
+      res.status(500).json({ message: "Failed to export data" });
+    }
+  });
+
+  app.post("/api/import", async (req, res) => {
+    try {
+      const { data } = req.body;
+      if (!Array.isArray(data)) {
+        return res.status(400).json({ message: "Invalid data format. Expected { data: [...] }" });
+      }
+      
+      if (data.length === 0) {
+        return res.status(400).json({ message: "Data array is empty" });
+      }
+      
+      const errors: string[] = [];
+      for (let i = 0; i < data.length; i++) {
+        const etf = data[i];
+        if (!etf.code || !etf.name || !etf.mainCategory) {
+          errors.push(`Item ${i}: missing required fields (code, name, mainCategory)`);
+        }
+      }
+      
+      if (errors.length > 0) {
+        return res.status(400).json({ message: "Validation failed", errors });
+      }
+      
+      const existing = await storage.getEtfs();
+      for (const etf of existing) {
+        await storage.deleteEtf(etf.id);
+      }
+      
+      let imported = 0;
+      for (const etfData of data) {
+        await storage.createEtf(etfData);
+        imported++;
+      }
+      
+      res.json({ success: true, imported });
+    } catch (err) {
+      console.error("Import error:", err);
+      res.status(500).json({ message: "Failed to import data" });
+    }
+  });
+
   // Background task to periodically update scores and recommendations
   setInterval(async () => {
     try {
