@@ -5,12 +5,6 @@ import { api } from "@shared/routes";
 import { z } from "zod";
 import axios from "axios";
 import bcrypt from "bcryptjs";
-import OpenAI from "openai";
-
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
 
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
 const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH;
@@ -194,7 +188,7 @@ export async function registerRoutes(
       let title = "";
       let thumbnail = "";
       let sourceType = "article";
-      let contentToSummarize = "";
+      let preview = "";
 
       if (url.includes("youtube.com") || url.includes("youtu.be")) {
         sourceType = "youtube";
@@ -208,7 +202,6 @@ export async function registerRoutes(
             title = "YouTube Video";
           }
           
-          let description = "";
           try {
             const pageRes = await axios.get(`https://www.youtube.com/watch?v=${videoId}`, {
               timeout: 10000,
@@ -217,19 +210,13 @@ export async function registerRoutes(
             const html = pageRes.data as string;
             const descMatch = html.match(/"shortDescription":"([^"]+)"/);
             if (descMatch) {
-              description = descMatch[1]
-                .replace(/\\n/g, '\n')
+              preview = descMatch[1]
+                .replace(/\\n/g, ' ')
                 .replace(/\\"/g, '"')
-                .substring(0, 2000);
+                .substring(0, 200);
             }
           } catch {
-            description = "";
-          }
-          
-          if (description.length > 100) {
-            contentToSummarize = `YouTube 영상 제목: "${title}"\n\n영상 설명:\n${description}\n\n위 YouTube 영상에서 다루는 ETF/투자 관련 핵심 내용을 3-5개 불릿 포인트로 요약해주세요.`;
-          } else {
-            contentToSummarize = `YouTube 영상 제목: "${title}"\n\n(영상 설명이 제한적입니다. 제목을 기반으로 추론하여 ETF/투자 관련 내용을 3-5개 불릿 포인트로 요약해주세요.)`;
+            preview = "";
           }
         }
       } else if (url.includes("blog.naver.com")) {
@@ -247,12 +234,11 @@ export async function registerRoutes(
             .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
             .replace(/<[^>]+>/g, ' ')
             .replace(/\s+/g, ' ')
-            .trim()
-            .substring(0, 3000);
-          contentToSummarize = `블로그 제목: "${title}"\n\n본문 내용:\n${bodyText}\n\n위 블로그 글에서 ETF/투자 관련 핵심 내용을 3-5개 불릿 포인트로 요약해주세요.`;
+            .trim();
+          preview = bodyText.substring(0, 200);
         } catch {
           title = "네이버 블로그 글";
-          contentToSummarize = `네이버 블로그 URL: ${url} - ETF/투자 관련 내용을 요약해주세요.`;
+          preview = "";
         }
       } else {
         try {
@@ -268,50 +254,18 @@ export async function registerRoutes(
             .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
             .replace(/<[^>]+>/g, ' ')
             .replace(/\s+/g, ' ')
-            .trim()
-            .substring(0, 3000);
-          contentToSummarize = `기사 제목: "${title}"\n\n본문 내용:\n${bodyText}\n\n위 기사에서 ETF/투자 관련 핵심 내용을 3-5개 불릿 포인트로 요약해주세요.`;
+            .trim();
+          preview = bodyText.substring(0, 200);
         } catch {
           title = url;
-          contentToSummarize = `웹 기사 URL: ${url} - ETF/투자 관련 내용을 요약해주세요.`;
+          preview = "";
         }
-      }
-
-      let summary = "";
-      try {
-        const completion = await openai.chat.completions.create({
-          model: "gpt-4o-mini",
-          messages: [
-            {
-              role: "system",
-              content: `당신은 ETF 및 투자 콘텐츠 전문 요약가입니다. 
-주어진 콘텐츠를 분석하여 정확히 3-5개의 핵심 포인트로 요약해주세요.
-
-출력 형식:
-- 각 포인트는 "•" 로 시작
-- 각 포인트는 1-2문장으로 간결하게
-- 투자자에게 유용한 정보 위주로
-- 모든 내용은 한국어로 작성
-
-콘텐츠에 접근할 수 없는 경우, 제목이나 URL을 기반으로 일반적인 ETF/투자 관련 인사이트를 제공해주세요.`
-            },
-            {
-              role: "user",
-              content: contentToSummarize
-            }
-          ],
-          max_completion_tokens: 600,
-        });
-        summary = completion.choices[0]?.message?.content || "• 요약을 생성할 수 없습니다.";
-      } catch (aiError) {
-        console.error("AI summarization error:", aiError);
-        summary = "• AI 요약을 생성하는 중 오류가 발생했습니다.\n• 잠시 후 다시 시도해주세요.";
       }
 
       const trend = await storage.createEtfTrend({
         url,
         title,
-        summary,
+        summary: preview ? preview + "..." : "",
         thumbnail,
         sourceType,
       });
