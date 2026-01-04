@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { Link } from "wouter";
 import { useEtfs, useUpdateEtf } from "@/hooks/use-etfs";
+import { useAuth } from "@/hooks/use-auth";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
@@ -14,6 +15,7 @@ import { type InsertEtf } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent } from "@/components/ui/card";
+import { LoginDialog } from "@/components/LoginDialog";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
@@ -36,6 +38,7 @@ export default function Home() {
   const createEtf = useCreateEtf();
   const updateEtf = useUpdateEtf();
   const { toast } = useToast();
+  const { isAdmin } = useAuth();
 
   const handleCreate = async (data: InsertEtf) => {
     try {
@@ -93,13 +96,15 @@ export default function Home() {
               </div>
             </div>
             
-            <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-              <DialogTrigger asChild>
-                <Button className="shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all">
-                  <Plus className="w-4 h-4 mr-2" />
-                  Add New ETF
-                </Button>
-              </DialogTrigger>
+            <div className="flex items-center gap-3">
+              <LoginDialog />
+              <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+                <DialogTrigger asChild>
+                  <Button className="shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all">
+                    <Plus className="w-4 h-4 mr-2" />
+                    Add New ETF
+                  </Button>
+                </DialogTrigger>
               <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle>Add New Covered Call ETF</DialogTitle>
@@ -113,7 +118,8 @@ export default function Home() {
                   submitLabel="Create ETF"
                 />
               </DialogContent>
-            </Dialog>
+              </Dialog>
+            </div>
           </div>
         </div>
       </header>
@@ -253,7 +259,7 @@ export default function Home() {
                   <Table>
                     <TableHeader>
                       <TableRow className="bg-muted/30 hover:bg-muted/30">
-                        <TableHead className="w-[50px] text-center">Fav.</TableHead>
+                        {isAdmin && <TableHead className="w-[50px] text-center">Fav.</TableHead>}
                         <TableHead className="w-[80px]">Code</TableHead>
                         <TableHead>M.Cat</TableHead>
                         <TableHead>S.Cat</TableHead>
@@ -267,12 +273,15 @@ export default function Home() {
                     <TableBody>
                       {etfs?.map((etf) => (
                         <TableRow key={etf.id} className="group hover:bg-muted/20 transition-colors">
-                          <TableCell className="text-center">
-                            <Checkbox 
-                              checked={etf.isFavorite || false} 
-                              onCheckedChange={() => handleToggleFavorite(etf)}
-                            />
-                          </TableCell>
+                          {isAdmin && (
+                            <TableCell className="text-center">
+                              <Checkbox 
+                                checked={etf.isFavorite || false} 
+                                onCheckedChange={() => handleToggleFavorite(etf)}
+                                data-testid={`checkbox-fav-${etf.id}`}
+                              />
+                            </TableCell>
+                          )}
                           <TableCell className="font-mono text-sm font-medium text-muted-foreground">
                             {etf.code}
                           </TableCell>
@@ -331,7 +340,7 @@ export default function Home() {
           </TabsContent>
 
           <TabsContent value="favorites">
-             <FavoriteSection etfs={etfs || []} onToggleFavorite={handleToggleFavorite} />
+             <FavoriteSection etfs={etfs || []} onToggleFavorite={handleToggleFavorite} isAdmin={isAdmin} />
           </TabsContent>
         </Tabs>
       </main>
@@ -371,7 +380,7 @@ function TrendingSection() {
 
 const MCAT_ORDER = ["해외.커버드콜", "해외.액티브", "해외패시브&기타", "국내자산"];
 
-function FavoriteSection({ etfs, onToggleFavorite }: { etfs: any[], onToggleFavorite: (etf: any) => void }) {
+function FavoriteSection({ etfs, onToggleFavorite, isAdmin }: { etfs: any[], onToggleFavorite: (etf: any) => void, isAdmin: boolean }) {
   const favorites = etfs.filter(e => e.isFavorite);
 
   if (favorites.length === 0) {
@@ -412,11 +421,13 @@ function FavoriteSection({ etfs, onToggleFavorite }: { etfs: any[], onToggleFavo
                 <CardContent className="p-4">
                   <div className="flex justify-between items-start mb-3">
                     <StatusBadge variant="outline">{etf.subCategory}</StatusBadge>
-                    <Checkbox 
-                      checked={etf.isFavorite} 
-                      onCheckedChange={() => onToggleFavorite(etf)}
-                      data-testid={`checkbox-favorite-${etf.id}`}
-                    />
+                    {isAdmin && (
+                      <Checkbox 
+                        checked={etf.isFavorite} 
+                        onCheckedChange={() => onToggleFavorite(etf)}
+                        data-testid={`checkbox-favorite-${etf.id}`}
+                      />
+                    )}
                   </div>
                   <h4 className="font-bold text-base mb-1 truncate">{etf.name}</h4>
                   <p className="text-xs text-muted-foreground mb-3">{etf.code}</p>

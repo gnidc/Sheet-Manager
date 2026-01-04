@@ -6,8 +6,8 @@ import { z } from "zod";
 import axios from "axios";
 import bcrypt from "bcryptjs";
 
-const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
-const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH || bcrypt.hashSync("admin123", 10);
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
+const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH;
 
 function requireAdmin(req: Request, res: Response, next: NextFunction) {
   if (!req.session?.isAdmin) {
@@ -26,6 +26,10 @@ export async function registerRoutes(
     
     if (!username || !password) {
       return res.status(400).json({ message: "Username and password required" });
+    }
+    
+    if (!ADMIN_USERNAME || !ADMIN_PASSWORD_HASH) {
+      return res.status(503).json({ message: "Admin credentials not configured" });
     }
     
     if (username !== ADMIN_USERNAME) {
