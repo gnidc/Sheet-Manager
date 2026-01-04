@@ -22,6 +22,7 @@ export interface IStorage {
   getEtfTrends(): Promise<EtfTrend[]>;
   getEtfTrend(id: number): Promise<EtfTrend | undefined>;
   createEtfTrend(trend: InsertEtfTrend): Promise<EtfTrend>;
+  updateEtfTrend(id: number, comment: string): Promise<EtfTrend>;
   deleteEtfTrend(id: number): Promise<void>;
 }
 
@@ -91,6 +92,14 @@ export class DatabaseStorage implements IStorage {
   async createEtfTrend(trend: InsertEtfTrend): Promise<EtfTrend> {
     const [newTrend] = await db.insert(etfTrends).values(trend).returning();
     return newTrend;
+  }
+
+  async updateEtfTrend(id: number, comment: string): Promise<EtfTrend> {
+    const [updated] = await db.update(etfTrends)
+      .set({ comment })
+      .where(eq(etfTrends.id, id))
+      .returning();
+    return updated;
   }
 
   async deleteEtfTrend(id: number): Promise<void> {

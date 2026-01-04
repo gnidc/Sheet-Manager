@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { EtfForm } from "@/components/EtfForm";
 import { useCreateEtf } from "@/hooks/use-etfs";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Search, Plus, ExternalLink, SlidersHorizontal, ArrowRight, TrendingUp, Wallet, Globe, Loader2, Star, Lightbulb, Newspaper, Youtube, FileText, Link as LinkIcon, Trash2 } from "lucide-react";
+import { Search, Plus, ExternalLink, SlidersHorizontal, ArrowRight, TrendingUp, Wallet, Globe, Loader2, Star, Lightbulb, Newspaper, Youtube, FileText, Link as LinkIcon, Trash2, Pencil } from "lucide-react";
 import { type InsertEtf } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -475,6 +475,8 @@ interface EtfTrend {
 function EtfTrendsSection({ isAdmin }: { isAdmin: boolean }) {
   const [urlInput, setUrlInput] = useState("");
   const [commentInput, setCommentInput] = useState("");
+  const [editingTrend, setEditingTrend] = useState<EtfTrend | null>(null);
+  const [editComment, setEditComment] = useState("");
   const { toast } = useToast();
   
   const { data: trends, isLoading } = useQuery<EtfTrend[]>({ 
@@ -500,6 +502,21 @@ function EtfTrendsSection({ isAdmin }: { isAdmin: boolean }) {
     }
   });
 
+  const updateTrend = useMutation({
+    mutationFn: async ({ id, comment }: { id: number; comment: string }) => {
+      return apiRequest("PATCH", `/api/etf-trends/${id}`, { comment });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/etf-trends"] });
+      setEditingTrend(null);
+      setEditComment("");
+      toast({ title: "수정됨", description: "코멘트가 수정되었습니다." });
+    },
+    onError: () => {
+      toast({ title: "오류", description: "수정에 실패했습니다.", variant: "destructive" });
+    }
+  });
+
   const deleteTrend = useMutation({
     mutationFn: async (id: number) => {
       return apiRequest("DELETE", `/api/etf-trends/${id}`);
@@ -512,6 +529,17 @@ function EtfTrendsSection({ isAdmin }: { isAdmin: boolean }) {
       toast({ title: "오류", description: "삭제에 실패했습니다.", variant: "destructive" });
     }
   });
+
+  const handleEdit = (trend: EtfTrend) => {
+    setEditingTrend(trend);
+    setEditComment(trend.comment || "");
+  };
+
+  const handleSaveEdit = () => {
+    if (editingTrend) {
+      updateTrend.mutate({ id: editingTrend.id, comment: editComment });
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -648,15 +676,25 @@ function EtfTrendsSection({ isAdmin }: { isAdmin: boolean }) {
                       </Button>
                     </a>
                     {isAdmin && (
-                      <Button 
-                        variant="ghost" 
-                        size="sm"
-                        onClick={() => deleteTrend.mutate(trend.id)}
-                        disabled={deleteTrend.isPending}
-                        data-testid={`button-delete-trend-${trend.id}`}
-                      >
-                        <Trash2 className="w-4 h-4 text-destructive" />
-                      </Button>
+                      <div className="flex items-center gap-1">
+                        <Button 
+                          variant="ghost" 
+                          size="icon"
+                          onClick={() => handleEdit(trend)}
+                          data-testid={`button-edit-trend-${trend.id}`}
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </Button>
+                        <Button 
+                          variant="ghost" 
+                          size="icon"
+                          onClick={() => deleteTrend.mutate(trend.id)}
+                          disabled={deleteTrend.isPending}
+                          data-testid={`button-delete-trend-${trend.id}`}
+                        >
+                          <Trash2 className="w-4 h-4 text-destructive" />
+                        </Button>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -665,6 +703,44 @@ function EtfTrendsSection({ isAdmin }: { isAdmin: boolean }) {
           ))}
         </div>
       )}
+
+      <Dialog open={!!editingTrend} onOpenChange={(open) => !open && setEditingTrend(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>코멘트 수정</DialogTitle>
+            <DialogDescription>
+              {editingTrend?.title}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <Textarea
+              placeholder="코멘트를 입력하세요..."
+              value={editComment}
+              onChange={(e) => setEditComment(e.target.value)}
+              rows={5}
+              data-testid="input-edit-comment"
+            />
+            <div className="flex justify-end gap-2">
+              <Button 
+                variant="outline" 
+                onClick={() => setEditingTrend(null)}
+              >
+                취소
+              </Button>
+              <Button 
+                onClick={handleSaveEdit}
+                disabled={updateTrend.isPending}
+                data-testid="button-save-edit"
+              >
+                {updateTrend.isPending ? (
+                  <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                ) : null}
+                저장
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

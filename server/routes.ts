@@ -243,6 +243,16 @@ export async function registerRoutes(
     }
   });
 
+  app.patch("/api/etf-trends/:id", requireAdmin, async (req, res) => {
+    try {
+      const { comment } = req.body;
+      const trend = await storage.updateEtfTrend(Number(req.params.id), comment || "");
+      res.json(trend);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to update ETF trend" });
+    }
+  });
+
   app.delete("/api/etf-trends/:id", requireAdmin, async (req, res) => {
     try {
       await storage.deleteEtfTrend(Number(req.params.id));
