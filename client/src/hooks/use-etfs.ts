@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, buildUrl, type InsertEtf } from "@shared/routes";
+import { api, buildUrl } from "@shared/routes";
+import { type InsertEtf } from "@shared/schema";
 import { z } from "zod";
 
 // ============================================

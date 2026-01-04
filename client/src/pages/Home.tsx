@@ -88,7 +88,7 @@ export default function Home() {
                 <TrendingUp className="w-6 h-6 text-primary" />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-foreground tracking-tight">Covered Call Intelligence</h1>
+                <h1 className="text-xl font-bold text-foreground tracking-tight">Life Fitness ETF (투자와 함께 하는 삶)</h1>
                 <p className="text-xs text-muted-foreground hidden sm:block">Advanced ETF Analytics Dashboard</p>
               </div>
             </div>
