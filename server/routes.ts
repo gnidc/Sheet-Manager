@@ -3,11 +3,46 @@ import type { Server } from "http";
 import { storage } from "./storage";
 import { api } from "@shared/routes";
 import { z } from "zod";
+import axios from "axios";
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  // Real-time price update endpoint
+  app.post("/api/etfs/:id/refresh", async (req, res) => {
+    try {
+      const etf = await storage.getEtf(Number(req.params.id));
+      if (!etf) return res.status(404).json({ message: "ETF not found" });
+
+      // In a real app, we would use Alpha Vantage or Finnhub here.
+      // For this demo, we'll simulate a price fetch if no API key is set.
+      const API_KEY = process.env.FINNHUB_API_KEY;
+      let price = etf.currentPrice ? parseFloat(etf.currentPrice) : 10000;
+      let change = 0;
+
+      if (API_KEY) {
+        const response = await axios.get(`https://finnhub.io/api/v1/quote?symbol=${etf.code}&token=${API_KEY}`);
+        price = response.data.c;
+        change = response.data.dp;
+      } else {
+        // Mock some movement
+        price = price * (1 + (Math.random() * 0.02 - 0.01));
+        change = (Math.random() * 4 - 2);
+      }
+
+      const updated = await storage.updateEtf(etf.id, {
+        currentPrice: price.toString(),
+        dailyChangeRate: change.toString(),
+        lastUpdated: new Date()
+      });
+
+      res.json(updated);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to refresh price" });
+    }
+  });
+
   app.get(api.etfs.list.path, async (req, res) => {
     const search = req.query.search as string | undefined;
     const category = req.query.category as string | undefined;
@@ -73,6 +108,24 @@ export async function registerRoutes(
     const recommended = await storage.getRecommendedEtfs();
     res.json(recommended);
   });
+
+  // Background task to periodically update scores and recommendations
+  setInterval(async () => {
+    try {
+      const all = await storage.getEtfs();
+      for (const etf of all) {
+        // Randomly update scores for demo trends
+        const newScore = Math.floor(Math.random() * 100);
+        const shouldRecommend = newScore > 85;
+        await storage.updateEtf(etf.id, { 
+          trendScore: newScore.toString(),
+          isRecommended: shouldRecommend 
+        });
+      }
+    } catch (e) {
+      console.error("Failed background update", e);
+    }
+  }, 60000); // Every minute
 
   await seedDatabase();
 
