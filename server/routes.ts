@@ -180,7 +180,7 @@ export async function registerRoutes(
 
   app.post("/api/etf-trends", requireAdmin, async (req, res) => {
     try {
-      const { url } = req.body;
+      const { url, comment } = req.body;
       if (!url) {
         return res.status(400).json({ message: "URL is required" });
       }
@@ -188,7 +188,6 @@ export async function registerRoutes(
       let title = "";
       let thumbnail = "";
       let sourceType = "article";
-      let preview = "";
 
       if (url.includes("youtube.com") || url.includes("youtu.be")) {
         sourceType = "youtube";
@@ -201,23 +200,6 @@ export async function registerRoutes(
           } catch {
             title = "YouTube Video";
           }
-          
-          try {
-            const pageRes = await axios.get(`https://www.youtube.com/watch?v=${videoId}`, {
-              timeout: 10000,
-              headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-            });
-            const html = pageRes.data as string;
-            const descMatch = html.match(/"shortDescription":"([^"]+)"/);
-            if (descMatch) {
-              preview = descMatch[1]
-                .replace(/\\n/g, ' ')
-                .replace(/\\"/g, '"')
-                .substring(0, 200);
-            }
-          } catch {
-            preview = "";
-          }
         }
       } else if (url.includes("blog.naver.com")) {
         sourceType = "blog";
@@ -229,16 +211,8 @@ export async function registerRoutes(
           const html = response.data as string;
           const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
           title = titleMatch ? titleMatch[1].replace(/\s*[:|-].*$/, '').trim() : "네이버 블로그";
-          const bodyText = html
-            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-            .replace(/<[^>]+>/g, ' ')
-            .replace(/\s+/g, ' ')
-            .trim();
-          preview = bodyText.substring(0, 200);
         } catch {
           title = "네이버 블로그 글";
-          preview = "";
         }
       } else {
         try {
@@ -249,23 +223,15 @@ export async function registerRoutes(
           const html = response.data as string;
           const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
           title = titleMatch ? titleMatch[1].trim() : url;
-          const bodyText = html
-            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-            .replace(/<[^>]+>/g, ' ')
-            .replace(/\s+/g, ' ')
-            .trim();
-          preview = bodyText.substring(0, 200);
         } catch {
           title = url;
-          preview = "";
         }
       }
 
       const trend = await storage.createEtfTrend({
         url,
         title,
-        summary: preview ? preview + "..." : "",
+        comment: comment || "",
         thumbnail,
         sourceType,
       });

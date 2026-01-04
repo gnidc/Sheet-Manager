@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { useEtfs, useUpdateEtf } from "@/hooks/use-etfs";
 import { useAuth } from "@/hooks/use-auth";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -465,7 +466,7 @@ interface EtfTrend {
   id: number;
   url: string;
   title: string;
-  summary: string;
+  comment: string | null;
   thumbnail: string | null;
   sourceType: string;
   createdAt: string;
@@ -473,6 +474,7 @@ interface EtfTrend {
 
 function EtfTrendsSection({ isAdmin }: { isAdmin: boolean }) {
   const [urlInput, setUrlInput] = useState("");
+  const [commentInput, setCommentInput] = useState("");
   const { toast } = useToast();
   
   const { data: trends, isLoading } = useQuery<EtfTrend[]>({ 
@@ -480,12 +482,13 @@ function EtfTrendsSection({ isAdmin }: { isAdmin: boolean }) {
   });
 
   const createTrend = useMutation({
-    mutationFn: async (url: string) => {
-      return apiRequest("POST", "/api/etf-trends", { url });
+    mutationFn: async ({ url, comment }: { url: string; comment: string }) => {
+      return apiRequest("POST", "/api/etf-trends", { url, comment });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/etf-trends"] });
       setUrlInput("");
+      setCommentInput("");
       toast({ title: "성공", description: "ETF 동향이 추가되었습니다." });
     },
     onError: (error: any) => {
@@ -513,7 +516,7 @@ function EtfTrendsSection({ isAdmin }: { isAdmin: boolean }) {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!urlInput.trim()) return;
-    createTrend.mutate(urlInput.trim());
+    createTrend.mutate({ url: urlInput.trim(), comment: commentInput.trim() });
   };
 
   const getSourceIcon = (sourceType: string) => {
@@ -556,13 +559,19 @@ function EtfTrendsSection({ isAdmin }: { isAdmin: boolean }) {
               <Plus className="w-5 h-5" />
               새 동향 추가
             </h3>
-            <form onSubmit={handleSubmit} className="flex gap-3">
+            <form onSubmit={handleSubmit} className="space-y-3">
               <Input
                 placeholder="YouTube, 블로그, 뉴스 URL을 입력하세요..."
                 value={urlInput}
                 onChange={(e) => setUrlInput(e.target.value)}
-                className="flex-1"
                 data-testid="input-trend-url"
+              />
+              <Textarea
+                placeholder="코멘트를 입력하세요 (선택사항)..."
+                value={commentInput}
+                onChange={(e) => setCommentInput(e.target.value)}
+                rows={3}
+                data-testid="input-trend-comment"
               />
               <Button 
                 type="submit" 
@@ -572,7 +581,7 @@ function EtfTrendsSection({ isAdmin }: { isAdmin: boolean }) {
                 {createTrend.isPending ? (
                   <>
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    AI 분석중...
+                    추가중...
                   </>
                 ) : (
                   <>
@@ -583,7 +592,7 @@ function EtfTrendsSection({ isAdmin }: { isAdmin: boolean }) {
               </Button>
             </form>
             <p className="text-xs text-muted-foreground mt-2">
-              URL을 입력하면 AI가 자동으로 내용을 요약합니다. (YouTube, 네이버 블로그, 일반 기사 지원)
+              URL과 함께 코멘트를 입력하면 동향 정보로 저장됩니다. (YouTube, 네이버 블로그, 일반 기사 지원)
             </p>
           </CardContent>
         </Card>
@@ -622,9 +631,11 @@ function EtfTrendsSection({ isAdmin }: { isAdmin: boolean }) {
                     </span>
                   </div>
                   <h4 className="font-bold text-base mb-2 line-clamp-2">{trend.title}</h4>
-                  <div className="text-sm text-muted-foreground whitespace-pre-wrap mb-3 line-clamp-5">
-                    {trend.summary}
-                  </div>
+                  {trend.comment && (
+                    <div className="text-sm text-muted-foreground whitespace-pre-wrap mb-3 line-clamp-5">
+                      {trend.comment}
+                    </div>
+                  )}
                   <div className="flex items-center justify-between gap-2">
                     <a 
                       href={trend.url} 

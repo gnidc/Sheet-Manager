@@ -48,7 +48,7 @@ export const etfTrends = pgTable("etf_trends", {
   id: serial("id").primaryKey(),
   url: text("url").notNull(),
   title: text("title"),
-  summary: text("summary"),
+  comment: text("comment"),
   thumbnail: text("thumbnail"),
   sourceType: text("source_type"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
