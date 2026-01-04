@@ -5,7 +5,7 @@ import {
   type InsertEtf,
   type UpdateEtfRequest
 } from "@shared/schema";
-import { eq, ilike, and } from "drizzle-orm";
+import { eq, ilike, and, desc } from "drizzle-orm";
 
 export interface IStorage {
   getEtfs(params?: { search?: string; category?: string; country?: string }): Promise<Etf[]>;
@@ -13,6 +13,8 @@ export interface IStorage {
   createEtf(etf: InsertEtf): Promise<Etf>;
   updateEtf(id: number, updates: UpdateEtfRequest): Promise<Etf>;
   deleteEtf(id: number): Promise<void>;
+  getRecommendedEtfs(): Promise<Etf[]>;
+  getTrendingEtfs(): Promise<Etf[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -56,6 +58,13 @@ export class DatabaseStorage implements IStorage {
 
   async deleteEtf(id: number): Promise<void> {
     await db.delete(etfs).where(eq(etfs.id, id));
+  }
+  async getRecommendedEtfs(): Promise<Etf[]> {
+    return await db.select().from(etfs).where(eq(etfs.isRecommended, true));
+  }
+
+  async getTrendingEtfs(): Promise<Etf[]> {
+    return await db.select().from(etfs).orderBy(desc(etfs.trendScore)).limit(5);
   }
 }
 

@@ -64,6 +64,16 @@ export async function registerRoutes(
     res.status(204).send();
   });
 
+  app.get("/api/trends", async (req, res) => {
+    const trends = await storage.getTrendingEtfs();
+    res.json(trends);
+  });
+
+  app.get("/api/recommended", async (req, res) => {
+    const recommended = await storage.getRecommendedEtfs();
+    res.json(recommended);
+  });
+
   await seedDatabase();
 
   return httpServer;

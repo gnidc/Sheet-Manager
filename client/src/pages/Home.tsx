@@ -13,6 +13,8 @@ import { Search, Plus, ExternalLink, SlidersHorizontal, ArrowRight, TrendingUp, 
 import { type InsertEtf } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
 export default function Home() {
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("ALL");
@@ -90,9 +92,16 @@ export default function Home() {
       </header>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        
-        {/* Stats Row */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <Tabs defaultValue="all" className="space-y-8">
+          <TabsList className="grid w-full grid-cols-3 max-w-md mx-auto">
+            <TabsTrigger value="all">전체 ETF</TabsTrigger>
+            <TabsTrigger value="trends">동향</TabsTrigger>
+            <TabsTrigger value="recommended">추천 ETF</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="all" className="space-y-8">
+            {/* Stats Row */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="bg-gradient-to-br from-primary/5 to-primary/10 rounded-2xl p-6 border border-primary/10 shadow-sm">
             <div className="flex items-center gap-4 mb-2">
@@ -260,8 +269,44 @@ export default function Home() {
                 </TableBody>
               </Table>
             </div>
-          )}
-        </div>
+          </TabsContent>
+
+          <TabsContent value="trends">
+            <div className="bg-white dark:bg-card rounded-xl border p-8 text-center">
+              <TrendingUp className="w-12 h-12 text-primary mx-auto mb-4 opacity-20" />
+              <h3 className="text-xl font-bold mb-2">실시간 ETF 동향</h3>
+              <p className="text-muted-foreground">시장의 흐름과 거래량 급증 ETF를 분석하여 보여줍니다.</p>
+              <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Trend cards will go here */}
+                <div className="p-4 border rounded-lg bg-muted/20">데이터 분석 중...</div>
+                <div className="p-4 border rounded-lg bg-muted/20">거래량 상위 집계 중...</div>
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="recommended">
+             <div className="bg-white dark:bg-card rounded-xl border p-8 text-center">
+              <Globe className="w-12 h-12 text-primary mx-auto mb-4 opacity-20" />
+              <h3 className="text-xl font-bold mb-2">추천 커버드콜 리스트</h3>
+              <p className="text-muted-foreground">전문가들이 선정한 고배당 및 안정성 위주의 추천 리스트입니다.</p>
+              <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* Recommendation cards will go here */}
+                <div className="p-6 border rounded-xl shadow-sm bg-primary/5 border-primary/10">
+                  <h4 className="font-bold text-primary mb-2">안정 추구형</h4>
+                  <p className="text-xs text-muted-foreground">미국 국채 기반 커버드콜</p>
+                </div>
+                <div className="p-6 border rounded-xl shadow-sm bg-emerald-500/5 border-emerald-500/10">
+                  <h4 className="font-bold text-emerald-600 mb-2">고수익 추구형</h4>
+                  <p className="text-xs text-muted-foreground">나스닥100 타겟 데일리</p>
+                </div>
+                <div className="p-6 border rounded-xl shadow-sm bg-purple-500/5 border-purple-500/10">
+                  <h4 className="font-bold text-purple-600 mb-2">배당 성장형</h4>
+                  <p className="text-xs text-muted-foreground">우량 배당주 커버드콜</p>
+                </div>
+              </div>
+            </div>
+          </TabsContent>
+        </Tabs>
       </main>
     </div>
   );
