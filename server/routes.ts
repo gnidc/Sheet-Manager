@@ -1,14 +1,58 @@
-import type { Express } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
 import { api } from "@shared/routes";
 import { z } from "zod";
 import axios from "axios";
+import bcrypt from "bcryptjs";
+
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
+const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH || bcrypt.hashSync("admin123", 10);
+
+function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  if (!req.session?.isAdmin) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+  next();
+}
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  
+  app.post("/api/auth/login", async (req, res) => {
+    const { username, password } = req.body;
+    
+    if (!username || !password) {
+      return res.status(400).json({ message: "Username and password required" });
+    }
+    
+    if (username !== ADMIN_USERNAME) {
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
+    
+    const isValid = await bcrypt.compare(password, ADMIN_PASSWORD_HASH);
+    if (!isValid) {
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
+    
+    req.session.isAdmin = true;
+    res.json({ success: true, isAdmin: true });
+  });
+  
+  app.post("/api/auth/logout", (req, res) => {
+    req.session.destroy((err) => {
+      if (err) {
+        return res.status(500).json({ message: "Logout failed" });
+      }
+      res.json({ success: true });
+    });
+  });
+  
+  app.get("/api/auth/me", (req, res) => {
+    res.json({ isAdmin: !!req.session?.isAdmin });
+  });
   // Real-time price update endpoint
   app.post("/api/etfs/:id/refresh", async (req, res) => {
     try {
