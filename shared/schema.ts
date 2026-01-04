@@ -8,6 +8,8 @@ export const etfs = pgTable("etfs", {
   mainCategory: text("main_category"),
   subCategory: text("sub_category"),
   country: text("country"),
+  name: text("name").notNull(),
+  code: text("code").notNull(),
   fee: text("fee"),
   yield: text("yield"),
   marketCap: text("market_cap"),
