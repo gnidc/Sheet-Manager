@@ -21,12 +21,14 @@ export default function Home() {
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("ALL");
   const [countryFilter, setCountryFilter] = useState("ALL");
+  const [assetClassFilter, setAssetClassFilter] = useState("ALL");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   
   const { data: etfs, isLoading, error } = useEtfs({ 
     search, 
     category: categoryFilter, 
-    country: countryFilter 
+    country: countryFilter,
+    assetClass: assetClassFilter
   });
   
   const createEtf = useCreateEtf();
@@ -97,7 +99,7 @@ export default function Home() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <Tabs defaultValue="all" className="space-y-8">
           <TabsList className="grid w-full grid-cols-3 max-w-md mx-auto">
-            <TabsTrigger value="all">전체 ETF</TabsTrigger>
+            <TabsTrigger value="all">ETF (유형별)</TabsTrigger>
             <TabsTrigger value="trends">동향</TabsTrigger>
             <TabsTrigger value="recommended">추천 ETF</TabsTrigger>
           </TabsList>
@@ -158,7 +160,20 @@ export default function Home() {
               </div>
               
               <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
-                <Select value={countryFilter} onValueChange={setCountryFilter}>
+              <Select value={assetClassFilter} onValueChange={setAssetClassFilter}>
+                <SelectTrigger className="w-full sm:w-[180px]">
+                  <SelectValue placeholder="ETF 유형" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">전체 유형</SelectItem>
+                  <SelectItem value="해외.커버드콜">해외.커버드콜</SelectItem>
+                  <SelectItem value="해외.액티브">해외.액티브</SelectItem>
+                  <SelectItem value="해외패시브&기타">해외패시브&기타</SelectItem>
+                  <SelectItem value="국내자산">국내자산</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select value={countryFilter} onValueChange={setCountryFilter}>
                   <SelectTrigger className="w-full sm:w-[150px]">
                     <SelectValue placeholder="Country" />
                   </SelectTrigger>

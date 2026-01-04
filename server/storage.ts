@@ -8,7 +8,7 @@ import {
 import { eq, ilike, and, desc } from "drizzle-orm";
 
 export interface IStorage {
-  getEtfs(params?: { search?: string; category?: string; country?: string }): Promise<Etf[]>;
+  getEtfs(params?: { search?: string; category?: string; country?: string; assetClass?: string }): Promise<Etf[]>;
   getEtf(id: number): Promise<Etf | undefined>;
   createEtf(etf: InsertEtf): Promise<Etf>;
   updateEtf(id: number, updates: UpdateEtfRequest): Promise<Etf>;
@@ -18,7 +18,7 @@ export interface IStorage {
 }
 
 export class DatabaseStorage implements IStorage {
-  async getEtfs(params?: { search?: string; category?: string; country?: string }): Promise<Etf[]> {
+  async getEtfs(params?: { search?: string; category?: string; country?: string; assetClass?: string }): Promise<Etf[]> {
     const conditions = [];
     
     if (params?.search) {
@@ -31,6 +31,10 @@ export class DatabaseStorage implements IStorage {
 
     if (params?.country) {
       conditions.push(eq(etfs.country, params.country));
+    }
+
+    if (params?.assetClass) {
+      conditions.push(eq(etfs.assetClass, params.assetClass));
     }
 
     return await db.select()

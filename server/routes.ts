@@ -47,7 +47,8 @@ export async function registerRoutes(
     const search = req.query.search as string | undefined;
     const category = req.query.category as string | undefined;
     const country = req.query.country as string | undefined;
-    const etfs = await storage.getEtfs({ search, category, country });
+    const assetClass = req.query.assetClass as string | undefined;
+    const etfs = await storage.getEtfs({ search, category, country, assetClass });
     res.json(etfs);
   });
 
@@ -137,6 +138,7 @@ async function seedDatabase() {
   if (existing.length === 0) {
     const seeds = [
       {
+        assetClass: "해외.커버드콜",
         generation: "2세대",
         category: "미국국채",
         country: "미국",
@@ -155,6 +157,7 @@ async function seedDatabase() {
         linkBlog: "https://blog.naver.com/m_invest/223358405892"
       },
       {
+        assetClass: "해외.커버드콜",
         generation: "2세대",
         category: "미국국채",
         country: "미국",
@@ -172,6 +175,7 @@ async function seedDatabase() {
         linkProduct: "https://www.samsungfund.com/etf/product/view.do?id=2ETFM9"
       },
       {
+        assetClass: "해외.액티브",
         generation: "1세대",
         category: "나스닥100",
         country: "미국",
@@ -188,6 +192,7 @@ async function seedDatabase() {
         linkProduct: "https://www.tigeretf.com/ko/product/search/detail/index.do?ksdFund=KR7441680006"
       },
       {
+        assetClass: "국내자산",
         generation: "3세대",
         category: "나스닥100",
         country: "미국",

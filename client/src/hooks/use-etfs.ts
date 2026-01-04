@@ -10,6 +10,7 @@ export interface EtfFilters {
   search?: string;
   category?: string;
   country?: string;
+  assetClass?: string;
 }
 
 export function useEtfs(filters?: EtfFilters) {
@@ -17,6 +18,7 @@ export function useEtfs(filters?: EtfFilters) {
   if (filters?.search) queryParams.append("search", filters.search);
   if (filters?.category && filters.category !== "ALL") queryParams.append("category", filters.category);
   if (filters?.country && filters.country !== "ALL") queryParams.append("country", filters.country);
+  if (filters?.assetClass && filters.assetClass !== "ALL") queryParams.append("assetClass", filters.assetClass);
 
   return useQuery({
     queryKey: [api.etfs.list.path, filters],
