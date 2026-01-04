@@ -369,6 +369,8 @@ function TrendingSection() {
   );
 }
 
+const MCAT_ORDER = ["해외.커버드콜", "해외.액티브", "해외패시브&기타", "국내자산"];
+
 function FavoriteSection({ etfs, onToggleFavorite }: { etfs: any[], onToggleFavorite: (etf: any) => void }) {
   const favorites = etfs.filter(e => e.isFavorite);
 
@@ -382,31 +384,56 @@ function FavoriteSection({ etfs, onToggleFavorite }: { etfs: any[], onToggleFavo
     );
   }
 
+  const groupedByMcat: Record<string, any[]> = {};
+  favorites.forEach(etf => {
+    const mcat = etf.mainCategory || "기타";
+    if (!groupedByMcat[mcat]) groupedByMcat[mcat] = [];
+    groupedByMcat[mcat].push(etf);
+  });
+
+  const orderedCategories = MCAT_ORDER.filter(cat => groupedByMcat[cat]?.length > 0);
+  const otherCategories = Object.keys(groupedByMcat).filter(cat => !MCAT_ORDER.includes(cat));
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-      {favorites.map((etf) => (
-        <Card key={etf.id} className="overflow-hidden hover:shadow-md transition-shadow">
-          <CardContent className="p-6">
-            <div className="flex justify-between items-start mb-4">
-              <StatusBadge variant="success">{etf.mainCategory}</StatusBadge>
-              <Checkbox 
-                checked={etf.isFavorite} 
-                onCheckedChange={() => onToggleFavorite(etf)}
-              />
-            </div>
-            <h4 className="font-bold text-lg mb-1 truncate">{etf.name}</h4>
-            <p className="text-xs text-muted-foreground mb-4">{etf.code} | {etf.subCategory}</p>
-            <div className="flex justify-between items-end">
-              <div>
-                <div className="text-sm text-muted-foreground">Yield</div>
-                <div className="text-xl font-bold text-emerald-600 dark:text-emerald-400">{etf.yield}</div>
-              </div>
-              <Link href={`/etf/${etf.id}`}>
-                <Button size="sm" variant="outline">Details</Button>
-              </Link>
-            </div>
-          </CardContent>
-        </Card>
+    <div className="space-y-8">
+      {[...orderedCategories, ...otherCategories].map(category => (
+        <div key={category}>
+          <h3 
+            className="text-lg font-bold mb-4 pb-2 border-b flex items-center gap-2"
+            data-testid={`heading-mcat-${category.replace(/[.&]/g, '-')}`}
+          >
+            <Star className="w-4 h-4 text-amber-500" />
+            {category}
+            <span className="text-sm font-normal text-muted-foreground">({groupedByMcat[category].length})</span>
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {groupedByMcat[category].map((etf: any) => (
+              <Card key={etf.id} className="overflow-hidden hover:shadow-md transition-shadow">
+                <CardContent className="p-4">
+                  <div className="flex justify-between items-start mb-3">
+                    <StatusBadge variant="outline">{etf.subCategory}</StatusBadge>
+                    <Checkbox 
+                      checked={etf.isFavorite} 
+                      onCheckedChange={() => onToggleFavorite(etf)}
+                      data-testid={`checkbox-favorite-${etf.id}`}
+                    />
+                  </div>
+                  <h4 className="font-bold text-base mb-1 truncate">{etf.name}</h4>
+                  <p className="text-xs text-muted-foreground mb-3">{etf.code}</p>
+                  <div className="flex justify-between items-end gap-2">
+                    <div>
+                      <div className="text-xs text-muted-foreground">Yield</div>
+                      <div className="text-lg font-bold text-emerald-600 dark:text-emerald-400">{etf.yield || "-"}</div>
+                    </div>
+                    <Link href={`/etf/${etf.id}`}>
+                      <Button size="sm" variant="outline">Details</Button>
+                    </Link>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
       ))}
     </div>
   );
