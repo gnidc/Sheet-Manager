@@ -5,6 +5,12 @@ import { api } from "@shared/routes";
 import { z } from "zod";
 import axios from "axios";
 import bcrypt from "bcryptjs";
+import OpenAI from "openai";
+
+const openai = new OpenAI({
+  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+});
 
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
 const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH;
@@ -167,6 +173,108 @@ export async function registerRoutes(
   app.get("/api/recommended", async (req, res) => {
     const recommended = await storage.getRecommendedEtfs();
     res.json(recommended);
+  });
+
+  app.get("/api/etf-trends", async (req, res) => {
+    try {
+      const trends = await storage.getEtfTrends();
+      res.json(trends);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to fetch ETF trends" });
+    }
+  });
+
+  app.post("/api/etf-trends", requireAdmin, async (req, res) => {
+    try {
+      const { url } = req.body;
+      if (!url) {
+        return res.status(400).json({ message: "URL is required" });
+      }
+
+      let title = "";
+      let thumbnail = "";
+      let sourceType = "article";
+      let contentToSummarize = "";
+
+      if (url.includes("youtube.com") || url.includes("youtu.be")) {
+        sourceType = "youtube";
+        const videoId = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\s]+)/)?.[1];
+        if (videoId) {
+          try {
+            const oembedRes = await axios.get(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`);
+            title = oembedRes.data.title || "YouTube Video";
+            thumbnail = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+            contentToSummarize = `YouTube video titled: "${title}"`;
+          } catch {
+            title = "YouTube Video";
+            thumbnail = videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : "";
+            contentToSummarize = `YouTube video at URL: ${url}`;
+          }
+        }
+      } else if (url.includes("blog.naver.com")) {
+        sourceType = "blog";
+        title = "네이버 블로그 글";
+        contentToSummarize = `Naver blog post at URL: ${url}`;
+      } else {
+        try {
+          const response = await axios.get(url, { 
+            timeout: 10000,
+            headers: { 'User-Agent': 'Mozilla/5.0' }
+          });
+          const html = response.data;
+          const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+          title = titleMatch ? titleMatch[1].trim() : url;
+          contentToSummarize = `Web article titled: "${title}" at URL: ${url}`;
+        } catch {
+          title = url;
+          contentToSummarize = `Web article at URL: ${url}`;
+        }
+      }
+
+      let summary = "";
+      try {
+        const completion = await openai.chat.completions.create({
+          model: "gpt-4o-mini",
+          messages: [
+            {
+              role: "system",
+              content: "You are a financial content summarizer. Summarize the given content about ETFs or investments in 3-5 bullet points in Korean. Be concise and focus on key information. If you cannot access the content, provide a generic summary based on the title."
+            },
+            {
+              role: "user",
+              content: contentToSummarize
+            }
+          ],
+          max_completion_tokens: 500,
+        });
+        summary = completion.choices[0]?.message?.content || "요약을 생성할 수 없습니다.";
+      } catch (aiError) {
+        console.error("AI summarization error:", aiError);
+        summary = "AI 요약을 생성하는 중 오류가 발생했습니다.";
+      }
+
+      const trend = await storage.createEtfTrend({
+        url,
+        title,
+        summary,
+        thumbnail,
+        sourceType,
+      });
+
+      res.status(201).json(trend);
+    } catch (err) {
+      console.error("Error creating ETF trend:", err);
+      res.status(500).json({ message: "Failed to create ETF trend" });
+    }
+  });
+
+  app.delete("/api/etf-trends/:id", requireAdmin, async (req, res) => {
+    try {
+      await storage.deleteEtfTrend(Number(req.params.id));
+      res.status(204).send();
+    } catch (err) {
+      res.status(500).json({ message: "Failed to delete ETF trend" });
+    }
   });
 
   app.post("/api/seed", requireAdmin, async (req, res) => {

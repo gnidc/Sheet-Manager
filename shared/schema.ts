@@ -1,6 +1,9 @@
-import { pgTable, text, serial, numeric, timestamp, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, numeric, timestamp, boolean, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
+import { sql } from "drizzle-orm";
+
+export * from "./models/chat";
 
 export const etfs = pgTable("etfs", {
   id: serial("id").primaryKey(),
@@ -40,3 +43,18 @@ export type InsertEtf = z.infer<typeof insertEtfSchema>;
 
 export type CreateEtfRequest = InsertEtf;
 export type UpdateEtfRequest = Partial<InsertEtf>;
+
+export const etfTrends = pgTable("etf_trends", {
+  id: serial("id").primaryKey(),
+  url: text("url").notNull(),
+  title: text("title"),
+  summary: text("summary"),
+  thumbnail: text("thumbnail"),
+  sourceType: text("source_type"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const insertEtfTrendSchema = createInsertSchema(etfTrends).omit({ id: true, createdAt: true });
+
+export type EtfTrend = typeof etfTrends.$inferSelect;
+export type InsertEtfTrend = z.infer<typeof insertEtfTrendSchema>;

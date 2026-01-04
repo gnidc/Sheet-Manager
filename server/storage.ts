@@ -1,9 +1,12 @@
 import { db } from "./db";
 import {
   etfs,
+  etfTrends,
   type Etf,
   type InsertEtf,
-  type UpdateEtfRequest
+  type UpdateEtfRequest,
+  type EtfTrend,
+  type InsertEtfTrend
 } from "@shared/schema";
 import { eq, ilike, and, desc } from "drizzle-orm";
 
@@ -15,6 +18,11 @@ export interface IStorage {
   deleteEtf(id: number): Promise<void>;
   getRecommendedEtfs(): Promise<Etf[]>;
   getTrendingEtfs(): Promise<Etf[]>;
+  
+  getEtfTrends(): Promise<EtfTrend[]>;
+  getEtfTrend(id: number): Promise<EtfTrend | undefined>;
+  createEtfTrend(trend: InsertEtfTrend): Promise<EtfTrend>;
+  deleteEtfTrend(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -69,6 +77,24 @@ export class DatabaseStorage implements IStorage {
 
   async getTrendingEtfs(): Promise<Etf[]> {
     return await db.select().from(etfs).orderBy(desc(etfs.trendScore)).limit(5);
+  }
+
+  async getEtfTrends(): Promise<EtfTrend[]> {
+    return await db.select().from(etfTrends).orderBy(desc(etfTrends.createdAt));
+  }
+
+  async getEtfTrend(id: number): Promise<EtfTrend | undefined> {
+    const [trend] = await db.select().from(etfTrends).where(eq(etfTrends.id, id));
+    return trend;
+  }
+
+  async createEtfTrend(trend: InsertEtfTrend): Promise<EtfTrend> {
+    const [newTrend] = await db.insert(etfTrends).values(trend).returning();
+    return newTrend;
+  }
+
+  async deleteEtfTrend(id: number): Promise<void> {
+    await db.delete(etfTrends).where(eq(etfTrends.id, id));
   }
 }
 
