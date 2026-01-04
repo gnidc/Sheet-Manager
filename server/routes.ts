@@ -29,14 +29,18 @@ export async function registerRoutes(
     }
     
     if (!ADMIN_USERNAME || !ADMIN_PASSWORD_HASH) {
+      console.log("Admin credentials check - USERNAME exists:", !!ADMIN_USERNAME, "HASH exists:", !!ADMIN_PASSWORD_HASH);
       return res.status(503).json({ message: "Admin credentials not configured" });
     }
+    
+    console.log("Login attempt - input username:", username, "expected:", ADMIN_USERNAME, "match:", username === ADMIN_USERNAME);
     
     if (username !== ADMIN_USERNAME) {
       return res.status(401).json({ message: "Invalid credentials" });
     }
     
     const isValid = await bcrypt.compare(password, ADMIN_PASSWORD_HASH);
+    console.log("Password check - isValid:", isValid);
     if (!isValid) {
       return res.status(401).json({ message: "Invalid credentials" });
     }
