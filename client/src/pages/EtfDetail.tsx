@@ -1,5 +1,6 @@
 import { useRoute, useLocation } from "wouter";
 import { useEtf, useUpdateEtf, useDeleteEtf } from "@/hooks/use-etfs";
+import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Loader2, ArrowLeft, Trash2, Edit2, ExternalLink, Info, Calendar, DollarSign, BarChart3, TrendingUp, FileText } from "lucide-react";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -20,6 +21,7 @@ export default function EtfDetail() {
   const updateEtf = useUpdateEtf();
   const deleteEtf = useDeleteEtf();
   const { toast } = useToast();
+  const { isAdmin } = useAuth();
   
   const [isEditOpen, setIsEditOpen] = useState(false);
 
@@ -91,49 +93,51 @@ export default function EtfDetail() {
               </div>
             </div>
 
-            <div className="flex gap-2">
-              <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="outline">
-                    <Edit2 className="w-4 h-4 mr-2" /> Edit
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-                  <DialogHeader>
-                    <DialogTitle>Edit ETF</DialogTitle>
-                    <DialogDescription>Update the details for this ETF.</DialogDescription>
-                  </DialogHeader>
-                  <EtfForm 
-                    defaultValues={etf}
-                    onSubmit={handleUpdate} 
-                    isPending={updateEtf.isPending} 
-                    submitLabel="Save Changes"
-                  />
-                </DialogContent>
-              </Dialog>
+            {isAdmin && (
+              <div className="flex gap-2">
+                <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline">
+                      <Edit2 className="w-4 h-4 mr-2" /> Edit
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+                    <DialogHeader>
+                      <DialogTitle>Edit ETF</DialogTitle>
+                      <DialogDescription>Update the details for this ETF.</DialogDescription>
+                    </DialogHeader>
+                    <EtfForm 
+                      defaultValues={etf}
+                      onSubmit={handleUpdate} 
+                      isPending={updateEtf.isPending} 
+                      submitLabel="Save Changes"
+                    />
+                  </DialogContent>
+                </Dialog>
 
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button variant="destructive" size="icon">
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      This action cannot be undone. This will permanently delete the ETF from the database.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                      Delete
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            </div>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="destructive" size="icon">
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This action cannot be undone. This will permanently delete the ETF from the database.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                        Delete
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </div>
+            )}
           </div>
         </div>
       </div>

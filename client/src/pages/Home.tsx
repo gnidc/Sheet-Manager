@@ -98,14 +98,15 @@ export default function Home() {
             
             <div className="flex items-center gap-3">
               <LoginDialog />
-              <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-                <DialogTrigger asChild>
-                  <Button className="shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all">
-                    <Plus className="w-4 h-4 mr-2" />
-                    Add New ETF
-                  </Button>
-                </DialogTrigger>
-              <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+              {isAdmin && (
+                <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+                  <DialogTrigger asChild>
+                    <Button className="shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all">
+                      <Plus className="w-4 h-4 mr-2" />
+                      Add New ETF
+                    </Button>
+                  </DialogTrigger>
+                <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle>Add New Covered Call ETF</DialogTitle>
                   <DialogDescription>
@@ -119,6 +120,7 @@ export default function Home() {
                 />
               </DialogContent>
               </Dialog>
+              )}
             </div>
           </div>
         </div>
