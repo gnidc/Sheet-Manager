@@ -100,3 +100,20 @@ Imports ETF data from JSON. This will **replace all existing data** in the datab
 
 ### Auto-Seed Feature
 When the app starts with fewer than 50 ETFs in the database, it automatically seeds with the default ETF data from the seed script.
+
+### Automatic Sync (Scheduled Deployment)
+
+A script at `scripts/sync-from-production.ts` can automatically sync production data to development.
+
+**Setup:**
+1. Go to **Publishing** tool in the left panel
+2. Select **Scheduled** option
+3. Configure:
+   - **Schedule**: `0 * * * *` (every hour) or use natural language "Every hour"
+   - **Run command**: `tsx scripts/sync-from-production.ts`
+   - **Secrets**: Add `PRODUCTION_URL` with your production app URL (e.g., `https://your-app.replit.app`)
+
+**Manual Run:**
+```bash
+PRODUCTION_URL=https://your-app.replit.app tsx scripts/sync-from-production.ts
+```
