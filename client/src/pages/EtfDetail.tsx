@@ -38,7 +38,7 @@ export default function EtfDetail() {
 
   const handleUpdate = async (data: InsertEtf) => {
     try {
-      await updateEtf.mutateAsync({ id, ...data });
+      await updateEtf.mutateAsync({ id, data });
       setIsEditOpen(false);
       toast({ title: "Updated", description: "ETF details updated successfully" });
     } catch (err) {
@@ -84,7 +84,7 @@ export default function EtfDetail() {
               </div>
               <h1 className="text-3xl font-bold font-display text-foreground tracking-tight">{etf.name}</h1>
               <div className="flex items-center gap-4 mt-2 text-muted-foreground text-sm">
-                <span className="flex items-center gap-1"><Info className="w-3 h-3" /> {etf.category}</span>
+                <span className="flex items-center gap-1"><Info className="w-3 h-3" /> {etf.mainCategory} | {etf.subCategory}</span>
                 <span className="flex items-center gap-1"><Calendar className="w-3 h-3" /> Listed: {etf.listingDate}</span>
               </div>
             </div>
