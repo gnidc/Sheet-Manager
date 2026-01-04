@@ -73,8 +73,8 @@ export function useCreateEtf() {
 export function useUpdateEtf() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, ...updates }: { id: number } & Partial<InsertEtf>) => {
-      const validated = api.etfs.update.input.parse(updates);
+    mutationFn: async ({ id, data }: { id: number, data: Partial<InsertEtf> }) => {
+      const validated = api.etfs.update.input.parse(data);
       const url = buildUrl(api.etfs.update.path, { id });
       
       const res = await fetch(url, {

@@ -29,6 +29,7 @@ export const etfs = pgTable("etfs", {
   
   // Metadata for trends/recommendations
   isRecommended: boolean("is_recommended").default(false),
+  isFavorite: boolean("is_favorite").default(false),
   trendScore: numeric("trend_score").default("0"),
 });
 

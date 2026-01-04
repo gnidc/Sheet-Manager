@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Link } from "wouter";
-import { useEtfs } from "@/hooks/use-etfs";
+import { useEtfs, useUpdateEtf } from "@/hooks/use-etfs";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
@@ -9,9 +9,11 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { EtfForm } from "@/components/EtfForm";
 import { useCreateEtf } from "@/hooks/use-etfs";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Search, Plus, ExternalLink, SlidersHorizontal, ArrowRight, TrendingUp, Wallet, Globe, Loader2 } from "lucide-react";
+import { Search, Plus, ExternalLink, SlidersHorizontal, ArrowRight, TrendingUp, Wallet, Globe, Loader2, Star, Lightbulb } from "lucide-react";
 import { type InsertEtf } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Card, CardContent } from "@/components/ui/card";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
@@ -32,6 +34,7 @@ export default function Home() {
   });
   
   const createEtf = useCreateEtf();
+  const updateEtf = useUpdateEtf();
   const { toast } = useToast();
 
   const handleCreate = async (data: InsertEtf) => {
@@ -48,11 +51,31 @@ export default function Home() {
     }
   };
 
+  const handleToggleFavorite = async (etf: any) => {
+    try {
+      await updateEtf.mutateAsync({
+        id: etf.id,
+        data: { isFavorite: !etf.isFavorite }
+      });
+    } catch (err) {
+      toast({ 
+        title: "Error", 
+        description: "Failed to update favorite", 
+        variant: "destructive" 
+      });
+    }
+  };
+
   const getSubCategories = () => {
     if (!etfs) return [];
     const cats = new Set(etfs.map(e => e.subCategory).filter(Boolean));
     return Array.from(cats) as string[];
   };
+
+  const filteredEtfs = useMemo(() => {
+    if (!etfs) return [];
+    return etfs;
+  }, [etfs]);
 
   return (
     <div className="min-h-screen bg-background pb-20">
@@ -98,10 +121,14 @@ export default function Home() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <Tabs defaultValue="all" className="space-y-8">
-          <TabsList className="grid w-full grid-cols-3 max-w-md mx-auto">
-            <TabsTrigger value="all">ETF (유형별)</TabsTrigger>
-            <TabsTrigger value="trends">동향</TabsTrigger>
-            <TabsTrigger value="recommended">추천 ETF</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-4 max-w-lg mx-auto">
+            <TabsTrigger value="all">Tracked ETFs</TabsTrigger>
+            <TabsTrigger value="trends">Markets</TabsTrigger>
+            <TabsTrigger value="strategies">Strategies</TabsTrigger>
+            <TabsTrigger value="favorites" className="gap-2">
+              <Lightbulb className="h-4 w-4 text-yellow-500" />
+              추천ETF
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="all" className="space-y-8">
@@ -226,6 +253,7 @@ export default function Home() {
                   <Table>
                     <TableHeader>
                       <TableRow className="bg-muted/30 hover:bg-muted/30">
+                        <TableHead className="w-[50px] text-center">Fav.</TableHead>
                         <TableHead className="w-[80px]">Code</TableHead>
                         <TableHead>M.Cat</TableHead>
                         <TableHead>S.Cat</TableHead>
@@ -239,6 +267,12 @@ export default function Home() {
                     <TableBody>
                       {etfs?.map((etf) => (
                         <TableRow key={etf.id} className="group hover:bg-muted/20 transition-colors">
+                          <TableCell className="text-center">
+                            <Checkbox 
+                              checked={etf.isFavorite || false} 
+                              onCheckedChange={() => handleToggleFavorite(etf)}
+                            />
+                          </TableCell>
                           <TableCell className="font-mono text-sm font-medium text-muted-foreground">
                             {etf.code}
                           </TableCell>
@@ -292,8 +326,12 @@ export default function Home() {
             <TrendingSection />
           </TabsContent>
 
-          <TabsContent value="recommended">
-             <RecommendedSection />
+          <TabsContent value="strategies">
+            <div className="p-8 text-center text-muted-foreground">Strategies section content goes here</div>
+          </TabsContent>
+
+          <TabsContent value="favorites">
+             <FavoriteSection etfs={etfs || []} onToggleFavorite={handleToggleFavorite} />
           </TabsContent>
         </Tabs>
       </main>
@@ -331,31 +369,46 @@ function TrendingSection() {
   );
 }
 
-function RecommendedSection() {
-  const { data: recommended, isLoading } = useQuery<any[]>({ queryKey: ["/api/recommended"] });
+function FavoriteSection({ etfs, onToggleFavorite }: { etfs: any[], onToggleFavorite: (etf: any) => void }) {
+  const favorites = etfs.filter(e => e.isFavorite);
 
-  if (isLoading) return <div className="p-8 text-center">추천 리스트 불러오는 중...</div>;
+  if (favorites.length === 0) {
+    return (
+      <div className="p-12 text-center border-2 border-dashed rounded-xl">
+        <Star className="w-12 h-12 mx-auto text-muted-foreground/30 mb-4" />
+        <h3 className="text-lg font-semibold">추천 리스트가 비어있습니다</h3>
+        <p className="text-muted-foreground">리스트에서 Fav. 체크박스를 클릭하여 나만의 추천 ETF를 만들어보세요.</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {recommended?.map((etf) => (
-          <Link key={etf.id} href={`/etf/${etf.id}`}>
-            <div className="p-6 border rounded-xl shadow-sm bg-primary/5 border-primary/10 hover:bg-primary/10 transition-colors cursor-pointer">
-              <div className="flex justify-between items-start mb-4">
-                <StatusBadge variant="accent">추천</StatusBadge>
-                <div className="text-xs font-mono">{etf.code}</div>
-              </div>
-              <h4 className="font-bold mb-1 truncate">{etf.name}</h4>
-              <p className="text-xs text-muted-foreground mb-4">{etf.mainCategory} | {etf.subCategory}</p>
-              <div className="flex justify-between items-end">
-                <div className="text-lg font-bold text-primary">{etf.yield}</div>
-                <ArrowRight className="w-4 h-4 text-primary" />
-              </div>
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      {favorites.map((etf) => (
+        <Card key={etf.id} className="overflow-hidden hover:shadow-md transition-shadow">
+          <CardContent className="p-6">
+            <div className="flex justify-between items-start mb-4">
+              <StatusBadge variant="success">{etf.mainCategory}</StatusBadge>
+              <Checkbox 
+                checked={etf.isFavorite} 
+                onCheckedChange={() => onToggleFavorite(etf)}
+              />
             </div>
-          </Link>
-        ))}
-      </div>
+            <h4 className="font-bold text-lg mb-1 truncate">{etf.name}</h4>
+            <p className="text-xs text-muted-foreground mb-4">{etf.code} | {etf.subCategory}</p>
+            <div className="flex justify-between items-end">
+              <div>
+                <div className="text-sm text-muted-foreground">Yield</div>
+                <div className="text-xl font-bold text-emerald-600 dark:text-emerald-400">{etf.yield}</div>
+              </div>
+              <Link href={`/etf/${etf.id}`}>
+                <Button size="sm" variant="outline">Details</Button>
+              </Link>
+            </div>
+          </CardContent>
+        </Card>
+      ))}
     </div>
   );
 }
+
