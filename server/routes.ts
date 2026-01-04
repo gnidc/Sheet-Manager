@@ -109,6 +109,16 @@ export async function registerRoutes(
     res.json(recommended);
   });
 
+  app.post("/api/seed", async (req, res) => {
+    try {
+      await seedDatabase(true);
+      const etfs = await storage.getEtfs();
+      res.json({ success: true, count: etfs.length });
+    } catch (err) {
+      res.status(500).json({ message: "Failed to seed database" });
+    }
+  });
+
   // Background task to periodically update scores and recommendations
   setInterval(async () => {
     try {
@@ -127,14 +137,23 @@ export async function registerRoutes(
     }
   }, 60000); // Every minute
 
-  await seedDatabase();
+  const existingEtfs = await storage.getEtfs();
+  if (existingEtfs.length < 50) {
+    console.log(`Database has only ${existingEtfs.length} ETFs, force seeding...`);
+    await seedDatabase(true);
+  }
 
   return httpServer;
 }
 
-async function seedDatabase() {
+async function seedDatabase(force: boolean = false) {
   const existing = await storage.getEtfs();
-  if (existing.length === 0) {
+  if (existing.length === 0 || (force && existing.length < 50)) {
+    if (force) {
+      for (const etf of existing) {
+        await storage.deleteEtf(etf.id);
+      }
+    }
     const seeds = [
       // 해외.커버드콜 - 미국국채
       { mainCategory: "해외.커버드콜", subCategory: "미국국채", generation: "2세대", country: "미국", name: "TIGER 미국30년국채커버드콜액티브(H)", code: "476550", fee: "0.39%", yield: "12%(타겟)", marketCap: "1.1조/>100억", dividendCycle: "월지급(말일)", optionType: "위클리(30%)", underlyingAsset: "KEDI US Treasury 30Y Weekly Covered Call 30 Index", callOption: "TLT", listingDate: "24.02", notes: "환헷지", linkProduct: "https://www.tigeretf.com/ko/product/search/detail/index.do?ksdFund=KR7476550009" },
