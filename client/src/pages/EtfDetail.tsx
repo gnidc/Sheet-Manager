@@ -42,9 +42,11 @@ export default function EtfDetail() {
       setIsEditOpen(false);
       toast({ title: "Updated", description: "ETF details updated successfully" });
     } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Failed to update ETF";
+      console.error("Update error:", err);
       toast({ 
         title: "Error", 
-        description: "Failed to update ETF", 
+        description: errorMessage, 
         variant: "destructive" 
       });
     }

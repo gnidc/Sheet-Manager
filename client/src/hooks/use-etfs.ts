@@ -75,7 +75,13 @@ export function useUpdateEtf() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, data }: { id: number, data: Partial<InsertEtf> }) => {
-      const validated = api.etfs.update.input.parse(data);
+      let validated;
+      try {
+        validated = api.etfs.update.input.parse(data);
+      } catch (e) {
+        console.error("Validation error:", e);
+        throw new Error("Validation failed");
+      }
       const url = buildUrl(api.etfs.update.path, { id });
       
       const res = await fetch(url, {
@@ -86,15 +92,25 @@ export function useUpdateEtf() {
       });
       
       if (!res.ok) {
+        const errorText = await res.text();
+        console.error("Server error:", res.status, errorText);
         if (res.status === 400) {
-          const error = api.etfs.update.responses[400].parse(await res.json());
-          throw new Error(error.message);
+          try {
+            const error = api.etfs.update.responses[400].parse(JSON.parse(errorText));
+            throw new Error(error.message);
+          } catch {
+            throw new Error(errorText || "Validation error");
+          }
         }
-        throw new Error("Failed to update ETF");
+        throw new Error(`Failed to update ETF: ${res.status}`);
       }
-      return api.etfs.update.responses[200].parse(await res.json());
+      const result = await res.json();
+      return result;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: [api.etfs.list.path] }),
+    onSuccess: (_, { id }) => {
+      queryClient.invalidateQueries({ queryKey: [api.etfs.list.path] });
+      queryClient.invalidateQueries({ queryKey: [api.etfs.get.path, id] });
+    },
   });
 }
 
