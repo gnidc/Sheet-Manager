@@ -46,7 +46,14 @@ export async function registerRoutes(
     }
     
     req.session.isAdmin = true;
-    res.json({ success: true, isAdmin: true });
+    req.session.save((err) => {
+      if (err) {
+        console.log("Session save error:", err);
+        return res.status(500).json({ message: "Session save failed" });
+      }
+      console.log("Login successful, session saved, sessionID:", req.sessionID);
+      res.json({ success: true, isAdmin: true });
+    });
   });
   
   app.post("/api/auth/logout", (req, res) => {
@@ -59,6 +66,7 @@ export async function registerRoutes(
   });
   
   app.get("/api/auth/me", (req, res) => {
+    console.log("/api/auth/me - sessionID:", req.sessionID, "isAdmin:", req.session?.isAdmin);
     res.json({ isAdmin: !!req.session?.isAdmin });
   });
   // Real-time price update endpoint
