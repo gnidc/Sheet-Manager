@@ -200,34 +200,80 @@ export async function registerRoutes(
         sourceType = "youtube";
         const videoId = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\s]+)/)?.[1];
         if (videoId) {
+          thumbnail = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
           try {
             const oembedRes = await axios.get(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`);
             title = oembedRes.data.title || "YouTube Video";
-            thumbnail = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
-            contentToSummarize = `YouTube video titled: "${title}"`;
           } catch {
             title = "YouTube Video";
-            thumbnail = videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : "";
-            contentToSummarize = `YouTube video at URL: ${url}`;
+          }
+          
+          let description = "";
+          try {
+            const pageRes = await axios.get(`https://www.youtube.com/watch?v=${videoId}`, {
+              timeout: 10000,
+              headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+            });
+            const html = pageRes.data as string;
+            const descMatch = html.match(/"shortDescription":"([^"]+)"/);
+            if (descMatch) {
+              description = descMatch[1]
+                .replace(/\\n/g, '\n')
+                .replace(/\\"/g, '"')
+                .substring(0, 2000);
+            }
+          } catch {
+            description = "";
+          }
+          
+          if (description.length > 100) {
+            contentToSummarize = `YouTube 영상 제목: "${title}"\n\n영상 설명:\n${description}\n\n위 YouTube 영상에서 다루는 ETF/투자 관련 핵심 내용을 3-5개 불릿 포인트로 요약해주세요.`;
+          } else {
+            contentToSummarize = `YouTube 영상 제목: "${title}"\n\n(영상 설명이 제한적입니다. 제목을 기반으로 추론하여 ETF/투자 관련 내용을 3-5개 불릿 포인트로 요약해주세요.)`;
           }
         }
       } else if (url.includes("blog.naver.com")) {
         sourceType = "blog";
-        title = "네이버 블로그 글";
-        contentToSummarize = `Naver blog post at URL: ${url}`;
+        try {
+          const response = await axios.get(url, { 
+            timeout: 10000,
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+          });
+          const html = response.data as string;
+          const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+          title = titleMatch ? titleMatch[1].replace(/\s*[:|-].*$/, '').trim() : "네이버 블로그";
+          const bodyText = html
+            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .substring(0, 3000);
+          contentToSummarize = `블로그 제목: "${title}"\n\n본문 내용:\n${bodyText}\n\n위 블로그 글에서 ETF/투자 관련 핵심 내용을 3-5개 불릿 포인트로 요약해주세요.`;
+        } catch {
+          title = "네이버 블로그 글";
+          contentToSummarize = `네이버 블로그 URL: ${url} - ETF/투자 관련 내용을 요약해주세요.`;
+        }
       } else {
         try {
           const response = await axios.get(url, { 
             timeout: 10000,
-            headers: { 'User-Agent': 'Mozilla/5.0' }
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
           });
-          const html = response.data;
+          const html = response.data as string;
           const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
           title = titleMatch ? titleMatch[1].trim() : url;
-          contentToSummarize = `Web article titled: "${title}" at URL: ${url}`;
+          const bodyText = html
+            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .substring(0, 3000);
+          contentToSummarize = `기사 제목: "${title}"\n\n본문 내용:\n${bodyText}\n\n위 기사에서 ETF/투자 관련 핵심 내용을 3-5개 불릿 포인트로 요약해주세요.`;
         } catch {
           title = url;
-          contentToSummarize = `Web article at URL: ${url}`;
+          contentToSummarize = `웹 기사 URL: ${url} - ETF/투자 관련 내용을 요약해주세요.`;
         }
       }
 
@@ -238,19 +284,28 @@ export async function registerRoutes(
           messages: [
             {
               role: "system",
-              content: "You are a financial content summarizer. Summarize the given content about ETFs or investments in 3-5 bullet points in Korean. Be concise and focus on key information. If you cannot access the content, provide a generic summary based on the title."
+              content: `당신은 ETF 및 투자 콘텐츠 전문 요약가입니다. 
+주어진 콘텐츠를 분석하여 정확히 3-5개의 핵심 포인트로 요약해주세요.
+
+출력 형식:
+- 각 포인트는 "•" 로 시작
+- 각 포인트는 1-2문장으로 간결하게
+- 투자자에게 유용한 정보 위주로
+- 모든 내용은 한국어로 작성
+
+콘텐츠에 접근할 수 없는 경우, 제목이나 URL을 기반으로 일반적인 ETF/투자 관련 인사이트를 제공해주세요.`
             },
             {
               role: "user",
               content: contentToSummarize
             }
           ],
-          max_completion_tokens: 500,
+          max_completion_tokens: 600,
         });
-        summary = completion.choices[0]?.message?.content || "요약을 생성할 수 없습니다.";
+        summary = completion.choices[0]?.message?.content || "• 요약을 생성할 수 없습니다.";
       } catch (aiError) {
         console.error("AI summarization error:", aiError);
-        summary = "AI 요약을 생성하는 중 오류가 발생했습니다.";
+        summary = "• AI 요약을 생성하는 중 오류가 발생했습니다.\n• 잠시 후 다시 시도해주세요.";
       }
 
       const trend = await storage.createEtfTrend({

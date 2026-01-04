@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { EtfForm } from "@/components/EtfForm";
 import { useCreateEtf } from "@/hooks/use-etfs";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Search, Plus, ExternalLink, SlidersHorizontal, ArrowRight, TrendingUp, Wallet, Globe, Loader2, Star, Lightbulb } from "lucide-react";
+import { Search, Plus, ExternalLink, SlidersHorizontal, ArrowRight, TrendingUp, Wallet, Globe, Loader2, Star, Lightbulb, Newspaper, Youtube, FileText, Link as LinkIcon, Trash2 } from "lucide-react";
 import { type InsertEtf } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -19,7 +19,8 @@ import { LoginDialog } from "@/components/LoginDialog";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 
 export default function Home() {
   const [search, setSearch] = useState("");
@@ -129,13 +130,17 @@ export default function Home() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <Tabs defaultValue="all" className="space-y-8">
-          <TabsList className="grid w-full grid-cols-4 max-w-lg mx-auto">
+          <TabsList className="grid w-full grid-cols-5 max-w-2xl mx-auto">
             <TabsTrigger value="all">Tracked ETFs</TabsTrigger>
             <TabsTrigger value="trends">Markets</TabsTrigger>
             <TabsTrigger value="strategies">Strategies</TabsTrigger>
             <TabsTrigger value="favorites" className="gap-2">
               <Lightbulb className="h-4 w-4 text-yellow-500" />
               추천ETF
+            </TabsTrigger>
+            <TabsTrigger value="etf-trends" className="gap-2">
+              <Newspaper className="h-4 w-4" />
+              ETF 동향
             </TabsTrigger>
           </TabsList>
 
@@ -344,6 +349,10 @@ export default function Home() {
           <TabsContent value="favorites">
              <FavoriteSection etfs={etfs || []} onToggleFavorite={handleToggleFavorite} isAdmin={isAdmin} />
           </TabsContent>
+
+          <TabsContent value="etf-trends">
+            <EtfTrendsSection isAdmin={isAdmin} />
+          </TabsContent>
         </Tabs>
       </main>
     </div>
@@ -448,6 +457,203 @@ function FavoriteSection({ etfs, onToggleFavorite, isAdmin }: { etfs: any[], onT
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+interface EtfTrend {
+  id: number;
+  url: string;
+  title: string;
+  summary: string;
+  thumbnail: string | null;
+  sourceType: string;
+  createdAt: string;
+}
+
+function EtfTrendsSection({ isAdmin }: { isAdmin: boolean }) {
+  const [urlInput, setUrlInput] = useState("");
+  const { toast } = useToast();
+  
+  const { data: trends, isLoading } = useQuery<EtfTrend[]>({ 
+    queryKey: ["/api/etf-trends"] 
+  });
+
+  const createTrend = useMutation({
+    mutationFn: async (url: string) => {
+      return apiRequest("POST", "/api/etf-trends", { url });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/etf-trends"] });
+      setUrlInput("");
+      toast({ title: "성공", description: "ETF 동향이 추가되었습니다." });
+    },
+    onError: (error: any) => {
+      toast({ 
+        title: "오류", 
+        description: error.message || "동향 추가에 실패했습니다.", 
+        variant: "destructive" 
+      });
+    }
+  });
+
+  const deleteTrend = useMutation({
+    mutationFn: async (id: number) => {
+      return apiRequest("DELETE", `/api/etf-trends/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/etf-trends"] });
+      toast({ title: "삭제됨", description: "동향이 삭제되었습니다." });
+    },
+    onError: () => {
+      toast({ title: "오류", description: "삭제에 실패했습니다.", variant: "destructive" });
+    }
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!urlInput.trim()) return;
+    createTrend.mutate(urlInput.trim());
+  };
+
+  const getSourceIcon = (sourceType: string) => {
+    switch (sourceType) {
+      case "youtube":
+        return <Youtube className="w-4 h-4 text-red-500" />;
+      case "blog":
+        return <FileText className="w-4 h-4 text-green-500" />;
+      default:
+        return <LinkIcon className="w-4 h-4 text-blue-500" />;
+    }
+  };
+
+  const getSourceLabel = (sourceType: string) => {
+    switch (sourceType) {
+      case "youtube":
+        return "YouTube";
+      case "blog":
+        return "블로그";
+      default:
+        return "Article";
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="p-8 text-center">
+        <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" />
+        <span className="text-muted-foreground">동향 불러오는 중...</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {isAdmin && (
+        <Card>
+          <CardContent className="p-6">
+            <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+              <Plus className="w-5 h-5" />
+              새 동향 추가
+            </h3>
+            <form onSubmit={handleSubmit} className="flex gap-3">
+              <Input
+                placeholder="YouTube, 블로그, 뉴스 URL을 입력하세요..."
+                value={urlInput}
+                onChange={(e) => setUrlInput(e.target.value)}
+                className="flex-1"
+                data-testid="input-trend-url"
+              />
+              <Button 
+                type="submit" 
+                disabled={createTrend.isPending || !urlInput.trim()}
+                data-testid="button-add-trend"
+              >
+                {createTrend.isPending ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    AI 분석중...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="w-4 h-4 mr-2" />
+                    추가
+                  </>
+                )}
+              </Button>
+            </form>
+            <p className="text-xs text-muted-foreground mt-2">
+              URL을 입력하면 AI가 자동으로 내용을 요약합니다. (YouTube, 네이버 블로그, 일반 기사 지원)
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {(!trends || trends.length === 0) ? (
+        <div className="p-12 text-center border-2 border-dashed rounded-xl">
+          <Newspaper className="w-12 h-12 mx-auto text-muted-foreground/30 mb-4" />
+          <h3 className="text-lg font-semibold">동향 정보가 없습니다</h3>
+          <p className="text-muted-foreground">
+            {isAdmin ? "URL을 추가하여 ETF 관련 콘텐츠를 요약해보세요." : "관리자가 ETF 동향을 추가하면 여기에 표시됩니다."}
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {trends.map((trend) => (
+            <Card key={trend.id} className="overflow-hidden" data-testid={`card-trend-${trend.id}`}>
+              <CardContent className="p-0">
+                {trend.thumbnail && (
+                  <div className="aspect-video relative overflow-hidden bg-muted">
+                    <img 
+                      src={trend.thumbnail} 
+                      alt={trend.title}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                )}
+                <div className="p-4">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <StatusBadge variant="outline" className="gap-1">
+                      {getSourceIcon(trend.sourceType)}
+                      {getSourceLabel(trend.sourceType)}
+                    </StatusBadge>
+                    <span className="text-xs text-muted-foreground">
+                      {new Date(trend.createdAt).toLocaleDateString('ko-KR')}
+                    </span>
+                  </div>
+                  <h4 className="font-bold text-base mb-2 line-clamp-2">{trend.title}</h4>
+                  <div className="text-sm text-muted-foreground whitespace-pre-wrap mb-3 line-clamp-5">
+                    {trend.summary}
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <a 
+                      href={trend.url} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                    >
+                      <Button variant="outline" size="sm">
+                        <ExternalLink className="w-3 h-3 mr-1" />
+                        원문 보기
+                      </Button>
+                    </a>
+                    {isAdmin && (
+                      <Button 
+                        variant="ghost" 
+                        size="sm"
+                        onClick={() => deleteTrend.mutate(trend.id)}
+                        disabled={deleteTrend.isPending}
+                        data-testid={`button-delete-trend-${trend.id}`}
+                      >
+                        <Trash2 className="w-4 h-4 text-destructive" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
