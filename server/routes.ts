@@ -107,7 +107,7 @@ export async function registerRoutes(
     res.json(etf);
   });
 
-  app.post(api.etfs.create.path, async (req, res) => {
+  app.post(api.etfs.create.path, requireAdmin, async (req, res) => {
     try {
       const input = api.etfs.create.input.parse(req.body);
       const etf = await storage.createEtf(input);
@@ -123,7 +123,7 @@ export async function registerRoutes(
     }
   });
 
-  app.put(api.etfs.update.path, async (req, res) => {
+  app.put(api.etfs.update.path, requireAdmin, async (req, res) => {
     try {
       const input = api.etfs.update.input.parse(req.body);
       const etf = await storage.updateEtf(Number(req.params.id), input);
@@ -142,7 +142,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete(api.etfs.delete.path, async (req, res) => {
+  app.delete(api.etfs.delete.path, requireAdmin, async (req, res) => {
     await storage.deleteEtf(Number(req.params.id));
     res.status(204).send();
   });
@@ -157,7 +157,7 @@ export async function registerRoutes(
     res.json(recommended);
   });
 
-  app.post("/api/seed", async (req, res) => {
+  app.post("/api/seed", requireAdmin, async (req, res) => {
     try {
       await seedDatabase(true);
       const etfs = await storage.getEtfs();
