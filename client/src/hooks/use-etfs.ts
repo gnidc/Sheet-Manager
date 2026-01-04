@@ -8,17 +8,17 @@ import { z } from "zod";
 
 export interface EtfFilters {
   search?: string;
-  category?: string;
+  mainCategory?: string;
+  subCategory?: string;
   country?: string;
-  assetClass?: string;
 }
 
 export function useEtfs(filters?: EtfFilters) {
   const queryParams = new URLSearchParams();
   if (filters?.search) queryParams.append("search", filters.search);
-  if (filters?.category && filters.category !== "ALL") queryParams.append("category", filters.category);
+  if (filters?.mainCategory && filters.mainCategory !== "ALL") queryParams.append("mainCategory", filters.mainCategory);
+  if (filters?.subCategory && filters.subCategory !== "ALL") queryParams.append("subCategory", filters.subCategory);
   if (filters?.country && filters.country !== "ALL") queryParams.append("country", filters.country);
-  if (filters?.assetClass && filters.assetClass !== "ALL") queryParams.append("assetClass", filters.assetClass);
 
   return useQuery({
     queryKey: [api.etfs.list.path, filters],

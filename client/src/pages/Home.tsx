@@ -19,16 +19,16 @@ import { useQuery } from "@tanstack/react-query";
 
 export default function Home() {
   const [search, setSearch] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState("ALL");
+  const [mainCategoryFilter, setMainCategoryFilter] = useState("ALL");
+  const [subCategoryFilter, setSubCategoryFilter] = useState("ALL");
   const [countryFilter, setCountryFilter] = useState("ALL");
-  const [assetClassFilter, setAssetClassFilter] = useState("ALL");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   
   const { data: etfs, isLoading, error } = useEtfs({ 
     search, 
-    category: categoryFilter, 
-    country: countryFilter,
-    assetClass: assetClassFilter
+    mainCategory: mainCategoryFilter,
+    subCategory: subCategoryFilter,
+    country: countryFilter
   });
   
   const createEtf = useCreateEtf();
@@ -48,9 +48,9 @@ export default function Home() {
     }
   };
 
-  const getCategories = () => {
+  const getSubCategories = () => {
     if (!etfs) return [];
-    const cats = new Set(etfs.map(e => e.category).filter(Boolean));
+    const cats = new Set(etfs.map(e => e.subCategory).filter(Boolean));
     return Array.from(cats) as string[];
   };
 
@@ -141,7 +141,7 @@ export default function Home() {
                   <h3 className="font-semibold text-foreground">Strategies</h3>
                 </div>
                 <div className="text-3xl font-bold font-display">
-                  {etfs ? new Set(etfs.map(e => e.category)).size : 0}
+                  {etfs ? new Set(etfs.map(e => e.subCategory)).size : 0}
                 </div>
                 <p className="text-sm text-muted-foreground mt-1">Unique asset classes</p>
               </div>
@@ -160,20 +160,32 @@ export default function Home() {
               </div>
               
               <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
-              <Select value={assetClassFilter} onValueChange={setAssetClassFilter}>
-                <SelectTrigger className="w-full sm:w-[180px]">
-                  <SelectValue placeholder="ETF 유형" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">전체 유형</SelectItem>
-                  <SelectItem value="해외.커버드콜">해외.커버드콜</SelectItem>
-                  <SelectItem value="해외.액티브">해외.액티브</SelectItem>
-                  <SelectItem value="해외패시브&기타">해외패시브&기타</SelectItem>
-                  <SelectItem value="국내자산">국내자산</SelectItem>
-                </SelectContent>
-              </Select>
+                <Select value={mainCategoryFilter} onValueChange={setMainCategoryFilter}>
+                  <SelectTrigger className="w-full sm:w-[180px]">
+                    <SelectValue placeholder="M.Cat" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">전체 M.Cat</SelectItem>
+                    <SelectItem value="해외.커버드콜">해외.커버드콜</SelectItem>
+                    <SelectItem value="해외.액티브">해외.액티브</SelectItem>
+                    <SelectItem value="해외패시브&기타">해외패시브&기타</SelectItem>
+                    <SelectItem value="국내자산">국내자산</SelectItem>
+                  </SelectContent>
+                </Select>
 
-              <Select value={countryFilter} onValueChange={setCountryFilter}>
+                <Select value={subCategoryFilter} onValueChange={setSubCategoryFilter}>
+                  <SelectTrigger className="w-full sm:w-[180px]">
+                    <SelectValue placeholder="S.Cat" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">전체 S.Cat</SelectItem>
+                    {getSubCategories().map(cat => (
+                      <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <Select value={countryFilter} onValueChange={setCountryFilter}>
                   <SelectTrigger className="w-full sm:w-[150px]">
                     <SelectValue placeholder="Country" />
                   </SelectTrigger>
@@ -182,18 +194,6 @@ export default function Home() {
                     <SelectItem value="미국">미국 (USA)</SelectItem>
                     <SelectItem value="한국">한국 (Korea)</SelectItem>
                     <SelectItem value="CN">중국 (China)</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                  <SelectTrigger className="w-full sm:w-[180px]">
-                    <SelectValue placeholder="Category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ALL">All Categories</SelectItem>
-                    {getCategories().map(cat => (
-                      <SelectItem key={cat} value={cat}>{cat}</SelectItem>
-                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -227,12 +227,11 @@ export default function Home() {
                     <TableHeader>
                       <TableRow className="bg-muted/30 hover:bg-muted/30">
                         <TableHead className="w-[80px]">Code</TableHead>
-                        <TableHead className="w-[100px]">Gen</TableHead>
-                        <TableHead className="min-w-[250px]">Name</TableHead>
-                        <TableHead>Category</TableHead>
+                        <TableHead>M.Cat</TableHead>
+                        <TableHead>S.Cat</TableHead>
+                        <TableHead className="min-w-[200px]">Name</TableHead>
                         <TableHead>Yield</TableHead>
                         <TableHead>Fee</TableHead>
-                        <TableHead>Dividend</TableHead>
                         <TableHead>Cycle</TableHead>
                         <TableHead className="text-right">Action</TableHead>
                       </TableRow>
@@ -243,23 +242,16 @@ export default function Home() {
                           <TableCell className="font-mono text-sm font-medium text-muted-foreground">
                             {etf.code}
                           </TableCell>
-                          <TableCell>
-                            <StatusBadge variant={
-                              etf.generation === '1세대' ? 'secondary' :
-                              etf.generation === '2세대' ? 'default' : 'accent'
-                            }>
-                              {etf.generation || 'N/A'}
-                            </StatusBadge>
-                          </TableCell>
+                          <TableCell className="text-xs font-medium">{etf.mainCategory}</TableCell>
+                          <TableCell className="text-xs">{etf.subCategory}</TableCell>
                           <TableCell>
                             <div className="flex flex-col">
                               <span className="font-semibold text-foreground group-hover:text-primary transition-colors">
                                 {etf.name}
                               </span>
-                              <span className="text-xs text-muted-foreground">{etf.country}</span>
+                              <span className="text-[10px] text-muted-foreground">{etf.country} | {etf.generation}</span>
                             </div>
                           </TableCell>
-                          <TableCell className="text-sm">{etf.category}</TableCell>
                           <TableCell>
                             <div className="flex flex-col">
                               <span className="font-mono font-medium text-emerald-600 dark:text-emerald-400">
@@ -272,8 +264,7 @@ export default function Home() {
                               )}
                             </div>
                           </TableCell>
-                          <TableCell className="text-sm text-muted-foreground">{etf.fee}</TableCell>
-                          <TableCell className="text-sm">{etf.marketCap}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">{etf.fee}</TableCell>
                           <TableCell>
                              <StatusBadge variant={
                               etf.dividendCycle?.includes('월') ? 'success' : 'outline'
@@ -356,7 +347,7 @@ function RecommendedSection() {
                 <div className="text-xs font-mono">{etf.code}</div>
               </div>
               <h4 className="font-bold mb-1 truncate">{etf.name}</h4>
-              <p className="text-xs text-muted-foreground mb-4">{etf.category}</p>
+              <p className="text-xs text-muted-foreground mb-4">{etf.mainCategory} | {etf.subCategory}</p>
               <div className="flex justify-between items-end">
                 <div className="text-lg font-bold text-primary">{etf.yield}</div>
                 <ArrowRight className="w-4 h-4 text-primary" />

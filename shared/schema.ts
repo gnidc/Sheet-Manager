@@ -5,11 +5,9 @@ import { z } from "zod";
 export const etfs = pgTable("etfs", {
   id: serial("id").primaryKey(),
   generation: text("generation"),
-  category: text("category"),
+  mainCategory: text("main_category"),
+  subCategory: text("sub_category"),
   country: text("country"),
-  name: text("name").notNull(),
-  code: text("code").notNull(),
-  assetClass: text("asset_class"),
   fee: text("fee"),
   yield: text("yield"),
   marketCap: text("market_cap"),

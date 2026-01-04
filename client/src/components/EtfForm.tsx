@@ -22,7 +22,8 @@ export function EtfForm({ defaultValues, onSubmit, isPending, submitLabel }: Etf
       name: "",
       code: "",
       generation: "2세대",
-      category: "",
+      mainCategory: "해외.커버드콜",
+      subCategory: "",
       country: "미국",
       fee: "",
       yield: "",
@@ -95,6 +96,44 @@ export function EtfForm({ defaultValues, onSubmit, isPending, submitLabel }: Etf
 
           <FormField
             control={form.control}
+            name="mainCategory"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>M.Cat (Main Category)</FormLabel>
+                <Select onValueChange={field.onChange} defaultValue={field.value || undefined}>
+                  <FormControl>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select main category" />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    <SelectItem value="해외.커버드콜">해외.커버드콜</SelectItem>
+                    <SelectItem value="해외.액티브">해외.액티브</SelectItem>
+                    <SelectItem value="해외패시브&기타">해외패시브&기타</SelectItem>
+                    <SelectItem value="국내자산">국내자산</SelectItem>
+                  </SelectContent>
+                </Select>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name="subCategory"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>S.Cat (Sub Category)</FormLabel>
+                <FormControl>
+                  <Input placeholder="e.g. 미국국채, 나스닥100" {...field} value={field.value || ""} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
             name="country"
             render={({ field }) => (
               <FormItem>
@@ -111,20 +150,6 @@ export function EtfForm({ defaultValues, onSubmit, isPending, submitLabel }: Etf
                     <SelectItem value="CN">중국 (China)</SelectItem>
                   </SelectContent>
                 </Select>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-
-          <FormField
-            control={form.control}
-            name="category"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Category</FormLabel>
-                <FormControl>
-                  <Input placeholder="미국국채, 나스닥100..." {...field} value={field.value || ""} />
-                </FormControl>
                 <FormMessage />
               </FormItem>
             )}

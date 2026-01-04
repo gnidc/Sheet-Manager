@@ -45,10 +45,10 @@ export async function registerRoutes(
 
   app.get(api.etfs.list.path, async (req, res) => {
     const search = req.query.search as string | undefined;
-    const category = req.query.category as string | undefined;
+    const mainCategory = req.query.mainCategory as string | undefined;
+    const subCategory = req.query.subCategory as string | undefined;
     const country = req.query.country as string | undefined;
-    const assetClass = req.query.assetClass as string | undefined;
-    const etfs = await storage.getEtfs({ search, category, country, assetClass });
+    const etfs = await storage.getEtfs({ search, mainCategory, subCategory, country });
     res.json(etfs);
   });
 
