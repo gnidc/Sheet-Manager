@@ -34,27 +34,37 @@ export interface IStorage {
 
 export class DatabaseStorage implements IStorage {
   async getEtfs(params?: { search?: string; mainCategory?: string; subCategory?: string; country?: string }): Promise<Etf[]> {
-    const conditions = [];
-    
-    if (params?.search) {
-      conditions.push(ilike(etfs.name, `%${params.search}%`));
-    }
-    
-    if (params?.mainCategory) {
-      conditions.push(eq(etfs.mainCategory, params.mainCategory));
-    }
+    try {
+      const conditions = [];
+      
+      if (params?.search) {
+        conditions.push(ilike(etfs.name, `%${params.search}%`));
+      }
+      
+      if (params?.mainCategory) {
+        conditions.push(eq(etfs.mainCategory, params.mainCategory));
+      }
 
-    if (params?.subCategory) {
-      conditions.push(eq(etfs.subCategory, params.subCategory));
-    }
+      if (params?.subCategory) {
+        conditions.push(eq(etfs.subCategory, params.subCategory));
+      }
 
-    if (params?.country) {
-      conditions.push(eq(etfs.country, params.country));
-    }
+      if (params?.country) {
+        conditions.push(eq(etfs.country, params.country));
+      }
 
-    return await db.select()
-      .from(etfs)
-      .where(and(...conditions));
+      const query = db.select().from(etfs);
+      
+      // conditions가 비어있지 않을 때만 where 절 추가
+      if (conditions.length > 0) {
+        return await query.where(and(...conditions));
+      } else {
+        return await query;
+      }
+    } catch (error) {
+      console.error("Error in getEtfs:", error);
+      throw error;
+    }
   }
 
   async getEtf(id: number): Promise<Etf | undefined> {

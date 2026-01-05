@@ -105,12 +105,27 @@ export async function registerRoutes(
   });
 
   app.get(api.etfs.list.path, async (req, res) => {
-    const search = req.query.search as string | undefined;
-    const mainCategory = req.query.mainCategory as string | undefined;
-    const subCategory = req.query.subCategory as string | undefined;
-    const country = req.query.country as string | undefined;
-    const etfs = await storage.getEtfs({ search, mainCategory, subCategory, country });
-    res.json(etfs);
+    try {
+      const search = req.query.search as string | undefined;
+      const mainCategory = req.query.mainCategory as string | undefined;
+      const subCategory = req.query.subCategory as string | undefined;
+      const country = req.query.country as string | undefined;
+      
+      console.log("GET /api/etfs - params:", { search, mainCategory, subCategory, country });
+      
+      const etfs = await storage.getEtfs({ search, mainCategory, subCategory, country });
+      
+      console.log("GET /api/etfs - result count:", etfs.length);
+      
+      res.json(etfs);
+    } catch (error: any) {
+      console.error("Error in GET /api/etfs:", error);
+      res.status(500).json({ 
+        message: "Failed to fetch ETFs", 
+        error: error.message,
+        stack: process.env.NODE_ENV === "development" ? error.stack : undefined
+      });
+    }
   });
 
   app.get(api.etfs.get.path, async (req, res) => {
