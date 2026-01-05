@@ -43,19 +43,12 @@ export interface KisPriceData {
   volume?: string;
 }
 
-export async function getEtfDailyPrices(
+async function fetchPriceChunk(
+  token: string,
   stockCode: string,
-  period: "1M" | "3M" | "6M" | "1Y"
+  startDate: Date,
+  endDate: Date
 ): Promise<KisPriceData[]> {
-  const token = await getAccessToken();
-
-  const periodDays: Record<string, number> = { "1M": 30, "3M": 90, "6M": 180, "1Y": 365 };
-  const days = periodDays[period];
-
-  const endDate = new Date();
-  const startDate = new Date();
-  startDate.setDate(startDate.getDate() - days);
-
   const formatDate = (d: Date) =>
     d.getFullYear().toString() +
     (d.getMonth() + 1).toString().padStart(2, "0") +
@@ -90,7 +83,7 @@ export async function getEtfDailyPrices(
 
     const output2 = response.data.output2 || [];
     
-    const prices: KisPriceData[] = output2
+    return output2
       .filter((item: any) => item.stck_bsop_date)
       .map((item: any) => ({
         date: `${item.stck_bsop_date.slice(0, 4)}-${item.stck_bsop_date.slice(4, 6)}-${item.stck_bsop_date.slice(6, 8)}`,
@@ -99,14 +92,65 @@ export async function getEtfDailyPrices(
         highPrice: item.stck_hgpr,
         lowPrice: item.stck_lwpr,
         volume: item.acml_vol,
-      }))
-      .reverse();
-
-    console.log(`Fetched ${prices.length} price records for ${stockCode}`);
-    return prices;
+      }));
   } catch (error: any) {
-    console.error("Failed to fetch ETF prices:", error.response?.data || error.message);
+    console.error("Failed to fetch ETF prices chunk:", error.response?.data || error.message);
     return [];
+  }
+}
+
+export async function getEtfDailyPrices(
+  stockCode: string,
+  period: "1M" | "3M" | "6M" | "1Y"
+): Promise<KisPriceData[]> {
+  const token = await getAccessToken();
+
+  const periodDays: Record<string, number> = { "1M": 30, "3M": 90, "6M": 180, "1Y": 365 };
+  const days = periodDays[period];
+
+  const endDate = new Date();
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
+
+  const allPrices: KisPriceData[] = [];
+  
+  if (period === "1Y" || period === "6M") {
+    const chunkDays = 80;
+    let currentEnd = new Date(endDate);
+    
+    while (currentEnd > startDate) {
+      const currentStart = new Date(currentEnd);
+      currentStart.setDate(currentStart.getDate() - chunkDays);
+      
+      if (currentStart < startDate) {
+        currentStart.setTime(startDate.getTime());
+      }
+      
+      const chunk = await fetchPriceChunk(token, stockCode, currentStart, currentEnd);
+      allPrices.unshift(...chunk);
+      
+      currentEnd = new Date(currentStart);
+      currentEnd.setDate(currentEnd.getDate() - 1);
+      
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
+    const uniquePrices = allPrices.reduce((acc: KisPriceData[], curr) => {
+      if (!acc.find(p => p.date === curr.date)) {
+        acc.push(curr);
+      }
+      return acc;
+    }, []);
+    
+    uniquePrices.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    
+    console.log(`Fetched ${uniquePrices.length} price records for ${stockCode} (${period})`);
+    return uniquePrices;
+  } else {
+    const prices = await fetchPriceChunk(token, stockCode, startDate, endDate);
+    prices.reverse();
+    console.log(`Fetched ${prices.length} price records for ${stockCode} (${period})`);
+    return prices;
   }
 }
 
