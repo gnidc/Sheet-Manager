@@ -69,6 +69,40 @@ async function buildAll() {
   // Vercel이 자동으로 TypeScript를 컴파일하므로 소스 파일만 배포하면 됨
   console.log("Skipping api/index.ts build - Vercel will compile TypeScript automatically");
   
+  // shared 디렉토리의 TypeScript 파일들을 JavaScript로 컴파일
+  // Vercel은 api/만 자동 컴파일하므로 shared/는 수동으로 컴파일 필요
+  console.log("building shared files...");
+  const { readdir, stat } = await import("fs/promises");
+  const { join, extname, basename } = await import("path");
+  
+  async function compileSharedDir(dir) {
+    const entries = await readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await compileSharedDir(fullPath);
+      } else if (extname(entry.name) === ".ts" && !entry.name.endsWith(".d.ts")) {
+        const outPath = fullPath.replace(/\.ts$/, ".js");
+        await esbuild({
+          entryPoints: [fullPath],
+          platform: "node",
+          bundle: false, // shared 파일들은 번들링하지 않음
+          format: "esm",
+          outfile: outPath,
+          define: {
+            "process.env.NODE_ENV": '"production"',
+          },
+          minify: false, // shared 파일들은 minify하지 않음
+          external: allDeps, // 모든 의존성은 external로 설정
+          logLevel: "warning",
+        });
+      }
+    }
+  }
+  
+  await compileSharedDir("shared");
+  console.log("Shared files build completed");
+  
   // Verify dist/public exists
   const { existsSync } = await import("fs");
   const distPublicPath = "dist/public";

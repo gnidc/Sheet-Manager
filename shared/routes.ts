@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { insertEtfSchema, etfs } from './schema';
+import { insertEtfSchema, etfs } from './schema.js';
 
 export const errorSchemas = {
   validation: z.object({

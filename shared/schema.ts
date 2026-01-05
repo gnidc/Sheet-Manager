@@ -3,7 +3,7 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { sql } from "drizzle-orm";
 
-export * from "./models/chat";
+export * from "./models/chat.js";
 
 export const etfs = pgTable("etfs", {
   id: serial("id").primaryKey(),
