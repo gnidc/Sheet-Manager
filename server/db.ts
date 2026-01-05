@@ -11,18 +11,26 @@ import * as schema from "../shared/schema.js";
 const { Pool } = pg;
 
 const databaseUrl = process.env.DATABASE_URL;
-if (!databaseUrl) {
-  console.error("DATABASE_URL is not set. Available env vars:", Object.keys(process.env).filter(k => k.includes("DATABASE") || k.includes("DB")));
+
+// DATABASE_URL이 없거나 빈 문자열인지 확인
+if (!databaseUrl || databaseUrl.trim() === "") {
+  const availableEnvVars = Object.keys(process.env).filter(k => 
+    k.includes("DATABASE") || k.includes("DB") || k.includes("POSTGRES")
+  );
+  console.error("DATABASE_URL is not set or empty.");
+  console.error("Available env vars:", availableEnvVars);
+  console.error("All env vars (first 20):", Object.keys(process.env).slice(0, 20));
   throw new Error(
     "DATABASE_URL must be set. Did you forget to provision a database? " +
-    "Please check Vercel environment variables."
+    "Please check Vercel environment variables. " +
+    `Available vars: ${availableEnvVars.join(", ")}`
   );
 }
 
 // connectionString이 문자열인지 확인
 if (typeof databaseUrl !== "string") {
   throw new Error(
-    "DATABASE_URL must be a string. Current type: " + typeof databaseUrl,
+    "DATABASE_URL must be a string. Current type: " + typeof databaseUrl + ", value: " + String(databaseUrl),
   );
 }
 
@@ -30,9 +38,18 @@ if (typeof databaseUrl !== "string") {
 if (!databaseUrl.startsWith("postgresql://") && !databaseUrl.startsWith("postgres://")) {
   throw new Error(
     "DATABASE_URL must be a valid PostgreSQL connection string. " +
-    "It should start with 'postgresql://' or 'postgres://'"
+    "It should start with 'postgresql://' or 'postgres://'. " +
+    `Current value: ${databaseUrl.substring(0, 20)}...`
   );
 }
 
-export const pool = new Pool({ connectionString: databaseUrl });
+// Pool 생성 전에 connectionString이 유효한지 확인
+const connectionString = databaseUrl.trim();
+if (!connectionString) {
+  throw new Error("DATABASE_URL is empty after trimming.");
+}
+
+console.log("DATABASE_URL is set, length:", connectionString.length, "starts with:", connectionString.substring(0, 20));
+
+export const pool = new Pool({ connectionString });
 export const db = drizzle(pool, { schema });
