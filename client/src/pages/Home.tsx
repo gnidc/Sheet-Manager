@@ -386,7 +386,8 @@ function CompareSection({ etfs }: { etfs: any[] }) {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedPeriod, setSelectedPeriod] = useState<HistoryPeriod>("3M");
 
-  const selectedEtfs = etfs.filter(e => selectedIds.includes(e.id));
+  // Maintain order matching selectedIds for correct chart data alignment
+  const selectedEtfs = selectedIds.map(id => etfs.find(e => e.id === id)).filter(Boolean);
   const filteredEtfs = etfs.filter(e => 
     !selectedIds.includes(e.id) && 
     ((e.name?.toLowerCase() ?? "").includes(searchTerm.toLowerCase()) || 
@@ -427,7 +428,8 @@ function CompareSection({ etfs }: { etfs: any[] }) {
         if (!allDates.has(dateKey)) {
           allDates.set(dateKey, { date: dateKey });
         }
-        allDates.get(dateKey)[etf?.name || `ETF ${idx + 1}`] = normalizedValue.toFixed(2);
+        // Keep as number for Recharts
+        allDates.get(dateKey)[etf?.name || `ETF ${idx + 1}`] = Math.round(normalizedValue * 100) / 100;
       });
     });
     
