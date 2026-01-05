@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { EtfForm } from "@/components/EtfForm";
 import { useCreateEtf } from "@/hooks/use-etfs";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Search, Plus, ExternalLink, SlidersHorizontal, ArrowRight, TrendingUp, Wallet, Globe, Loader2, Star, Lightbulb, Newspaper, Youtube, FileText, Link as LinkIcon, Trash2, Pencil, Scale, X } from "lucide-react";
+import { Search, Plus, ExternalLink, SlidersHorizontal, ArrowRight, TrendingUp, Wallet, Globe, Loader2, Star, Lightbulb, Newspaper, Youtube, FileText, Link as LinkIcon, Trash2, Pencil, Scale, X, BarChart3 } from "lucide-react";
 import { type InsertEtf, type HistoryPeriod } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -394,7 +394,7 @@ function CompareSection({ etfs }: { etfs: any[] }) {
      (e.code?.toLowerCase() ?? "").includes(searchTerm.toLowerCase()))
   );
 
-  // Fetch price history for selected ETFs
+  // Fetch price history for selected ETFs (for chart)
   const historyQueries = useQueries({
     queries: selectedIds.map(id => ({
       queryKey: ["/api/etfs", id, "history", selectedPeriod],
@@ -407,8 +407,84 @@ function CompareSection({ etfs }: { etfs: any[] }) {
     })),
   });
 
+  // Fetch all periods data for performance metrics table
+  const allPeriodsQueries = useQueries({
+    queries: selectedIds.flatMap(id => 
+      PERIODS.map(period => ({
+        queryKey: ["/api/etfs", id, "history", period.value, "metrics"],
+        queryFn: async () => {
+          const res = await fetch(`/api/etfs/${id}/history?period=${period.value}`);
+          if (!res.ok) throw new Error("Failed to fetch history");
+          const data = await res.json();
+          return { etfId: id, period: period.value, data };
+        },
+        enabled: selectedIds.length >= 2,
+      }))
+    ),
+  });
+
   const isLoadingHistory = historyQueries.some(q => q.isLoading);
   const hasHistoryData = historyQueries.every(q => q.data && q.data.length > 0);
+  const isLoadingMetrics = allPeriodsQueries.some(q => q.isLoading);
+
+  // Calculate performance metrics for each ETF
+  const performanceMetrics = useMemo(() => {
+    if (isLoadingMetrics || selectedIds.length < 2) return [];
+
+    const calculateMetrics = (history: any[]) => {
+      if (!history || history.length < 2) return null;
+      
+      const prices = history.map(h => parseFloat(h.closePrice));
+      const firstPrice = prices[0];
+      const lastPrice = prices[prices.length - 1];
+      
+      // Return calculation
+      const returnPct = ((lastPrice - firstPrice) / firstPrice) * 100;
+      
+      // Daily returns for Sharpe and MDD
+      const dailyReturns: number[] = [];
+      for (let i = 1; i < prices.length; i++) {
+        dailyReturns.push((prices[i] - prices[i-1]) / prices[i-1]);
+      }
+      
+      // Sharpe Ratio (annualized, assuming 252 trading days)
+      const avgReturn = dailyReturns.reduce((a, b) => a + b, 0) / dailyReturns.length;
+      const stdDev = Math.sqrt(dailyReturns.reduce((sum, r) => sum + Math.pow(r - avgReturn, 2), 0) / dailyReturns.length);
+      const sharpeRatio = stdDev > 0 ? (avgReturn / stdDev) * Math.sqrt(252) : 0;
+      
+      // MDD (Maximum Drawdown)
+      let peak = prices[0];
+      let maxDrawdown = 0;
+      for (const price of prices) {
+        if (price > peak) peak = price;
+        const drawdown = (peak - price) / peak;
+        if (drawdown > maxDrawdown) maxDrawdown = drawdown;
+      }
+      
+      return {
+        return: returnPct,
+        sharpe: sharpeRatio,
+        mdd: maxDrawdown * 100,
+      };
+    };
+
+    return selectedIds.map(etfId => {
+      const etf = etfs.find(e => e.id === etfId);
+      const metrics: Record<string, any> = { etfId, name: etf?.name || `ETF ${etfId}` };
+      
+      PERIODS.forEach(period => {
+        const query = allPeriodsQueries.find(q => 
+          q.data?.etfId === etfId && q.data?.period === period.value
+        );
+        if (query?.data?.data) {
+          const result = calculateMetrics(query.data.data);
+          metrics[period.value] = result;
+        }
+      });
+      
+      return metrics;
+    });
+  }, [allPeriodsQueries, selectedIds, etfs, isLoadingMetrics]);
 
   // Prepare chart data by merging history from all selected ETFs
   const chartData = useMemo(() => {
@@ -672,6 +748,110 @@ function CompareSection({ etfs }: { etfs: any[] }) {
             <p className="text-xs text-muted-foreground mt-4 text-center">
               * 성과는 기간 시작일 대비 가격 변화율(%)로 표시됩니다. 시뮬레이션 데이터일 수 있습니다.
             </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Performance Metrics Table */}
+      {selectedEtfs.length >= 2 && performanceMetrics.length > 0 && (
+        <Card>
+          <CardContent className="p-6">
+            <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+              <BarChart3 className="w-5 h-5 text-primary" />
+              기간별 성과 지표
+            </h3>
+            
+            {isLoadingMetrics ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                <span className="ml-2 text-muted-foreground">성과 지표 계산 중...</span>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[150px] bg-muted/30">ETF</TableHead>
+                      <TableHead className="text-center bg-muted/30">지표</TableHead>
+                      {PERIODS.map(period => (
+                        <TableHead key={period.value} className="text-center min-w-[100px]">
+                          {period.label}
+                        </TableHead>
+                      ))}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {performanceMetrics.map((etfMetrics, etfIdx) => (
+                      <>
+                        {/* Return row */}
+                        <TableRow key={`${etfMetrics.etfId}-return`}>
+                          <TableCell 
+                            rowSpan={3} 
+                            className="font-bold align-middle bg-muted/10"
+                            style={{ borderRight: '1px solid hsl(var(--border))' }}
+                          >
+                            <div className="flex items-center gap-2">
+                              <div 
+                                className="w-3 h-3 rounded-full" 
+                                style={{ backgroundColor: CHART_COLORS[etfIdx] }}
+                              />
+                              <span className="text-sm">{etfMetrics.name}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="font-medium text-center bg-muted/5">수익률</TableCell>
+                          {PERIODS.map(period => {
+                            const metrics = etfMetrics[period.value];
+                            const value = metrics?.return;
+                            return (
+                              <TableCell 
+                                key={period.value} 
+                                className={`text-center font-mono font-bold ${
+                                  value > 0 ? 'text-red-500' : value < 0 ? 'text-blue-500' : ''
+                                }`}
+                              >
+                                {value !== undefined ? `${value > 0 ? '+' : ''}${value.toFixed(2)}%` : '-'}
+                              </TableCell>
+                            );
+                          })}
+                        </TableRow>
+                        {/* Sharpe Ratio row */}
+                        <TableRow key={`${etfMetrics.etfId}-sharpe`}>
+                          <TableCell className="font-medium text-center bg-muted/5">Sharpe</TableCell>
+                          {PERIODS.map(period => {
+                            const metrics = etfMetrics[period.value];
+                            const value = metrics?.sharpe;
+                            return (
+                              <TableCell key={period.value} className="text-center font-mono">
+                                {value !== undefined ? value.toFixed(2) : '-'}
+                              </TableCell>
+                            );
+                          })}
+                        </TableRow>
+                        {/* MDD row */}
+                        <TableRow key={`${etfMetrics.etfId}-mdd`} className="border-b-2">
+                          <TableCell className="font-medium text-center bg-muted/5">MDD</TableCell>
+                          {PERIODS.map(period => {
+                            const metrics = etfMetrics[period.value];
+                            const value = metrics?.mdd;
+                            return (
+                              <TableCell key={period.value} className="text-center font-mono text-blue-500">
+                                {value !== undefined ? `-${value.toFixed(2)}%` : '-'}
+                              </TableCell>
+                            );
+                          })}
+                        </TableRow>
+                      </>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+            
+            <div className="mt-4 text-xs text-muted-foreground space-y-1">
+              <p>* <strong>수익률</strong>: 기간 시작일 대비 종료일 가격 변화율</p>
+              <p>* <strong>Sharpe Ratio</strong>: 위험 대비 수익률 (높을수록 좋음, 일반적으로 1 이상이면 양호)</p>
+              <p>* <strong>MDD</strong>: 최대낙폭 (Maximum Drawdown), 기간 중 고점 대비 최대 하락률</p>
+            </div>
           </CardContent>
         </Card>
       )}
