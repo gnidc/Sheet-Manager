@@ -66,7 +66,11 @@ async function buildAll() {
   console.log("Server build completed");
 
   console.log("building api/index...");
-  // api/index.ts를 빌드 - 모든 의존성을 번들링하여 Vercel에서 사용
+  // api/index.ts를 빌드 - 모든 로컬 파일(server/*, shared/*)은 번들에 포함
+  // npm 패키지는 external로 설정하여 node_modules에서 로드
+  // allowlist에 있는 패키지는 번들에 포함 (이미 번들링됨)
+  const apiExternals = allDeps.filter((dep) => !allowlist.includes(dep));
+  
   await esbuild({
     entryPoints: ["api/index.ts"],
     platform: "node",
@@ -77,7 +81,8 @@ async function buildAll() {
       "process.env.NODE_ENV": '"production"',
     },
     minify: true,
-    external: externals,
+    // npm 패키지만 external로 설정, 로컬 파일(server/*, shared/*)은 번들에 포함
+    external: apiExternals,
     logLevel: "warning", // chunk size 경고는 표시하되 info 레벨 로그는 줄임
   });
   console.log("API build completed");
