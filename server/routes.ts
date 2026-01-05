@@ -192,39 +192,70 @@ export async function registerRoutes(
         return;
       }
       
-      // Generate simulated historical data based on current price
+      // Generate simulated historical data based on ETF characteristics
       const basePrice = etf.currentPrice ? parseFloat(etf.currentPrice) : 10000;
       const periodDays: Record<string, number> = { "1M": 30, "3M": 90, "6M": 180, "1Y": 365 };
       const days = periodDays[period];
       
-      // Generate simulated price history with realistic movements
-      const history = [];
-      const now = new Date();
+      // Parse yield to determine expected annual return
+      let annualReturn = 0.05; // Default 5% annual return
+      if (etf.yield) {
+        const yieldMatch = etf.yield.match(/([\d.]+)/);
+        if (yieldMatch) {
+          annualReturn = parseFloat(yieldMatch[1]) / 100;
+        }
+      }
       
-      // Seed random based on ETF id for consistent results per ETF
+      // Calculate daily expected return based on period
+      const dailyReturn = annualReturn / 365;
+      
+      // Volatility based on ETF category (covered call typically lower volatility)
+      let volatility = 0.015; // 1.5% daily volatility as base
+      if (etf.mainCategory?.includes('커버드콜')) {
+        volatility = 0.008; // Lower volatility for covered call
+      } else if (etf.mainCategory?.includes('액티브')) {
+        volatility = 0.018; // Higher volatility for active
+      }
+      
+      // Seed random for consistent results per ETF
       const seedRandom = (seed: number, offset: number) => {
-        const x = Math.sin(seed + offset) * 10000;
+        const x = Math.sin(seed * 12.9898 + offset * 78.233) * 43758.5453;
         return x - Math.floor(x);
       };
       
-      // Calculate start price with some variation
-      let cumulativeChange = 0;
-      for (let i = days; i >= 0; i--) {
-        cumulativeChange += (seedRandom(etfId, i) * 0.02 - 0.01);
-      }
-      let currentPrice = basePrice / (1 + cumulativeChange);
+      // Generate price history starting from past
+      const history = [];
+      const now = new Date();
       
-      for (let i = days; i >= 0; i--) {
-        const date = new Date(now);
-        date.setDate(date.getDate() - i);
+      // Start price calculation: work backwards from current price
+      // Current price is at day 0, we calculate what price was "days" ago
+      let priceAtEnd = basePrice;
+      
+      // Generate path and then normalize to end at current price
+      const rawPrices: number[] = [];
+      let tempPrice = 100; // Start with normalized 100
+      
+      for (let i = 0; i <= days; i++) {
+        rawPrices.push(tempPrice);
         
-        // Add daily volatility
-        const dailyChange = seedRandom(etfId, i) * 0.02 - 0.01;
-        currentPrice = currentPrice * (1 + dailyChange);
+        // Random component with ETF-specific seed
+        const random = seedRandom(etfId * 1000, i) * 2 - 1; // -1 to 1
+        
+        // Add trend + random walk
+        const dailyChange = dailyReturn + (random * volatility);
+        tempPrice = tempPrice * (1 + dailyChange);
+      }
+      
+      // Scale prices so that the last value equals basePrice
+      const scaleFactor = basePrice / rawPrices[rawPrices.length - 1];
+      
+      for (let i = 0; i <= days; i++) {
+        const date = new Date(now);
+        date.setDate(date.getDate() - (days - i));
         
         history.push({
           date: date.toISOString(),
-          closePrice: currentPrice.toFixed(2)
+          closePrice: (rawPrices[i] * scaleFactor).toFixed(2)
         });
       }
       
