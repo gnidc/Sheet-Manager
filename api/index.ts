@@ -58,7 +58,7 @@ async function initializeApp() {
       res.status(status).json({ message });
     });
 
-    // 프로덕션에서는 정적 파일 서빙
+    // 프로덕션에서는 정적 파일 서빙 (API 경로 제외)
     if (process.env.NODE_ENV === "production") {
       serveStatic(app);
     }
