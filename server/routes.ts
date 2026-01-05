@@ -166,68 +166,56 @@ export async function registerRoutes(
     res.json(trends);
   });
 
-  // Naver Finance ETF scraping endpoint
+  // Naver Finance ETF API endpoint
   app.get("/api/naver-etf", async (req, res) => {
     try {
-      const category = (req.query.category as string) || "all";
-      
-      // Naver Finance ETF page URL
-      const url = "https://finance.naver.com/sise/etf.naver";
+      // Use Naver's official ETF API endpoint
+      const url = "https://finance.naver.com/api/sise/etfItemList.nhn";
       
       const response = await axios.get(url, {
+        params: {
+          etfType: 0,
+          targetColumn: "market_sum",
+          sortOrder: "desc",
+        },
         headers: {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-          "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+          "Referer": "https://finance.naver.com/sise/etf.naver",
+          "Accept": "application/json",
         },
-        timeout: 10000,
+        timeout: 15000,
       });
       
-      const $ = cheerio.load(response.data);
-      const etfList: any[] = [];
+      const jsonData = response.data;
+      const etfItems = jsonData?.result?.etfItemList || [];
       
-      // Parse the ETF table
-      $("table.type_1 tbody tr").each((index, element) => {
-        const $row = $(element);
-        const cells = $row.find("td");
+      const etfList = etfItems.map((item: any) => {
+        const risefall = item.risefall;
+        const isUp = risefall === "2" || risefall === "1";
+        const isDown = risefall === "4" || risefall === "5";
         
-        if (cells.length >= 8) {
-          const nameCell = $(cells[0]).find("a");
-          const name = nameCell.text().trim();
-          const href = nameCell.attr("href");
-          const code = href?.match(/code=(\d+)/)?.[1] || "";
-          
-          if (name && code) {
-            const currentPrice = $(cells[1]).text().trim().replace(/,/g, "");
-            const changeText = $(cells[2]).text().trim().replace(/,/g, "");
-            const changeRateText = $(cells[3]).text().trim();
-            const nav = $(cells[4]).text().trim().replace(/,/g, "");
-            const return3M = $(cells[5]).text().trim();
-            const volume = $(cells[6]).text().trim().replace(/,/g, "");
-            const tradingValue = $(cells[7]).text().trim().replace(/,/g, "");
-            const marketCap = cells.length > 8 ? $(cells[8]).text().trim().replace(/,/g, "") : "";
-            
-            // Determine if up or down
-            const isUp = $row.find(".tah.p11.red").length > 0 || changeRateText.startsWith("+");
-            const isDown = $row.find(".tah.p11.nv01").length > 0 || changeRateText.startsWith("-");
-            
-            etfList.push({
-              name,
-              code,
-              currentPrice: parseInt(currentPrice) || 0,
-              change: parseInt(changeText) || 0,
-              changeRate: changeRateText,
-              isUp,
-              isDown,
-              nav: parseInt(nav) || 0,
-              return3M,
-              volume: parseInt(volume) || 0,
-              tradingValue: parseInt(tradingValue) || 0,
-              marketCap: parseInt(marketCap) || 0,
-              naverLink: `https://finance.naver.com/item/main.naver?code=${code}`,
-            });
-          }
-        }
+        const changeRate = item.changeRate;
+        const threeMonthRate = item.threeMonthEarnRate;
+        
+        return {
+          name: item.itemname || "",
+          code: item.itemcode || "",
+          currentPrice: item.nowVal || 0,
+          change: item.changeVal || 0,
+          changeRate: (changeRate !== null && changeRate !== undefined) 
+            ? `${changeRate >= 0 ? '+' : ''}${Number(changeRate).toFixed(2)}%` 
+            : "-",
+          isUp,
+          isDown,
+          nav: item.nav || 0,
+          return3M: (threeMonthRate !== null && threeMonthRate !== undefined) 
+            ? `${threeMonthRate >= 0 ? '+' : ''}${Number(threeMonthRate).toFixed(2)}%` 
+            : "-",
+          volume: item.quant || 0,
+          tradingValue: item.amonut || 0,
+          marketCap: item.marketSum || 0,
+          naverLink: `https://finance.naver.com/item/main.naver?code=${item.itemcode}`,
+        };
       });
       
       res.json({
@@ -237,7 +225,7 @@ export async function registerRoutes(
         data: etfList,
       });
     } catch (err: any) {
-      console.error("Naver ETF scraping error:", err.message);
+      console.error("Naver ETF API error:", err.message);
       res.status(500).json({
         success: false,
         message: "Failed to fetch Naver ETF data",
