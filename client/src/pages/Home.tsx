@@ -431,33 +431,33 @@ function FavoriteSection({ etfs, onToggleFavorite, isAdmin }: { etfs: any[], onT
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {groupedByMcat[category].map((etf: any) => (
-              <Card key={etf.id} className="overflow-hidden hover:shadow-md transition-shadow">
-                <CardContent className="p-4">
-                  <div className="flex justify-between items-start mb-3">
-                    <StatusBadge variant="outline">{etf.subCategory}</StatusBadge>
-                    {isAdmin && (
-                      <Checkbox 
-                        checked={etf.isFavorite} 
-                        onCheckedChange={() => onToggleFavorite(etf)}
-                        data-testid={`checkbox-favorite-${etf.id}`}
-                      />
-                    )}
-                  </div>
-                  <Link href={`/etf/${etf.id}`}>
-                    <h4 className="font-bold text-base mb-1 truncate hover:text-primary hover:underline transition-colors cursor-pointer" data-testid={`link-fav-etf-name-${etf.id}`}>{etf.name}</h4>
-                  </Link>
-                  <p className="text-xs text-muted-foreground mb-3">{etf.code}</p>
-                  <div className="flex justify-between items-end gap-2">
-                    <div>
-                      <div className="text-xs text-muted-foreground">Yield</div>
-                      <div className="text-lg font-bold text-emerald-600 dark:text-emerald-400">{etf.yield || "-"}</div>
+              <Link key={etf.id} href={`/etf/${etf.id}`} data-testid={`link-fav-card-${etf.id}`}>
+                <Card className="overflow-hidden hover:shadow-md transition-shadow cursor-pointer h-full">
+                  <CardContent className="p-4">
+                    <div className="flex justify-between items-start mb-3">
+                      <StatusBadge variant="outline">{etf.subCategory}</StatusBadge>
+                      {isAdmin && (
+                        <div onClick={(e) => e.preventDefault()}>
+                          <Checkbox 
+                            checked={etf.isFavorite} 
+                            onCheckedChange={() => onToggleFavorite(etf)}
+                            data-testid={`checkbox-favorite-${etf.id}`}
+                          />
+                        </div>
+                      )}
                     </div>
-                    <Link href={`/etf/${etf.id}`}>
+                    <h4 className="font-bold text-base mb-1 truncate">{etf.name}</h4>
+                    <p className="text-xs text-muted-foreground mb-3">{etf.code}</p>
+                    <div className="flex justify-between items-end gap-2">
+                      <div>
+                        <div className="text-xs text-muted-foreground">Yield</div>
+                        <div className="text-lg font-bold text-emerald-600 dark:text-emerald-400">{etf.yield || "-"}</div>
+                      </div>
                       <Button size="sm" variant="outline">Details</Button>
-                    </Link>
-                  </div>
-                </CardContent>
-              </Card>
+                    </div>
+                  </CardContent>
+                </Card>
+              </Link>
             ))}
           </div>
         </div>
@@ -641,69 +641,71 @@ function EtfTrendsSection({ isAdmin }: { isAdmin: boolean }) {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {trends.map((trend) => (
-            <Card key={trend.id} className="overflow-hidden" data-testid={`card-trend-${trend.id}`}>
-              <CardContent className="p-0">
-                {trend.thumbnail && (
-                  <div className="aspect-video relative overflow-hidden bg-muted">
-                    <img 
-                      src={trend.thumbnail} 
-                      alt={trend.title}
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
-                )}
-                <div className="p-4">
-                  <div className="flex items-center justify-between gap-2 mb-2">
-                    <StatusBadge variant="outline" className="gap-1">
-                      {getSourceIcon(trend.sourceType)}
-                      {getSourceLabel(trend.sourceType)}
-                    </StatusBadge>
-                    <span className="text-xs text-muted-foreground">
-                      {new Date(trend.createdAt).toLocaleDateString('ko-KR')}
-                    </span>
-                  </div>
-                  <h4 className="font-bold text-base mb-2 line-clamp-2">{trend.title}</h4>
-                  {trend.comment && (
-                    <div className="text-sm text-muted-foreground whitespace-pre-wrap mb-3 line-clamp-5">
-                      {trend.comment}
+            <a 
+              key={trend.id} 
+              href={trend.url} 
+              target="_blank" 
+              rel="noopener noreferrer"
+              data-testid={`link-trend-card-${trend.id}`}
+            >
+              <Card className="overflow-hidden cursor-pointer hover:shadow-md transition-shadow h-full">
+                <CardContent className="p-0">
+                  {trend.thumbnail && (
+                    <div className="aspect-video relative overflow-hidden bg-muted">
+                      <img 
+                        src={trend.thumbnail} 
+                        alt={trend.title}
+                        className="w-full h-full object-cover"
+                      />
                     </div>
                   )}
-                  <div className="flex items-center justify-between gap-2">
-                    <a 
-                      href={trend.url} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                    >
+                  <div className="p-4">
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <StatusBadge variant="outline" className="gap-1">
+                        {getSourceIcon(trend.sourceType)}
+                        {getSourceLabel(trend.sourceType)}
+                      </StatusBadge>
+                      <span className="text-xs text-muted-foreground">
+                        {new Date(trend.createdAt).toLocaleDateString('ko-KR')}
+                      </span>
+                    </div>
+                    <h4 className="font-bold text-base mb-2 line-clamp-2">{trend.title}</h4>
+                    {trend.comment && (
+                      <div className="text-sm text-muted-foreground whitespace-pre-wrap mb-3 line-clamp-5">
+                        {trend.comment}
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between gap-2">
                       <Button variant="outline" size="sm">
                         <ExternalLink className="w-3 h-3 mr-1" />
                         원문 보기
                       </Button>
-                    </a>
-                    {isAdmin && (
-                      <div className="flex items-center gap-1">
-                        <Button 
-                          variant="ghost" 
-                          size="icon"
-                          onClick={() => handleEdit(trend)}
-                          data-testid={`button-edit-trend-${trend.id}`}
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </Button>
-                        <Button 
-                          variant="ghost" 
-                          size="icon"
-                          onClick={() => deleteTrend.mutate(trend.id)}
-                          disabled={deleteTrend.isPending}
-                          data-testid={`button-delete-trend-${trend.id}`}
-                        >
-                          <Trash2 className="w-4 h-4 text-destructive" />
-                        </Button>
-                      </div>
-                    )}
+                      {isAdmin && (
+                        <div className="flex items-center gap-1" onClick={(e) => e.preventDefault()}>
+                          <Button 
+                            variant="ghost" 
+                            size="icon"
+                            onClick={(e) => { e.stopPropagation(); handleEdit(trend); }}
+                            data-testid={`button-edit-trend-${trend.id}`}
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="icon"
+                            onClick={(e) => { e.stopPropagation(); deleteTrend.mutate(trend.id); }}
+                            disabled={deleteTrend.isPending}
+                            data-testid={`button-delete-trend-${trend.id}`}
+                          >
+                            <Trash2 className="w-4 h-4 text-destructive" />
+                          </Button>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            </a>
           ))}
         </div>
       )}
