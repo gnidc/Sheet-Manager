@@ -24,10 +24,31 @@ export function useEtfs(filters?: EtfFilters) {
   return useQuery({
     queryKey: [api.etfs.list.path, filters],
     queryFn: async () => {
-      const url = `${api.etfs.list.path}?${queryParams.toString()}`;
-      const res = await fetch(url, { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to fetch ETFs");
-      return api.etfs.list.responses[200].parse(await res.json());
+      try {
+        const url = `${api.etfs.list.path}?${queryParams.toString()}`;
+        const res = await fetch(url, { credentials: "include" });
+        
+        if (!res.ok) {
+          const errorText = await res.text();
+          let errorMessage = `Failed to fetch ETFs (${res.status})`;
+          try {
+            const errorJson = JSON.parse(errorText);
+            errorMessage = errorJson.message || errorMessage;
+          } catch {
+            if (errorText) errorMessage = errorText;
+          }
+          throw new Error(errorMessage);
+        }
+        
+        const data = await res.json();
+        return api.etfs.list.responses[200].parse(data);
+      } catch (error: any) {
+        console.error("Error fetching ETFs:", error);
+        if (error.name === "TypeError" && error.message.includes("fetch")) {
+          throw new Error("Network error: Unable to connect to server");
+        }
+        throw error;
+      }
     },
   });
 }

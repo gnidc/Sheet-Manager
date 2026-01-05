@@ -50,25 +50,32 @@ async function initializeApp() {
   if (initPromise) return initPromise;
 
   initPromise = (async () => {
-    await registerRoutes(httpServer, app);
+    try {
+      await registerRoutes(httpServer, app);
 
-    app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-      const status = err.status || err.statusCode || 500;
-      const message = err.message || "Internal Server Error";
-      res.status(status).json({ message });
-    });
+      app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+        console.error("Express error:", err);
+        const status = err.status || err.statusCode || 500;
+        const message = err.message || "Internal Server Error";
+        res.status(status).json({ message });
+      });
 
-    // 프로덕션에서는 정적 파일 서빙 (API 경로 제외)
-    if (process.env.NODE_ENV === "production") {
-      serveStatic(app);
+      // 프로덕션에서는 정적 파일 서빙 (API 경로 제외)
+      if (process.env.NODE_ENV === "production") {
+        serveStatic(app);
+      }
+
+      // serverless-http로 래핑
+      handler = serverless(app, {
+        binary: ["image/*", "application/pdf"],
+      });
+
+      appInitialized = true;
+      console.log("App initialized successfully");
+    } catch (error: any) {
+      console.error("Error initializing app:", error);
+      throw error;
     }
-
-    // serverless-http로 래핑
-    handler = serverless(app, {
-      binary: ["image/*", "application/pdf"],
-    });
-
-    appInitialized = true;
   })();
 
   return initPromise;
@@ -76,10 +83,19 @@ async function initializeApp() {
 
 // Vercel 서버리스 함수 핸들러
 export default async function (req: any, res: any) {
-  await initializeApp();
-  if (!handler) {
-    throw new Error("Handler not initialized");
+  try {
+    await initializeApp();
+    if (!handler) {
+      console.error("Handler not initialized");
+      return res.status(500).json({ message: "Handler not initialized" });
+    }
+    return handler(req, res);
+  } catch (error: any) {
+    console.error("Error in serverless handler:", error);
+    return res.status(500).json({ 
+      message: "Internal server error", 
+      error: process.env.NODE_ENV === "development" ? error.message : undefined 
+    });
   }
-  return handler(req, res);
 }
 
