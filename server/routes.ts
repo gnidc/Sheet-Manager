@@ -5,6 +5,7 @@ import { api } from "@shared/routes";
 import { z } from "zod";
 import axios from "axios";
 import bcrypt from "bcryptjs";
+import * as kisApi from "./kisApi";
 
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
 const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH;
@@ -184,7 +185,24 @@ export async function registerRoutes(
         return res.status(404).json({ message: "ETF not found" });
       }
       
-      // Check for real historical data first
+      // Try to fetch real data from Korea Investment API if configured
+      if (kisApi.isConfigured() && etf.code) {
+        try {
+          const kisData = await kisApi.getEtfDailyPrices(etf.code, period as any);
+          if (kisData.length > 0) {
+            console.log(`Using KIS API data for ${etf.code}: ${kisData.length} records`);
+            res.json(kisData.map(d => ({
+              date: new Date(d.date).toISOString(),
+              closePrice: d.closePrice
+            })));
+            return;
+          }
+        } catch (kisError) {
+          console.error("KIS API error, falling back to simulation:", kisError);
+        }
+      }
+      
+      // Check for cached historical data
       const realHistory = await storage.getEtfPriceHistory(etfId, period as any);
       
       if (realHistory.length > 0) {
@@ -226,10 +244,6 @@ export async function registerRoutes(
       // Generate price history starting from past
       const history = [];
       const now = new Date();
-      
-      // Start price calculation: work backwards from current price
-      // Current price is at day 0, we calculate what price was "days" ago
-      let priceAtEnd = basePrice;
       
       // Generate path and then normalize to end at current price
       const rawPrices: number[] = [];
