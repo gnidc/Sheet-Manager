@@ -4,6 +4,7 @@ config(); // Load .env file
 
 import express from "express";
 import session from "express-session";
+import MemoryStore from "memorystore";
 import { registerRoutes } from "../server/routes.js";
 import { serveStatic } from "../server/static.js";
 import { createServer } from "http";
@@ -34,7 +35,7 @@ app.use(
       maxAge: 24 * 60 * 60 * 1000,
       sameSite: "lax",
     },
-    store: new (require("memorystore"))(session)({
+    store: new (MemoryStore(session))({
       checkPeriod: 86400000, // 24 hours
     }),
   })
