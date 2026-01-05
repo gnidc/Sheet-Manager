@@ -2,13 +2,16 @@ import { db } from "./db";
 import {
   etfs,
   etfTrends,
+  etfPriceHistory,
   type Etf,
   type InsertEtf,
   type UpdateEtfRequest,
   type EtfTrend,
-  type InsertEtfTrend
+  type InsertEtfTrend,
+  type EtfPriceHistory,
+  type HistoryPeriod
 } from "@shared/schema";
-import { eq, ilike, and, desc } from "drizzle-orm";
+import { eq, ilike, and, desc, gte, sql } from "drizzle-orm";
 
 export interface IStorage {
   getEtfs(params?: { search?: string; mainCategory?: string; subCategory?: string; country?: string }): Promise<Etf[]>;
@@ -24,6 +27,9 @@ export interface IStorage {
   createEtfTrend(trend: InsertEtfTrend): Promise<EtfTrend>;
   updateEtfTrend(id: number, comment: string): Promise<EtfTrend>;
   deleteEtfTrend(id: number): Promise<void>;
+  
+  // Price history
+  getEtfPriceHistory(etfId: number, period: HistoryPeriod): Promise<EtfPriceHistory[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -104,6 +110,21 @@ export class DatabaseStorage implements IStorage {
 
   async deleteEtfTrend(id: number): Promise<void> {
     await db.delete(etfTrends).where(eq(etfTrends.id, id));
+  }
+
+  async getEtfPriceHistory(etfId: number, period: HistoryPeriod): Promise<EtfPriceHistory[]> {
+    const periodDays = { "1M": 30, "3M": 90, "6M": 180, "1Y": 365 };
+    const days = periodDays[period];
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    
+    return await db.select()
+      .from(etfPriceHistory)
+      .where(and(
+        eq(etfPriceHistory.etfId, etfId),
+        gte(etfPriceHistory.date, startDate)
+      ))
+      .orderBy(etfPriceHistory.date);
   }
 }
 

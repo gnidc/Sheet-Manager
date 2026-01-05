@@ -169,6 +169,72 @@ export async function registerRoutes(
     res.json(recommended);
   });
 
+  // Price history for performance charts
+  app.get("/api/etfs/:id/history", async (req, res) => {
+    try {
+      const etfId = Number(req.params.id);
+      const period = (req.query.period as string) || "1M";
+      
+      if (!["1M", "3M", "6M", "1Y"].includes(period)) {
+        return res.status(400).json({ message: "Invalid period. Use 1M, 3M, 6M, or 1Y" });
+      }
+      
+      const etf = await storage.getEtf(etfId);
+      if (!etf) {
+        return res.status(404).json({ message: "ETF not found" });
+      }
+      
+      // Check for real historical data first
+      const realHistory = await storage.getEtfPriceHistory(etfId, period as any);
+      
+      if (realHistory.length > 0) {
+        res.json(realHistory);
+        return;
+      }
+      
+      // Generate simulated historical data based on current price
+      const basePrice = etf.currentPrice ? parseFloat(etf.currentPrice) : 10000;
+      const periodDays: Record<string, number> = { "1M": 30, "3M": 90, "6M": 180, "1Y": 365 };
+      const days = periodDays[period];
+      
+      // Generate simulated price history with realistic movements
+      const history = [];
+      const now = new Date();
+      
+      // Seed random based on ETF id for consistent results per ETF
+      const seedRandom = (seed: number, offset: number) => {
+        const x = Math.sin(seed + offset) * 10000;
+        return x - Math.floor(x);
+      };
+      
+      // Calculate start price with some variation
+      let cumulativeChange = 0;
+      for (let i = days; i >= 0; i--) {
+        cumulativeChange += (seedRandom(etfId, i) * 0.02 - 0.01);
+      }
+      let currentPrice = basePrice / (1 + cumulativeChange);
+      
+      for (let i = days; i >= 0; i--) {
+        const date = new Date(now);
+        date.setDate(date.getDate() - i);
+        
+        // Add daily volatility
+        const dailyChange = seedRandom(etfId, i) * 0.02 - 0.01;
+        currentPrice = currentPrice * (1 + dailyChange);
+        
+        history.push({
+          date: date.toISOString(),
+          closePrice: currentPrice.toFixed(2)
+        });
+      }
+      
+      res.json(history);
+    } catch (err) {
+      console.error("Failed to get price history:", err);
+      res.status(500).json({ message: "Failed to get price history" });
+    }
+  });
+
   app.get("/api/etf-trends", async (req, res) => {
     try {
       const trends = await storage.getEtfTrends();

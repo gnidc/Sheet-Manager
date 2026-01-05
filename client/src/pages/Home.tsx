@@ -12,7 +12,7 @@ import { EtfForm } from "@/components/EtfForm";
 import { useCreateEtf } from "@/hooks/use-etfs";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Search, Plus, ExternalLink, SlidersHorizontal, ArrowRight, TrendingUp, Wallet, Globe, Loader2, Star, Lightbulb, Newspaper, Youtube, FileText, Link as LinkIcon, Trash2, Pencil, Scale, X } from "lucide-react";
-import { type InsertEtf } from "@shared/schema";
+import { type InsertEtf, type HistoryPeriod } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent } from "@/components/ui/card";
@@ -20,8 +20,11 @@ import { LoginDialog } from "@/components/LoginDialog";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueries } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { format } from "date-fns";
 
 export default function Home() {
   const [search, setSearch] = useState("");
@@ -370,9 +373,18 @@ export default function Home() {
   );
 }
 
+const CHART_COLORS = ["#2563eb", "#dc2626", "#16a34a"];
+const PERIODS: { value: HistoryPeriod; label: string }[] = [
+  { value: "1M", label: "1개월" },
+  { value: "3M", label: "3개월" },
+  { value: "6M", label: "6개월" },
+  { value: "1Y", label: "1년" },
+];
+
 function CompareSection({ etfs }: { etfs: any[] }) {
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
+  const [selectedPeriod, setSelectedPeriod] = useState<HistoryPeriod>("3M");
 
   const selectedEtfs = etfs.filter(e => selectedIds.includes(e.id));
   const filteredEtfs = etfs.filter(e => 
@@ -380,6 +392,47 @@ function CompareSection({ etfs }: { etfs: any[] }) {
     ((e.name?.toLowerCase() ?? "").includes(searchTerm.toLowerCase()) || 
      (e.code?.toLowerCase() ?? "").includes(searchTerm.toLowerCase()))
   );
+
+  // Fetch price history for selected ETFs
+  const historyQueries = useQueries({
+    queries: selectedIds.map(id => ({
+      queryKey: ["/api/etfs", id, "history", selectedPeriod],
+      queryFn: async () => {
+        const res = await fetch(`/api/etfs/${id}/history?period=${selectedPeriod}`);
+        if (!res.ok) throw new Error("Failed to fetch history");
+        return res.json();
+      },
+      enabled: selectedIds.length >= 2,
+    })),
+  });
+
+  const isLoadingHistory = historyQueries.some(q => q.isLoading);
+  const hasHistoryData = historyQueries.every(q => q.data && q.data.length > 0);
+
+  // Prepare chart data by merging history from all selected ETFs
+  const chartData = useMemo(() => {
+    if (!hasHistoryData || selectedIds.length < 2) return [];
+    
+    const allDates = new Map<string, any>();
+    
+    historyQueries.forEach((query, idx) => {
+      const etf = selectedEtfs[idx];
+      const history = query.data || [];
+      const firstPrice = history[0]?.closePrice ? parseFloat(history[0].closePrice) : 1;
+      
+      history.forEach((point: any) => {
+        const dateKey = format(new Date(point.date), "MM/dd");
+        const normalizedValue = ((parseFloat(point.closePrice) / firstPrice) - 1) * 100;
+        
+        if (!allDates.has(dateKey)) {
+          allDates.set(dateKey, { date: dateKey });
+        }
+        allDates.get(dateKey)[etf?.name || `ETF ${idx + 1}`] = normalizedValue.toFixed(2);
+      });
+    });
+    
+    return Array.from(allDates.values());
+  }, [historyQueries, selectedEtfs, hasHistoryData, selectedIds.length]);
 
   const handleSelect = (id: number) => {
     if (selectedIds.length < 3) {
@@ -535,6 +588,88 @@ function CompareSection({ etfs }: { etfs: any[] }) {
                 </TableBody>
               </Table>
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Performance Chart */}
+      {selectedEtfs.length >= 2 && (
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+              <h3 className="text-lg font-bold flex items-center gap-2">
+                <TrendingUp className="w-5 h-5 text-primary" />
+                기간별 성과 비교
+              </h3>
+              <div className="flex gap-2">
+                {PERIODS.map(period => (
+                  <Button
+                    key={period.value}
+                    variant={selectedPeriod === period.value ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setSelectedPeriod(period.value)}
+                    data-testid={`button-period-${period.value}`}
+                  >
+                    {period.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+            
+            {isLoadingHistory ? (
+              <div className="flex items-center justify-center h-[300px]">
+                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                <span className="ml-2 text-muted-foreground">데이터 로딩 중...</span>
+              </div>
+            ) : chartData.length > 0 ? (
+              <div className="h-[400px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                    <XAxis 
+                      dataKey="date" 
+                      tick={{ fontSize: 12 }}
+                      tickLine={false}
+                      interval="preserveStartEnd"
+                    />
+                    <YAxis 
+                      tick={{ fontSize: 12 }}
+                      tickLine={false}
+                      tickFormatter={(value) => `${value}%`}
+                      domain={['auto', 'auto']}
+                    />
+                    <Tooltip 
+                      contentStyle={{ 
+                        backgroundColor: 'hsl(var(--card))', 
+                        border: '1px solid hsl(var(--border))',
+                        borderRadius: '8px'
+                      }}
+                      formatter={(value: any) => [`${parseFloat(value).toFixed(2)}%`, '']}
+                    />
+                    <Legend />
+                    {selectedEtfs.map((etf, idx) => (
+                      <Line
+                        key={etf.id}
+                        type="monotone"
+                        dataKey={etf.name}
+                        stroke={CHART_COLORS[idx]}
+                        strokeWidth={2}
+                        dot={false}
+                        activeDot={{ r: 6 }}
+                      />
+                    ))}
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center h-[300px] text-muted-foreground">
+                차트 데이터를 불러올 수 없습니다.
+              </div>
+            )}
+            
+            <p className="text-xs text-muted-foreground mt-4 text-center">
+              * 성과는 기간 시작일 대비 가격 변화율(%)로 표시됩니다. 시뮬레이션 데이터일 수 있습니다.
+            </p>
           </CardContent>
         </Card>
       )}

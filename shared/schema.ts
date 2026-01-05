@@ -58,3 +58,19 @@ export const insertEtfTrendSchema = createInsertSchema(etfTrends).omit({ id: tru
 
 export type EtfTrend = typeof etfTrends.$inferSelect;
 export type InsertEtfTrend = z.infer<typeof insertEtfTrendSchema>;
+
+// Price history for performance charts
+export const etfPriceHistory = pgTable("etf_price_history", {
+  id: serial("id").primaryKey(),
+  etfId: integer("etf_id").notNull(),
+  date: timestamp("date").notNull(),
+  closePrice: numeric("close_price").notNull(),
+});
+
+export const insertEtfPriceHistorySchema = createInsertSchema(etfPriceHistory).omit({ id: true });
+
+export type EtfPriceHistory = typeof etfPriceHistory.$inferSelect;
+export type InsertEtfPriceHistory = z.infer<typeof insertEtfPriceHistorySchema>;
+
+// Period types for historical queries
+export type HistoryPeriod = "1M" | "3M" | "6M" | "1Y";
