@@ -83,7 +83,12 @@ async function buildAll() {
     minify: true,
     // npm 패키지만 external로 설정, 로컬 파일(server/*, shared/*)은 번들에 포함
     external: apiExternals,
-    logLevel: "warning", // chunk size 경고는 표시하되 info 레벨 로그는 줄임
+    // path alias 해결 (@shared/* -> shared/*)
+    alias: {
+      "@shared": "./shared",
+      "@": "./client/src",
+    },
+    logLevel: "info", // 빌드 과정 확인을 위해 info로 변경
   });
   console.log("API build completed");
   
