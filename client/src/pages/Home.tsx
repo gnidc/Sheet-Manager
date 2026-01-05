@@ -897,6 +897,7 @@ type SortOrder = "asc" | "desc";
 function TrendingSection() {
   const [sortKey, setSortKey] = useState<SortKey>("marketCap");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
+  const [excludeLeverage, setExcludeLeverage] = useState<boolean>(false);
   
   const { data: naverData, isLoading, error, refetch } = useQuery<{ success: boolean; data: NaverEtfData[]; timestamp: string }>({ 
     queryKey: ["/api/naver-etf"],
@@ -920,7 +921,12 @@ function TrendingSection() {
   const sortedData = useMemo(() => {
     if (!naverData?.data) return [];
     
-    const data = [...naverData.data];
+    let data = [...naverData.data];
+    
+    // Filter out leverage ETFs if enabled
+    if (excludeLeverage) {
+      data = data.filter(etf => !etf.name.includes("레버리지") && !etf.name.toLowerCase().includes("leverage") && !etf.name.includes("2X") && !etf.name.includes("3X"));
+    }
     
     data.sort((a, b) => {
       let aVal: number | string = 0;
@@ -973,7 +979,7 @@ function TrendingSection() {
     });
     
     return data;
-  }, [naverData?.data, sortKey, sortOrder]);
+  }, [naverData?.data, sortKey, sortOrder, excludeLeverage]);
 
   if (isLoading) {
     return (
@@ -1020,7 +1026,14 @@ function TrendingSection() {
               네이버 금융 ETF 시세
               <span className="text-sm font-normal text-muted-foreground">({sortedData.length}개)</span>
             </h3>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="flex items-center gap-2 cursor-pointer" data-testid="toggle-exclude-leverage">
+                <Checkbox 
+                  checked={excludeLeverage} 
+                  onCheckedChange={(checked) => setExcludeLeverage(checked === true)}
+                />
+                <span className="text-sm">레버리지 제외</span>
+              </label>
               <span className="text-xs text-muted-foreground">
                 업데이트: {naverData.timestamp ? new Date(naverData.timestamp).toLocaleTimeString('ko-KR') : '-'}
               </span>
