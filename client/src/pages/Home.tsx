@@ -875,32 +875,149 @@ function CompareSection({ etfs }: { etfs: any[] }) {
   );
 }
 
-function TrendingSection() {
-  const { data: trends, isLoading } = useQuery<any[]>({ queryKey: ["/api/trends"] });
+interface NaverEtfData {
+  name: string;
+  code: string;
+  currentPrice: number;
+  change: number;
+  changeRate: string;
+  isUp: boolean;
+  isDown: boolean;
+  nav: number;
+  return3M: string;
+  volume: number;
+  tradingValue: number;
+  marketCap: number;
+  naverLink: string;
+}
 
-  if (isLoading) return <div className="p-8 text-center">동향 분석 중...</div>;
+function TrendingSection() {
+  const { data: naverData, isLoading, error, refetch } = useQuery<{ success: boolean; data: NaverEtfData[]; timestamp: string }>({ 
+    queryKey: ["/api/naver-etf"],
+    refetchInterval: 60000,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="p-8 text-center">
+        <Loader2 className="w-8 h-8 animate-spin mx-auto text-primary" />
+        <p className="mt-2 text-muted-foreground">네이버 금융 ETF 데이터 로딩 중...</p>
+      </div>
+    );
+  }
+
+  if (error || !naverData?.success) {
+    return (
+      <div className="p-8 text-center">
+        <p className="text-destructive">데이터를 불러오는데 실패했습니다.</p>
+        <Button variant="outline" size="sm" className="mt-4" onClick={() => refetch()}>
+          다시 시도
+        </Button>
+      </div>
+    );
+  }
+
+  const etfList = naverData.data || [];
 
   return (
     <div className="space-y-6">
-      <div className="bg-white dark:bg-card rounded-xl border p-6">
-        <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-          <TrendingUp className="w-5 h-5 text-primary" />
-          실시간 인기 ETF
-        </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {trends?.map((etf) => (
-            <Link key={etf.id} href={`/etf/${etf.id}`}>
-              <div className="p-4 border rounded-lg hover:bg-muted/50 transition-colors cursor-pointer flex justify-between items-center">
-                <div>
-                  <div className="font-bold">{etf.name}</div>
-                  <div className="text-xs text-muted-foreground">{etf.code}</div>
-                </div>
-                <div className="text-primary font-mono font-bold">Score: {etf.trendScore}</div>
-              </div>
-            </Link>
-          ))}
-        </div>
-      </div>
+      <Card>
+        <CardContent className="p-6">
+          <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+            <h3 className="text-xl font-bold flex items-center gap-2">
+              <TrendingUp className="w-5 h-5 text-primary" />
+              네이버 금융 ETF 시세
+            </h3>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">
+                업데이트: {naverData.timestamp ? new Date(naverData.timestamp).toLocaleTimeString('ko-KR') : '-'}
+              </span>
+              <Button variant="ghost" size="icon" onClick={() => refetch()} data-testid="button-refresh-naver">
+                <ArrowRight className="w-4 h-4 rotate-180" />
+              </Button>
+              <a 
+                href="https://finance.naver.com/sise/etf.naver" 
+                target="_blank" 
+                rel="noopener noreferrer"
+              >
+                <Button variant="outline" size="sm" className="gap-1">
+                  <ExternalLink className="w-3 h-3" />
+                  네이버 금융
+                </Button>
+              </a>
+            </div>
+          </div>
+          
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="min-w-[200px]">종목명</TableHead>
+                  <TableHead className="text-right">현재가</TableHead>
+                  <TableHead className="text-right">전일비</TableHead>
+                  <TableHead className="text-right">등락률</TableHead>
+                  <TableHead className="text-right">NAV</TableHead>
+                  <TableHead className="text-right">3개월 수익률</TableHead>
+                  <TableHead className="text-right">거래량</TableHead>
+                  <TableHead className="text-right">거래대금(백만)</TableHead>
+                  <TableHead className="text-right">시가총액(억)</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {etfList.slice(0, 50).map((etf, idx) => (
+                  <TableRow key={etf.code} className="hover-elevate" data-testid={`row-naver-etf-${idx}`}>
+                    <TableCell>
+                      <a 
+                        href={etf.naverLink} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="hover:underline text-primary font-medium"
+                      >
+                        {etf.name}
+                      </a>
+                      <div className="text-xs text-muted-foreground">{etf.code}</div>
+                    </TableCell>
+                    <TableCell className="text-right font-mono">
+                      {etf.currentPrice.toLocaleString()}
+                    </TableCell>
+                    <TableCell className={`text-right font-mono ${etf.isUp ? 'text-red-500' : etf.isDown ? 'text-blue-500' : ''}`}>
+                      {etf.isUp ? '+' : etf.isDown ? '-' : ''}{Math.abs(etf.change).toLocaleString()}
+                    </TableCell>
+                    <TableCell className={`text-right font-mono font-bold ${etf.isUp ? 'text-red-500' : etf.isDown ? 'text-blue-500' : ''}`}>
+                      {etf.changeRate}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-muted-foreground">
+                      {etf.nav > 0 ? etf.nav.toLocaleString() : '-'}
+                    </TableCell>
+                    <TableCell className={`text-right font-mono ${etf.return3M.startsWith('+') ? 'text-red-500' : etf.return3M.startsWith('-') ? 'text-blue-500' : ''}`}>
+                      {etf.return3M || '-'}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-muted-foreground">
+                      {etf.volume.toLocaleString()}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-muted-foreground">
+                      {etf.tradingValue.toLocaleString()}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-muted-foreground">
+                      {etf.marketCap > 0 ? etf.marketCap.toLocaleString() : '-'}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          
+          {etfList.length === 0 && (
+            <div className="text-center py-8 text-muted-foreground">
+              ETF 데이터가 없습니다.
+            </div>
+          )}
+          
+          <p className="text-xs text-muted-foreground mt-4 text-center">
+            * 데이터 출처: 네이버 금융 (https://finance.naver.com/sise/etf.naver)
+          </p>
+        </CardContent>
+      </Card>
     </div>
   );
 }
