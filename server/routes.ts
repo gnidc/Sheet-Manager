@@ -1,11 +1,11 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import type { Server } from "http";
-import { storage } from "./storage";
+import { storage } from "./storage.js";
 import { api } from "@shared/routes";
 import { z } from "zod";
 import axios from "axios";
 import bcrypt from "bcryptjs";
-import * as kisApi from "./kisApi";
+import * as kisApi from "./kisApi.js";
 import * as cheerio from "cheerio";
 
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
