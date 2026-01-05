@@ -61,7 +61,7 @@ async function buildAll() {
     },
     minify: true,
     external: externals,
-    logLevel: "info",
+    logLevel: "warning", // chunk size 경고는 표시하되 info 레벨 로그는 줄임
   });
   console.log("Server build completed");
 
@@ -78,7 +78,7 @@ async function buildAll() {
     },
     minify: true,
     external: externals,
-    logLevel: "info",
+    logLevel: "warning", // chunk size 경고는 표시하되 info 레벨 로그는 줄임
   });
   console.log("API build completed");
   
