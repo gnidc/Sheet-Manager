@@ -93,7 +93,7 @@ async function buildAll() {
             "process.env.NODE_ENV": '"production"',
           },
           minify: false, // shared 파일들은 minify하지 않음
-          external: allDeps, // 모든 의존성은 external로 설정
+          // bundle: false일 때는 external 옵션을 사용할 수 없음
           logLevel: "warning",
         });
       }
