@@ -64,6 +64,23 @@ async function buildAll() {
     logLevel: "info",
   });
   console.log("Server build completed");
+
+  console.log("building api/index...");
+  // api/index.ts를 빌드 - 모든 의존성을 번들링하여 Vercel에서 사용
+  await esbuild({
+    entryPoints: ["api/index.ts"],
+    platform: "node",
+    bundle: true,
+    format: "esm",
+    outfile: "api/index.js",
+    define: {
+      "process.env.NODE_ENV": '"production"',
+    },
+    minify: true,
+    external: externals,
+    logLevel: "info",
+  });
+  console.log("API build completed");
   
   // Verify dist/public exists
   const { existsSync } = await import("fs");
