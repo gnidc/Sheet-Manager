@@ -7,7 +7,7 @@ import session from "express-session";
 import { registerRoutes } from "../server/routes";
 import { serveStatic } from "../server/static";
 import { createServer } from "http";
-import type { VercelRequest, VercelResponse } from "@vercel/node";
+import serverless from "serverless-http";
 
 const app = express();
 const httpServer = createServer(app);
@@ -43,9 +43,10 @@ app.use(
 // Express 앱 초기화 (비동기)
 let appInitialized = false;
 let initPromise: Promise<void> | null = null;
+let handler: ReturnType<typeof serverless> | null = null;
 
 async function initializeApp() {
-  if (appInitialized) return;
+  if (appInitialized && handler) return;
   if (initPromise) return initPromise;
 
   initPromise = (async () => {
@@ -62,6 +63,11 @@ async function initializeApp() {
       serveStatic(app);
     }
 
+    // serverless-http로 래핑
+    handler = serverless(app, {
+      binary: ["image/*", "application/pdf"],
+    });
+
     appInitialized = true;
   })();
 
@@ -69,14 +75,11 @@ async function initializeApp() {
 }
 
 // Vercel 서버리스 함수 핸들러
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function (req: any, res: any) {
   await initializeApp();
-  
-  // Vercel Request/Response를 Express Request/Response로 변환
-  return new Promise((resolve) => {
-    app(req as any, res as any, () => {
-      resolve(undefined);
-    });
-  });
+  if (!handler) {
+    throw new Error("Handler not initialized");
+  }
+  return handler(req, res);
 }
 
