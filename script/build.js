@@ -65,32 +65,9 @@ async function buildAll() {
   });
   console.log("Server build completed");
 
-  console.log("building api/index...");
-  // api/index.ts를 빌드 - 모든 로컬 파일(server/*, shared/*)은 번들에 포함
-  // npm 패키지는 external로 설정하여 node_modules에서 로드
-  // allowlist에 있는 패키지는 번들에 포함 (이미 번들링됨)
-  const apiExternals = allDeps.filter((dep) => !allowlist.includes(dep));
-  
-  await esbuild({
-    entryPoints: ["api/index.ts"],
-    platform: "node",
-    bundle: true,
-    format: "esm",
-    outfile: "api/index.js",
-    define: {
-      "process.env.NODE_ENV": '"production"',
-    },
-    minify: true,
-    // npm 패키지만 external로 설정, 로컬 파일(server/*, shared/*)은 번들에 포함
-    external: apiExternals,
-    // path alias 해결 (@shared/* -> shared/*)
-    alias: {
-      "@shared": "./shared",
-      "@": "./client/src",
-    },
-    logLevel: "info", // 빌드 과정 확인을 위해 info로 변경
-  });
-  console.log("API build completed");
+  // api/index.ts는 빌드하지 않고 TypeScript 그대로 사용
+  // Vercel이 자동으로 TypeScript를 컴파일하므로 소스 파일만 배포하면 됨
+  console.log("Skipping api/index.ts build - Vercel will compile TypeScript automatically");
   
   // Verify dist/public exists
   const { existsSync } = await import("fs");
