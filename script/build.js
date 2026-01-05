@@ -34,10 +34,13 @@ const allowlist = [
 ];
 
 async function buildAll() {
+  console.log("Starting build process...");
   await rm("dist", { recursive: true, force: true });
+  console.log("Cleaned dist directory");
 
   console.log("building client...");
   await viteBuild();
+  console.log("Client build completed");
 
   console.log("building server...");
   const pkg = JSON.parse(await readFile("package.json", "utf-8"));
@@ -60,6 +63,17 @@ async function buildAll() {
     external: externals,
     logLevel: "info",
   });
+  console.log("Server build completed");
+  
+  // Verify dist/public exists
+  const { existsSync } = await import("fs");
+  const distPublicPath = "dist/public";
+  if (existsSync(distPublicPath)) {
+    console.log(`✓ ${distPublicPath} directory exists`);
+  } else {
+    console.error(`✗ ${distPublicPath} directory not found!`);
+    process.exit(1);
+  }
 }
 
 buildAll().catch((err) => {
