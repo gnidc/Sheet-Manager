@@ -10,7 +10,7 @@ import {
   type InsertEtfTrend,
   type EtfPriceHistory,
   type HistoryPeriod
-} from "@shared/schema";
+} from "../shared/schema.js";
 import { eq, ilike, and, desc, gte, sql } from "drizzle-orm";
 
 export interface IStorage {
