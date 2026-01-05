@@ -891,11 +891,89 @@ interface NaverEtfData {
   naverLink: string;
 }
 
+type SortKey = "name" | "currentPrice" | "change" | "changeRate" | "nav" | "return3M" | "volume" | "tradingValue" | "marketCap";
+type SortOrder = "asc" | "desc";
+
 function TrendingSection() {
+  const [sortKey, setSortKey] = useState<SortKey>("marketCap");
+  const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
+  
   const { data: naverData, isLoading, error, refetch } = useQuery<{ success: boolean; data: NaverEtfData[]; timestamp: string }>({ 
     queryKey: ["/api/naver-etf"],
     refetchInterval: 60000,
   });
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+    } else {
+      setSortKey(key);
+      setSortOrder("desc");
+    }
+  };
+
+  const parsePercentage = (str: string): number => {
+    if (!str || str === "-") return 0;
+    return parseFloat(str.replace(/[+%]/g, "")) || 0;
+  };
+
+  const sortedData = useMemo(() => {
+    if (!naverData?.data) return [];
+    
+    const data = [...naverData.data];
+    
+    data.sort((a, b) => {
+      let aVal: number | string = 0;
+      let bVal: number | string = 0;
+      
+      switch (sortKey) {
+        case "name":
+          aVal = a.name;
+          bVal = b.name;
+          break;
+        case "currentPrice":
+          aVal = a.currentPrice;
+          bVal = b.currentPrice;
+          break;
+        case "change":
+          aVal = a.change;
+          bVal = b.change;
+          break;
+        case "changeRate":
+          aVal = parsePercentage(a.changeRate);
+          bVal = parsePercentage(b.changeRate);
+          break;
+        case "nav":
+          aVal = a.nav;
+          bVal = b.nav;
+          break;
+        case "return3M":
+          aVal = parsePercentage(a.return3M);
+          bVal = parsePercentage(b.return3M);
+          break;
+        case "volume":
+          aVal = a.volume;
+          bVal = b.volume;
+          break;
+        case "tradingValue":
+          aVal = a.tradingValue;
+          bVal = b.tradingValue;
+          break;
+        case "marketCap":
+          aVal = a.marketCap;
+          bVal = b.marketCap;
+          break;
+      }
+      
+      if (typeof aVal === "string" && typeof bVal === "string") {
+        return sortOrder === "asc" ? aVal.localeCompare(bVal, 'ko') : bVal.localeCompare(aVal, 'ko');
+      }
+      
+      return sortOrder === "asc" ? (aVal as number) - (bVal as number) : (bVal as number) - (aVal as number);
+    });
+    
+    return data;
+  }, [naverData?.data, sortKey, sortOrder]);
 
   if (isLoading) {
     return (
@@ -917,7 +995,20 @@ function TrendingSection() {
     );
   }
 
-  const etfList = naverData.data || [];
+  const SortHeader = ({ label, keyName, className = "" }: { label: string; keyName: SortKey; className?: string }) => (
+    <TableHead 
+      className={`cursor-pointer hover:bg-muted/50 select-none ${className}`}
+      onClick={() => handleSort(keyName)}
+      data-testid={`sort-${keyName}`}
+    >
+      <div className="flex items-center gap-1 justify-end">
+        <span>{label}</span>
+        {sortKey === keyName && (
+          <span className="text-primary">{sortOrder === "asc" ? "▲" : "▼"}</span>
+        )}
+      </div>
+    </TableHead>
+  );
 
   return (
     <div className="space-y-6">
@@ -927,6 +1018,7 @@ function TrendingSection() {
             <h3 className="text-xl font-bold flex items-center gap-2">
               <TrendingUp className="w-5 h-5 text-primary" />
               네이버 금융 ETF 시세
+              <span className="text-sm font-normal text-muted-foreground">({sortedData.length}개)</span>
             </h3>
             <div className="flex items-center gap-2">
               <span className="text-xs text-muted-foreground">
@@ -952,20 +1044,31 @@ function TrendingSection() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="min-w-[200px]">종목명</TableHead>
-                  <TableHead className="text-right">현재가</TableHead>
-                  <TableHead className="text-right">전일비</TableHead>
-                  <TableHead className="text-right">등락률</TableHead>
-                  <TableHead className="text-right">NAV</TableHead>
-                  <TableHead className="text-right">3개월 수익률</TableHead>
-                  <TableHead className="text-right">거래량</TableHead>
-                  <TableHead className="text-right">거래대금(백만)</TableHead>
-                  <TableHead className="text-right">시가총액(억)</TableHead>
+                  <TableHead 
+                    className="min-w-[200px] cursor-pointer hover:bg-muted/50 select-none"
+                    onClick={() => handleSort("name")}
+                    data-testid="sort-name"
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>종목명</span>
+                      {sortKey === "name" && (
+                        <span className="text-primary">{sortOrder === "asc" ? "▲" : "▼"}</span>
+                      )}
+                    </div>
+                  </TableHead>
+                  <SortHeader label="현재가" keyName="currentPrice" className="text-right" />
+                  <SortHeader label="전일비" keyName="change" className="text-right" />
+                  <SortHeader label="등락률" keyName="changeRate" className="text-right" />
+                  <SortHeader label="NAV" keyName="nav" className="text-right" />
+                  <SortHeader label="3개월 수익률" keyName="return3M" className="text-right" />
+                  <SortHeader label="거래량" keyName="volume" className="text-right" />
+                  <SortHeader label="거래대금(백만)" keyName="tradingValue" className="text-right" />
+                  <SortHeader label="시가총액(억)" keyName="marketCap" className="text-right" />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {etfList.slice(0, 50).map((etf, idx) => (
-                  <TableRow key={etf.code} className="hover-elevate" data-testid={`row-naver-etf-${idx}`}>
+                {sortedData.slice(0, 100).map((etf, idx) => (
+                  <TableRow key={etf.code} data-testid={`row-naver-etf-${idx}`}>
                     <TableCell>
                       <a 
                         href={etf.naverLink} 
@@ -1007,14 +1110,14 @@ function TrendingSection() {
             </Table>
           </div>
           
-          {etfList.length === 0 && (
+          {sortedData.length === 0 && (
             <div className="text-center py-8 text-muted-foreground">
               ETF 데이터가 없습니다.
             </div>
           )}
           
           <p className="text-xs text-muted-foreground mt-4 text-center">
-            * 데이터 출처: 네이버 금융 (https://finance.naver.com/sise/etf.naver)
+            * 데이터 출처: 네이버 금융 | 컬럼 클릭시 정렬
           </p>
         </CardContent>
       </Card>

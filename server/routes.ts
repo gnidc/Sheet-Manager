@@ -182,11 +182,23 @@ export async function registerRoutes(
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
           "Referer": "https://finance.naver.com/sise/etf.naver",
           "Accept": "application/json",
+          "Accept-Charset": "utf-8",
         },
         timeout: 15000,
+        responseType: "arraybuffer",
+        responseEncoding: "binary",
       });
       
-      const jsonData = response.data;
+      // Try decoding as EUC-KR first, then UTF-8
+      let decodedData: string;
+      try {
+        const decoder = new TextDecoder("euc-kr");
+        decodedData = decoder.decode(response.data);
+      } catch {
+        const decoder = new TextDecoder("utf-8");
+        decodedData = decoder.decode(response.data);
+      }
+      const jsonData = JSON.parse(decodedData);
       const etfItems = jsonData?.result?.etfItemList || [];
       
       const etfList = etfItems.map((item: any) => {
