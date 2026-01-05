@@ -297,9 +297,11 @@ export default function Home() {
                           <TableCell className="text-xs">{etf.subCategory}</TableCell>
                           <TableCell>
                             <div className="flex flex-col">
-                              <span className="font-semibold text-foreground group-hover:text-primary transition-colors">
-                                {etf.name}
-                              </span>
+                              <Link href={`/etf/${etf.id}`}>
+                                <span className="font-semibold text-foreground hover:text-primary hover:underline transition-colors cursor-pointer" data-testid={`link-etf-name-${etf.id}`}>
+                                  {etf.name}
+                                </span>
+                              </Link>
                               <span className="text-[10px] text-muted-foreground">{etf.country} | {etf.generation}</span>
                             </div>
                           </TableCell>
@@ -441,7 +443,9 @@ function FavoriteSection({ etfs, onToggleFavorite, isAdmin }: { etfs: any[], onT
                       />
                     )}
                   </div>
-                  <h4 className="font-bold text-base mb-1 truncate">{etf.name}</h4>
+                  <Link href={`/etf/${etf.id}`}>
+                    <h4 className="font-bold text-base mb-1 truncate hover:text-primary hover:underline transition-colors cursor-pointer" data-testid={`link-fav-etf-name-${etf.id}`}>{etf.name}</h4>
+                  </Link>
                   <p className="text-xs text-muted-foreground mb-3">{etf.code}</p>
                   <div className="flex justify-between items-end gap-2">
                     <div>
