@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { EtfForm } from "@/components/EtfForm";
 import { useCreateEtf } from "@/hooks/use-etfs";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Search, Plus, ExternalLink, SlidersHorizontal, ArrowRight, TrendingUp, Wallet, Globe, Loader2, Star, Lightbulb, Newspaper, Youtube, FileText, Link as LinkIcon, Trash2, Pencil } from "lucide-react";
+import { Search, Plus, ExternalLink, SlidersHorizontal, ArrowRight, TrendingUp, Wallet, Globe, Loader2, Star, Lightbulb, Newspaper, Youtube, FileText, Link as LinkIcon, Trash2, Pencil, Scale, X } from "lucide-react";
 import { type InsertEtf } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -131,8 +131,12 @@ export default function Home() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <Tabs defaultValue="all" className="space-y-8">
-          <TabsList className="grid w-full grid-cols-5 max-w-2xl mx-auto">
+          <TabsList className="grid w-full grid-cols-6 max-w-3xl mx-auto">
             <TabsTrigger value="all">Tracked ETFs</TabsTrigger>
+            <TabsTrigger value="compare" className="gap-2">
+              <Scale className="h-4 w-4" />
+              Compare
+            </TabsTrigger>
             <TabsTrigger value="trends">Markets</TabsTrigger>
             <TabsTrigger value="strategies">Strategies</TabsTrigger>
             <TabsTrigger value="favorites" className="gap-2">
@@ -341,6 +345,10 @@ export default function Home() {
             </div>
           </TabsContent>
 
+          <TabsContent value="compare">
+            <CompareSection etfs={etfs || []} />
+          </TabsContent>
+
           <TabsContent value="trends">
             <TrendingSection />
           </TabsContent>
@@ -358,6 +366,194 @@ export default function Home() {
           </TabsContent>
         </Tabs>
       </main>
+    </div>
+  );
+}
+
+function CompareSection({ etfs }: { etfs: any[] }) {
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [searchTerm, setSearchTerm] = useState("");
+
+  const selectedEtfs = etfs.filter(e => selectedIds.includes(e.id));
+  const filteredEtfs = etfs.filter(e => 
+    !selectedIds.includes(e.id) && 
+    ((e.name?.toLowerCase() ?? "").includes(searchTerm.toLowerCase()) || 
+     (e.code?.toLowerCase() ?? "").includes(searchTerm.toLowerCase()))
+  );
+
+  const handleSelect = (id: number) => {
+    if (selectedIds.length < 3) {
+      setSelectedIds([...selectedIds, id]);
+      setSearchTerm("");
+    }
+  };
+
+  const handleRemove = (id: number) => {
+    setSelectedIds(selectedIds.filter(i => i !== id));
+  };
+
+  const handleReset = () => {
+    setSelectedIds([]);
+    setSearchTerm("");
+  };
+
+  const compareRows = [
+    { label: "종목코드", key: "code" },
+    { label: "M.Category", key: "mainCategory" },
+    { label: "S.Category", key: "subCategory" },
+    { label: "수익률 (Yield)", key: "yield", highlight: true },
+    { label: "수수료 (Fee)", key: "fee" },
+    { label: "배당주기", key: "dividendCycle" },
+    { label: "시가총액", key: "marketCap" },
+    { label: "현재가", key: "currentPrice", format: (v: string) => v ? `${parseFloat(v).toLocaleString()}원` : "-" },
+    { label: "국가", key: "country" },
+    { label: "세대", key: "generation" },
+    { label: "기초자산", key: "underlyingAsset" },
+    { label: "운용사", key: "issuer" },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardContent className="p-6">
+          <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+            <Scale className="w-5 h-5 text-primary" />
+            ETF 비교 (최대 3개)
+          </h3>
+          
+          {/* Selected ETFs */}
+          <div className="flex flex-wrap gap-2 mb-4">
+            {selectedEtfs.map(etf => (
+              <StatusBadge 
+                key={etf.id} 
+                variant="secondary" 
+                className="gap-2 py-2 px-3"
+              >
+                <span className="font-medium">{etf.name}</span>
+                <span className="text-muted-foreground text-xs">({etf.code})</span>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-4 w-4 ml-1"
+                  onClick={() => handleRemove(etf.id)}
+                >
+                  <X className="w-3 h-3" />
+                </Button>
+              </StatusBadge>
+            ))}
+            {selectedIds.length === 0 && (
+              <span className="text-muted-foreground text-sm">ETF를 선택해주세요</span>
+            )}
+          </div>
+
+          {/* Search & Select */}
+          {selectedIds.length < 3 && (
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground w-4 h-4" />
+              <Input
+                placeholder="ETF 이름 또는 코드로 검색..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-9"
+                data-testid="input-compare-search"
+              />
+              {searchTerm && filteredEtfs.length > 0 && (
+                <div className="absolute z-10 w-full mt-1 bg-background border rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                  {filteredEtfs.slice(0, 10).map(etf => (
+                    <div
+                      key={etf.id}
+                      className="p-3 hover:bg-muted cursor-pointer flex justify-between items-center"
+                      onClick={() => handleSelect(etf.id)}
+                      data-testid={`option-compare-${etf.id}`}
+                    >
+                      <div>
+                        <div className="font-medium">{etf.name}</div>
+                        <div className="text-xs text-muted-foreground">{etf.code} | {etf.mainCategory}</div>
+                      </div>
+                      <Plus className="w-4 h-4 text-muted-foreground" />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Reset Button */}
+          {selectedIds.length > 0 && (
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={handleReset} 
+              className="mt-4"
+              data-testid="button-reset-compare"
+            >
+              초기화
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Comparison Table */}
+      {selectedEtfs.length >= 2 && (
+        <Card>
+          <CardContent className="p-6">
+            <h3 className="text-lg font-bold mb-4">비교 결과</h3>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[150px] bg-muted/30">항목</TableHead>
+                    {selectedEtfs.map(etf => (
+                      <TableHead key={etf.id} className="min-w-[200px] text-center">
+                        <Link href={`/etf/${etf.id}`}>
+                          <span className="font-bold text-primary hover:underline cursor-pointer">
+                            {etf.name}
+                          </span>
+                        </Link>
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {compareRows.map(row => (
+                    <TableRow key={row.key}>
+                      <TableCell className="font-medium bg-muted/20">{row.label}</TableCell>
+                      {selectedEtfs.map(etf => {
+                        const value = etf[row.key];
+                        const displayValue = row.format ? row.format(value) : (value || "-");
+                        return (
+                          <TableCell 
+                            key={etf.id} 
+                            className={`text-center ${row.highlight ? 'font-bold text-emerald-600 dark:text-emerald-400 text-lg' : ''}`}
+                          >
+                            {displayValue}
+                          </TableCell>
+                        );
+                      })}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {selectedEtfs.length === 1 && (
+        <div className="p-8 text-center border-2 border-dashed rounded-xl">
+          <Scale className="w-12 h-12 mx-auto text-muted-foreground/30 mb-4" />
+          <h3 className="text-lg font-semibold">1개 더 선택해주세요</h3>
+          <p className="text-muted-foreground">비교하려면 최소 2개 ETF를 선택해야 합니다.</p>
+        </div>
+      )}
+
+      {selectedEtfs.length === 0 && (
+        <div className="p-12 text-center border-2 border-dashed rounded-xl">
+          <Scale className="w-12 h-12 mx-auto text-muted-foreground/30 mb-4" />
+          <h3 className="text-lg font-semibold">ETF를 선택하여 비교해보세요</h3>
+          <p className="text-muted-foreground">최대 3개 ETF를 선택하여 수익률, 수수료, 배당주기 등을 나란히 비교할 수 있습니다.</p>
+        </div>
+      )}
     </div>
   );
 }
