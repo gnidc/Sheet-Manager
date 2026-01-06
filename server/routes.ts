@@ -536,17 +536,17 @@ export async function registerRoutes(
     }, 60000); // Every minute
   }
 
-  // Vercel에서는 초기화 시 DB 조회를 건너뛰어 빠른 시작
+  // Vercel에서는 초기화 시 DB 조회와 시딩을 완전히 건너뛰어 빠른 시작
   // 실제 요청 시에만 DB 조회 수행
-  let existingEtfs: any[] = [];
   if (process.env.NODE_ENV !== "production" || !process.env.VERCEL) {
-    existingEtfs = await storage.getEtfs();
+    // 로컬 개발 환경에서만 초기 DB 조회 및 시딩 수행
+    const existingEtfs = await storage.getEtfs();
+    if (existingEtfs.length < 50) {
+      console.log(`Database has only ${existingEtfs.length} ETFs, force seeding...`);
+      await seedDatabase(true);
+    }
   } else {
-    console.log("Skipping initial DB query in Vercel - will query on first request");
-  }
-  if (existingEtfs.length < 50) {
-    console.log(`Database has only ${existingEtfs.length} ETFs, force seeding...`);
-    await seedDatabase(true);
+    console.log("Skipping initial DB query and seeding in Vercel - will query on first request");
   }
 
   return httpServer;
