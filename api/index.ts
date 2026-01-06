@@ -158,6 +158,22 @@ export default async function (req: any, res: any) {
       } else {
         console.log(`Request completed - init: ${initTime}ms, handler: ${handlerTime}ms, total: ${totalTime}ms`);
       }
+      
+      // Vercel 서버리스 환경에서는 요청 완료 후 연결 풀 정리
+      // 다음 요청에서 새로운 연결을 생성하도록 함
+      if (process.env.VERCEL && process.env.NODE_ENV === "production") {
+        // 비동기로 연결 풀 정리 (요청 응답을 블로킹하지 않음)
+        setImmediate(async () => {
+          try {
+            const { resetPool } = await import("../server/db.js");
+            resetPool();
+            console.log("Database pool reset after request completion");
+          } catch (err) {
+            // 연결 풀 정리 실패는 무시 (다음 요청에서 재시도)
+            console.warn("Failed to reset pool:", err);
+          }
+        });
+      }
     } catch (timeoutError: any) {
       if (timeoutError.message === "Handler execution timeout") {
         console.error(`Handler timeout after ${Date.now() - handlerStart}ms`);
