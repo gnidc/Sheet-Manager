@@ -538,24 +538,36 @@ export async function registerRoutes(
   });
 
   // Background task to periodically update scores and recommendations
-  setInterval(async () => {
-    try {
-      const all = await storage.getEtfs();
-      for (const etf of all) {
-        // Randomly update scores for demo trends
-        const newScore = Math.floor(Math.random() * 100);
-        const shouldRecommend = newScore > 85;
-        await storage.updateEtf(etf.id, { 
-          trendScore: newScore.toString(),
-          isRecommended: shouldRecommend 
-        });
+  // Vercel serverless 환경에서는 setInterval을 사용하지 않음
+  // Serverless 함수는 요청이 끝나면 종료되므로 백그라운드 작업이 실행되지 않음
+  // 이 기능은 로컬 개발 환경에서만 실행
+  if (process.env.NODE_ENV !== "production" || !process.env.VERCEL) {
+    setInterval(async () => {
+      try {
+        const all = await storage.getEtfs();
+        for (const etf of all) {
+          // Randomly update scores for demo trends
+          const newScore = Math.floor(Math.random() * 100);
+          const shouldRecommend = newScore > 85;
+          await storage.updateEtf(etf.id, { 
+            trendScore: newScore.toString(),
+            isRecommended: shouldRecommend 
+          });
+        }
+      } catch (e) {
+        console.error("Failed background update", e);
       }
-    } catch (e) {
-      console.error("Failed background update", e);
-    }
-  }, 60000); // Every minute
+    }, 60000); // Every minute
+  }
 
-  const existingEtfs = await storage.getEtfs();
+  // Vercel에서는 초기화 시 DB 조회를 건너뛰어 빠른 시작
+  // 실제 요청 시에만 DB 조회 수행
+  let existingEtfs: any[] = [];
+  if (process.env.NODE_ENV !== "production" || !process.env.VERCEL) {
+    existingEtfs = await storage.getEtfs();
+  } else {
+    console.log("Skipping initial DB query in Vercel - will query on first request");
+  }
   if (existingEtfs.length < 50) {
     console.log(`Database has only ${existingEtfs.length} ETFs, force seeding...`);
     await seedDatabase(true);
