@@ -69,9 +69,21 @@ let _db: ReturnType<typeof drizzle> | null = null;
 // Pool 재설정 함수 (연결 에러 시 사용)
 export function resetPool() {
   if (_pool) {
-    _pool.end().catch((err) => {
-      console.error("Error closing pool:", err);
-    });
+    // Vercel 환경에서는 즉시 종료 (타임아웃 방지)
+    const isVercel = !!process.env.VERCEL;
+    if (isVercel) {
+      // Vercel에서는 모든 연결을 즉시 종료
+      _pool.end().then(() => {
+        console.log("Pool closed in Vercel environment");
+      }).catch((err) => {
+        console.error("Error closing pool:", err);
+      });
+    } else {
+      // 로컬 환경에서는 graceful shutdown
+      _pool.end().catch((err) => {
+        console.error("Error closing pool:", err);
+      });
+    }
   }
   _pool = null;
   _db = null;
@@ -85,19 +97,19 @@ export function getPool(): pg.Pool {
     // Vercel serverless 환경에 최적화된 Pool 설정
     const isVercel = !!process.env.VERCEL;
     
-    _pool = new Pool({
-      connectionString,
-      // Serverless 환경에서는 연결 수를 제한
-      max: isVercel ? 1 : 10, // Vercel에서는 최대 1개 연결 (serverless 제약)
-      min: 0, // Serverless에서는 최소 연결 수를 0으로 설정 (필요할 때만 연결)
-      idleTimeoutMillis: isVercel ? 2000 : 30000, // Vercel에서는 2초로 단축 (더 빠른 정리)
-      connectionTimeoutMillis: isVercel ? 1000 : 5000, // Vercel에서는 1초로 단축 (더 빠른 실패)
-      // SSL 설정 (Supabase는 SSL이 필요할 수 있음)
-      ssl: isVercel ? { rejectUnauthorized: false } : undefined,
-      // Keep-alive 설정으로 연결 유지
-      keepAlive: true,
-      keepAliveInitialDelayMillis: 0, // 즉시 시작
-    });
+            _pool = new Pool({
+              connectionString,
+              // Serverless 환경에서는 연결 수를 제한
+              max: isVercel ? 1 : 10, // Vercel에서는 최대 1개 연결 (serverless 제약)
+              min: 0, // Serverless에서는 최소 연결 수를 0으로 설정 (필요할 때만 연결)
+              idleTimeoutMillis: isVercel ? 1000 : 30000, // Vercel에서는 1초로 단축 (매우 빠른 정리)
+              connectionTimeoutMillis: isVercel ? 1000 : 5000, // Vercel에서는 1초로 단축 (더 빠른 실패)
+              // SSL 설정 (Supabase는 SSL이 필요할 수 있음)
+              ssl: isVercel ? { rejectUnauthorized: false } : undefined,
+              // Vercel에서는 keep-alive 비활성화 (연결을 빠르게 정리)
+              keepAlive: !isVercel, // Vercel에서는 keep-alive 비활성화
+              keepAliveInitialDelayMillis: isVercel ? 0 : 0, // Vercel에서는 사용 안 함
+            });
     
     // Pool 에러 핸들링 - 연결이 끊어졌을 때 재연결
     _pool.on('error', (err: any) => {

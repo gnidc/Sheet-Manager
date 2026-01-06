@@ -159,15 +159,16 @@ export default async function (req: any, res: any) {
         console.log(`Request completed - init: ${initTime}ms, handler: ${handlerTime}ms, total: ${totalTime}ms`);
       }
       
-      // Vercel 서버리스 환경에서는 요청 완료 후 연결 풀 정리
-      // 다음 요청에서 새로운 연결을 생성하도록 함
+      // Vercel 서버리스 환경에서는 요청 완료 후 즉시 연결 풀 정리
+      // 함수 종료 전에 연결을 명시적으로 종료하여 타임아웃 방지
       if (process.env.VERCEL && process.env.NODE_ENV === "production") {
-        // 비동기로 연결 풀 정리 (요청 응답을 블로킹하지 않음)
-        setImmediate(async () => {
+        // 요청이 완료되면 즉시 연결 풀 정리
+        // 응답이 전송된 후 실행되도록 함
+        res.on('finish', async () => {
           try {
             const { resetPool } = await import("../server/db.js");
             resetPool();
-            console.log("Database pool reset after request completion");
+            console.log("Database pool reset after response sent (Vercel)");
           } catch (err) {
             // 연결 풀 정리 실패는 무시 (다음 요청에서 재시도)
             console.warn("Failed to reset pool:", err);
