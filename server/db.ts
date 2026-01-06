@@ -66,6 +66,18 @@ function getDatabaseUrl(): string {
 let _pool: pg.Pool | null = null;
 let _db: ReturnType<typeof drizzle> | null = null;
 
+// Pool 재설정 함수 (연결 에러 시 사용)
+export function resetPool() {
+  if (_pool) {
+    _pool.end().catch((err) => {
+      console.error("Error closing pool:", err);
+    });
+  }
+  _pool = null;
+  _db = null;
+  console.log("Pool reset - will create new connection on next request");
+}
+
 export function getPool(): pg.Pool {
   if (!_pool) {
     const connectionString = getDatabaseUrl();
@@ -77,21 +89,39 @@ export function getPool(): pg.Pool {
       connectionString,
       // Serverless 환경에서는 연결 수를 제한
       max: isVercel ? 1 : 10, // Vercel에서는 최대 1개 연결 (serverless 제약)
-      idleTimeoutMillis: isVercel ? 10000 : 30000, // Vercel에서는 10초로 단축
-      connectionTimeoutMillis: isVercel ? 3000 : 5000, // Vercel에서는 3초로 단축 (빠른 실패)
+      min: 0, // Serverless에서는 최소 연결 수를 0으로 설정 (필요할 때만 연결)
+      idleTimeoutMillis: isVercel ? 5000 : 30000, // Vercel에서는 5초로 단축 (빠른 정리)
+      connectionTimeoutMillis: isVercel ? 2000 : 5000, // Vercel에서는 2초로 단축 (빠른 실패)
       // SSL 설정 (Supabase는 SSL이 필요할 수 있음)
       ssl: isVercel ? { rejectUnauthorized: false } : undefined,
       // Keep-alive 설정으로 연결 유지
       keepAlive: true,
-      keepAliveInitialDelayMillis: 10000,
+      keepAliveInitialDelayMillis: 0, // 즉시 시작
     });
     
-    // Pool 에러 핸들링
+    // Pool 에러 핸들링 - 연결이 끊어졌을 때 재연결
     _pool.on('error', (err) => {
       console.error('Unexpected error on idle client', err);
+      // 연결이 끊어졌을 때 Pool을 재설정
+      if (err.code === 'ECONNRESET' || err.code === 'EPIPE' || err.message?.includes('Connection terminated')) {
+        console.log('Connection error detected, resetting pool...');
+        _pool = null;
+        _db = null;
+      }
     });
     
-    console.log(`Database pool created (max: ${isVercel ? 1 : 10}, Vercel: ${isVercel})`);
+    // 연결 종료 시 Pool 정리
+    _pool.on('connect', (client) => {
+      client.on('error', (err) => {
+        console.error('Client error:', err);
+      });
+      
+      client.on('end', () => {
+        console.log('Client connection ended');
+      });
+    });
+    
+    console.log(`Database pool created (max: ${isVercel ? 1 : 10}, min: 0, Vercel: ${isVercel})`);
   }
   return _pool;
 }

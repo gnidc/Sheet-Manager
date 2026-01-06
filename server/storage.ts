@@ -34,45 +34,80 @@ export interface IStorage {
 
 export class DatabaseStorage implements IStorage {
   async getEtfs(params?: { search?: string; mainCategory?: string; subCategory?: string; country?: string }): Promise<Etf[]> {
-    try {
-      console.log("getEtfs called with params:", params);
-      
-      const conditions = [];
-      
-      if (params?.search) {
-        conditions.push(ilike(etfs.name, `%${params.search}%`));
-      }
-      
-      if (params?.mainCategory) {
-        conditions.push(eq(etfs.mainCategory, params.mainCategory));
-      }
+    const maxRetries = 3;
+    let lastError: any;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        if (attempt > 1) {
+          console.log(`getEtfs retry attempt ${attempt}/${maxRetries}`);
+          // 재시도 전에 짧은 대기
+          await new Promise(resolve => setTimeout(resolve, 100 * attempt));
+        }
+        
+        const conditions = [];
+        
+        if (params?.search) {
+          conditions.push(ilike(etfs.name, `%${params.search}%`));
+        }
+        
+        if (params?.mainCategory) {
+          conditions.push(eq(etfs.mainCategory, params.mainCategory));
+        }
 
-      if (params?.subCategory) {
-        conditions.push(eq(etfs.subCategory, params.subCategory));
-      }
+        if (params?.subCategory) {
+          conditions.push(eq(etfs.subCategory, params.subCategory));
+        }
 
-      if (params?.country) {
-        conditions.push(eq(etfs.country, params.country));
-      }
+        if (params?.country) {
+          conditions.push(eq(etfs.country, params.country));
+        }
 
-      const query = db.select().from(etfs);
-      
-      // conditions가 비어있지 않을 때만 where 절 추가
-      let result;
-      if (conditions.length > 0) {
-        result = await query.where(and(...conditions));
-      } else {
-        result = await query;
+        const query = db.select().from(etfs);
+        
+        // conditions가 비어있지 않을 때만 where 절 추가
+        let result;
+        if (conditions.length > 0) {
+          result = await query.where(and(...conditions));
+        } else {
+          result = await query;
+        }
+        
+        console.log(`getEtfs returning ${result.length} ETFs`);
+        return result;
+      } catch (error: any) {
+        lastError = error;
+        console.error(`Error in getEtfs (attempt ${attempt}/${maxRetries}):`, error.message);
+        
+        // 연결 관련 에러인 경우 재시도
+        const isConnectionError = 
+          error.code === 'ECONNRESET' ||
+          error.code === 'EPIPE' ||
+          error.code === 'ETIMEDOUT' ||
+          error.code === 'ENOTFOUND' ||
+          error.message?.includes('Connection terminated') ||
+          error.message?.includes('timeout') ||
+          error.message?.includes('Connection closed');
+        
+        if (isConnectionError && attempt < maxRetries) {
+          console.log(`Connection error detected, will retry...`);
+          // Pool 재설정
+          const { resetPool } = await import("./db.js");
+          resetPool();
+          // 다음 시도에서 새로운 연결을 시도하도록 함
+          continue;
+        }
+        
+        // 재시도할 수 없는 에러이거나 최대 재시도 횟수에 도달한 경우
+        if (attempt === maxRetries) {
+          console.error("Error in getEtfs (final):", error);
+          console.error("Error stack:", error.stack);
+          throw error;
+        }
       }
-      
-      console.log(`getEtfs returning ${result.length} ETFs`);
-      return result;
-    } catch (error: any) {
-      console.error("Error in getEtfs:", error);
-      console.error("Error message:", error.message);
-      console.error("Error stack:", error.stack);
-      throw error;
     }
+    
+    throw lastError;
   }
 
   async getEtf(id: number): Promise<Etf | undefined> {
