@@ -23,6 +23,31 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   
+  // 헬스체크 엔드포인트
+  app.get("/api/health", async (req, res) => {
+    try {
+      const dbStart = Date.now();
+      // 간단한 DB 쿼리로 연결 확인
+      await storage.getEtfs({});
+      const dbTime = Date.now() - dbStart;
+      
+      res.json({
+        status: "ok",
+        database: "connected",
+        dbQueryTime: `${dbTime}ms`,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error: any) {
+      console.error("Health check failed:", error);
+      res.status(503).json({
+        status: "error",
+        database: "disconnected",
+        error: error.message,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  });
+
   app.post("/api/auth/login", async (req, res) => {
     const { username, password } = req.body;
     
@@ -105,26 +130,53 @@ export async function registerRoutes(
   });
 
   app.get(api.etfs.list.path, async (req, res) => {
+    const startTime = Date.now();
     try {
       const search = req.query.search as string | undefined;
       const mainCategory = req.query.mainCategory as string | undefined;
       const subCategory = req.query.subCategory as string | undefined;
       const country = req.query.country as string | undefined;
       
-      console.log("GET /api/etfs - params:", { search, mainCategory, subCategory, country });
+      console.log(`[${new Date().toISOString()}] GET /api/etfs - params:`, { search, mainCategory, subCategory, country });
       
+      const queryStart = Date.now();
       const etfs = await storage.getEtfs({ search, mainCategory, subCategory, country });
+      const queryTime = Date.now() - queryStart;
       
-      console.log("GET /api/etfs - result count:", etfs.length);
+      console.log(`[${new Date().toISOString()}] GET /api/etfs - result count: ${etfs.length}, query time: ${queryTime}ms`);
+      
+      const totalTime = Date.now() - startTime;
+      console.log(`[${new Date().toISOString()}] GET /api/etfs - total time: ${totalTime}ms`);
       
       res.json(etfs);
     } catch (error: any) {
-      console.error("Error in GET /api/etfs:", error);
-      res.status(500).json({ 
-        message: "Failed to fetch ETFs", 
-        error: error.message,
-        stack: process.env.NODE_ENV === "development" ? error.stack : undefined
+      const totalTime = Date.now() - startTime;
+      console.error(`[${new Date().toISOString()}] Error in GET /api/etfs (after ${totalTime}ms):`, error);
+      console.error("Error details:", {
+        message: error.message,
+        code: error.code,
+        name: error.name,
+        stack: error.stack?.split('\n').slice(0, 5).join('\n')
       });
+      
+      // 더 자세한 에러 정보 제공
+      const errorResponse: any = {
+        message: "Failed to fetch ETFs",
+        error: error.message || "Unknown error",
+      };
+      
+      // 개발 환경이나 특정 에러의 경우 더 자세한 정보 제공
+      if (process.env.NODE_ENV === "development" || error.code) {
+        errorResponse.code = error.code;
+        errorResponse.name = error.name;
+      }
+      
+      // 타임아웃 에러인 경우 명확히 표시
+      if (error.code === 'ETIMEDOUT' || error.message?.includes('timeout')) {
+        errorResponse.message = "Database connection timeout. Please try again.";
+      }
+      
+      res.status(500).json(errorResponse);
     }
   });
 
