@@ -35,6 +35,8 @@ export interface IStorage {
 export class DatabaseStorage implements IStorage {
   async getEtfs(params?: { search?: string; mainCategory?: string; subCategory?: string; country?: string }): Promise<Etf[]> {
     try {
+      console.log("getEtfs called with params:", params);
+      
       const conditions = [];
       
       if (params?.search) {
@@ -56,13 +58,19 @@ export class DatabaseStorage implements IStorage {
       const query = db.select().from(etfs);
       
       // conditions가 비어있지 않을 때만 where 절 추가
+      let result;
       if (conditions.length > 0) {
-        return await query.where(and(...conditions));
+        result = await query.where(and(...conditions));
       } else {
-        return await query;
+        result = await query;
       }
-    } catch (error) {
+      
+      console.log(`getEtfs returning ${result.length} ETFs`);
+      return result;
+    } catch (error: any) {
       console.error("Error in getEtfs:", error);
+      console.error("Error message:", error.message);
+      console.error("Error stack:", error.stack);
       throw error;
     }
   }

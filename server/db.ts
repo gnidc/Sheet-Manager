@@ -69,7 +69,26 @@ let _db: ReturnType<typeof drizzle> | null = null;
 export function getPool(): pg.Pool {
   if (!_pool) {
     const connectionString = getDatabaseUrl();
-    _pool = new Pool({ connectionString });
+    
+    // Vercel serverless 환경에 최적화된 Pool 설정
+    const isVercel = !!process.env.VERCEL;
+    
+    _pool = new Pool({
+      connectionString,
+      // Serverless 환경에서는 연결 수를 제한
+      max: isVercel ? 1 : 10, // Vercel에서는 최대 1개 연결 (serverless 제약)
+      idleTimeoutMillis: isVercel ? 10000 : 30000, // Vercel에서는 10초로 단축
+      connectionTimeoutMillis: 5000, // 연결 타임아웃 5초
+      // SSL 설정 (Supabase는 SSL이 필요할 수 있음)
+      ssl: isVercel ? { rejectUnauthorized: false } : undefined,
+    });
+    
+    // Pool 에러 핸들링
+    _pool.on('error', (err) => {
+      console.error('Unexpected error on idle client', err);
+    });
+    
+    console.log(`Database pool created (max: ${isVercel ? 1 : 10}, Vercel: ${isVercel})`);
   }
   return _pool;
 }
