@@ -84,15 +84,27 @@ async function initializeApp() {
 
 // Vercel 서버리스 함수 핸들러
 export default async function (req: any, res: any) {
+  // 타임아웃 설정: 25초 (Vercel의 기본 타임아웃은 10초이지만, 프로 계정은 더 길 수 있음)
+  const timeout = setTimeout(() => {
+    console.error("Request timeout - taking too long to initialize");
+    if (!res.headersSent) {
+      res.status(504).json({ message: "Gateway timeout" });
+    }
+  }, 25000);
+
   try {
     await initializeApp();
+    clearTimeout(timeout);
+    
     if (!handler) {
       console.error("Handler not initialized");
       return res.status(500).json({ message: "Handler not initialized" });
     }
     return handler(req, res);
   } catch (error: any) {
+    clearTimeout(timeout);
     console.error("Error in serverless handler:", error);
+    console.error("Error stack:", error.stack);
     return res.status(500).json({ 
       message: "Internal server error", 
       error: process.env.NODE_ENV === "development" ? error.message : undefined 

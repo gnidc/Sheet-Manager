@@ -78,9 +78,12 @@ export function getPool(): pg.Pool {
       // Serverless 환경에서는 연결 수를 제한
       max: isVercel ? 1 : 10, // Vercel에서는 최대 1개 연결 (serverless 제약)
       idleTimeoutMillis: isVercel ? 10000 : 30000, // Vercel에서는 10초로 단축
-      connectionTimeoutMillis: 5000, // 연결 타임아웃 5초
+      connectionTimeoutMillis: isVercel ? 3000 : 5000, // Vercel에서는 3초로 단축 (빠른 실패)
       // SSL 설정 (Supabase는 SSL이 필요할 수 있음)
       ssl: isVercel ? { rejectUnauthorized: false } : undefined,
+      // Keep-alive 설정으로 연결 유지
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10000,
     });
     
     // Pool 에러 핸들링
@@ -100,6 +103,30 @@ export function getDb() {
   return _db;
 }
 
-// 기존 코드와의 호환성을 위해 export (지연 초기화)
-export const pool = getPool();
-export const db = getDb();
+// 기존 코드와의 호환성을 위해 export (완전 지연 초기화)
+// 모듈 레벨에서 즉시 실행하지 않고, 실제 사용 시점에 초기화
+// Proxy를 사용하여 속성 접근 시에만 초기화
+const poolProxy = new Proxy({} as pg.Pool, {
+  get(_target, prop, _receiver) {
+    const pool = getPool();
+    const value = (pool as any)[prop];
+    if (typeof value === 'function') {
+      return value.bind(pool);
+    }
+    return value;
+  }
+});
+
+const dbProxy = new Proxy({} as ReturnType<typeof drizzle>, {
+  get(_target, prop, _receiver) {
+    const db = getDb();
+    const value = (db as any)[prop];
+    if (typeof value === 'function') {
+      return value.bind(db);
+    }
+    return value;
+  }
+});
+
+export const pool = poolProxy;
+export const db = dbProxy;
