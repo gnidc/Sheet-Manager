@@ -538,21 +538,32 @@ export async function registerRoutes(
 
   // Vercel에서는 초기화 시 DB 조회와 시딩을 완전히 건너뛰어 빠른 시작
   // 실제 요청 시에만 DB 조회 수행
-  if (process.env.NODE_ENV !== "production" || !process.env.VERCEL) {
+  const isVercel = !!process.env.VERCEL;
+  const isProduction = process.env.NODE_ENV === "production";
+  
+  if (isVercel && isProduction) {
+    // Vercel 프로덕션 환경에서는 초기화 시 DB 조회와 시딩을 완전히 건너뛰기
+    console.log("Vercel production environment detected - skipping initial DB query and seeding");
+  } else {
     // 로컬 개발 환경에서만 초기 DB 조회 및 시딩 수행
+    console.log("Local development environment - checking database and seeding if needed");
     const existingEtfs = await storage.getEtfs();
     if (existingEtfs.length < 50) {
       console.log(`Database has only ${existingEtfs.length} ETFs, force seeding...`);
       await seedDatabase(true);
     }
-  } else {
-    console.log("Skipping initial DB query and seeding in Vercel - will query on first request");
   }
 
   return httpServer;
 }
 
 async function seedDatabase(force: boolean = false) {
+  // Vercel 프로덕션 환경에서는 시딩을 수행하지 않음
+  if (process.env.VERCEL && process.env.NODE_ENV === "production") {
+    console.log("Skipping seedDatabase in Vercel production environment");
+    return;
+  }
+  
   const existing = await storage.getEtfs();
   if (existing.length === 0 || (force && existing.length < 50)) {
     if (force) {
