@@ -23,12 +23,15 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   
-  // 헬스체크 엔드포인트
+  // 헬스체크 엔드포인트 (가벼운 DB 연결 확인만)
   app.get("/api/health", async (req, res) => {
     try {
       const dbStart = Date.now();
-      // 간단한 DB 쿼리로 연결 확인
-      await storage.getEtfs({});
+      // 매우 가벼운 쿼리로 연결만 확인 (LIMIT 1 사용)
+      const { db } = await import("./db.js");
+      const { sql } = await import("drizzle-orm");
+      // 단순히 연결 테스트만 수행
+      await db.execute(sql`SELECT 1 as test`);
       const dbTime = Date.now() - dbStart;
       
       res.json({

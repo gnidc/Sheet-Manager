@@ -101,47 +101,91 @@ async function initializeApp() {
 export default async function (req: any, res: any) {
   const startTime = Date.now();
   
-  // Vercel의 타임아웃은 10초 (Hobby), 60초 (Pro)이지만 안전하게 8초로 설정
-  const TIMEOUT_MS = 8000;
+  // Vercel의 타임아웃은 10초 (Hobby), 60초 (Pro)이지만 안전하게 9초로 설정
+  // 초기화는 빠르게 완료되어야 하므로 타임아웃을 조금 늘림
+  const TIMEOUT_MS = 9000;
+  let timeoutCleared = false;
   const timeout = setTimeout(() => {
-    console.error(`Request timeout after ${TIMEOUT_MS}ms - taking too long to initialize`);
-    if (!res.headersSent) {
-      res.status(504).json({ message: "Gateway timeout" });
+    if (!timeoutCleared && !res.headersSent) {
+      console.error(`Request timeout after ${TIMEOUT_MS}ms`);
+      res.status(504).json({ 
+        message: "Gateway timeout",
+        hint: "The server is taking too long to respond. Please try again."
+      });
     }
   }, TIMEOUT_MS);
 
   try {
-    // 초기화 시작
+    // 초기화 시작 (빠르게 완료되어야 함)
     const initStart = Date.now();
     await initializeApp();
     const initTime = Date.now() - initStart;
-    console.log(`App initialization took ${initTime}ms`);
     
+    if (initTime > 2000) {
+      console.warn(`Slow initialization: ${initTime}ms (should be < 2000ms)`);
+    } else {
+      console.log(`App initialization took ${initTime}ms`);
+    }
+    
+    timeoutCleared = true;
     clearTimeout(timeout);
     
     if (!handler) {
       console.error("Handler not initialized");
-      return res.status(500).json({ message: "Handler not initialized" });
+      if (!res.headersSent) {
+        return res.status(500).json({ message: "Handler not initialized" });
+      }
+      return;
     }
     
-    // handler 실행
+    // handler 실행 (비동기로 실행하되 타임아웃은 handler 내부에서 처리)
     const handlerStart = Date.now();
-    const result = await handler(req, res);
-    const handlerTime = Date.now() - handlerStart;
-    const totalTime = Date.now() - startTime;
     
-    console.log(`Request completed - init: ${initTime}ms, handler: ${handlerTime}ms, total: ${totalTime}ms`);
+    // Promise.race를 사용하여 handler 실행을 모니터링
+    const handlerPromise = handler(req, res);
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error("Handler execution timeout")), 8000);
+    });
     
-    return result;
+    try {
+      await Promise.race([handlerPromise, timeoutPromise]);
+      const handlerTime = Date.now() - handlerStart;
+      const totalTime = Date.now() - startTime;
+      
+      if (totalTime > 5000) {
+        console.warn(`Slow request: total ${totalTime}ms, handler ${handlerTime}ms`);
+      } else {
+        console.log(`Request completed - init: ${initTime}ms, handler: ${handlerTime}ms, total: ${totalTime}ms`);
+      }
+    } catch (timeoutError: any) {
+      if (timeoutError.message === "Handler execution timeout") {
+        console.error(`Handler timeout after ${Date.now() - handlerStart}ms`);
+        if (!res.headersSent) {
+          res.status(504).json({ message: "Request processing timeout" });
+        }
+      } else {
+        throw timeoutError;
+      }
+    }
+    
+    return handlerPromise;
   } catch (error: any) {
+    timeoutCleared = true;
     clearTimeout(timeout);
     const totalTime = Date.now() - startTime;
     console.error(`Error in serverless handler (after ${totalTime}ms):`, error);
-    console.error("Error stack:", error.stack);
-    return res.status(500).json({ 
-      message: "Internal server error", 
-      error: process.env.NODE_ENV === "development" ? error.message : undefined 
+    console.error("Error details:", {
+      message: error.message,
+      code: error.code,
+      name: error.name,
     });
+    
+    if (!res.headersSent) {
+      return res.status(500).json({ 
+        message: "Internal server error", 
+        error: process.env.NODE_ENV === "development" ? error.message : undefined 
+      });
+    }
   }
 }
 
