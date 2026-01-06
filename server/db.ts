@@ -100,7 +100,7 @@ export function getPool(): pg.Pool {
     });
     
     // Pool 에러 핸들링 - 연결이 끊어졌을 때 재연결
-    _pool.on('error', (err) => {
+    _pool.on('error', (err: any) => {
       console.error('Unexpected error on idle client', err);
       // 연결이 끊어졌을 때 Pool을 재설정
       if (err.code === 'ECONNRESET' || err.code === 'EPIPE' || err.message?.includes('Connection terminated')) {

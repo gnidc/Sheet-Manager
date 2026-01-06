@@ -9,7 +9,10 @@
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
     "db:push": "drizzle-kit push",
-    "db:reseed": "tsx scripts/reseed-from-excel.ts"
+    "db:reseed": "tsx scripts/reseed-from-excel.ts",
+    "db:add-active": "tsx scripts/add-active-etfs.ts",
+    "db:add-passive": "tsx scripts/add-passive-etfs.ts",
+    "db:add-domestic": "tsx scripts/add-domestic-etfs.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
