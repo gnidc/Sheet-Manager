@@ -34,15 +34,16 @@ export interface IStorage {
 
 export class DatabaseStorage implements IStorage {
   async getEtfs(params?: { search?: string; mainCategory?: string; subCategory?: string; country?: string }): Promise<Etf[]> {
-    const maxRetries = 3;
+    const maxRetries = 2; // 재시도 횟수 감소 (3 -> 2)
     let lastError: any;
+    const queryStart = Date.now();
     
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         if (attempt > 1) {
           console.log(`getEtfs retry attempt ${attempt}/${maxRetries}`);
-          // 재시도 전에 짧은 대기
-          await new Promise(resolve => setTimeout(resolve, 100 * attempt));
+          // 재시도 전에 짧은 대기 (더 짧게)
+          await new Promise(resolve => setTimeout(resolve, 50 * attempt));
         }
         
         const conditions = [];
@@ -73,7 +74,13 @@ export class DatabaseStorage implements IStorage {
           result = await query;
         }
         
-        console.log(`getEtfs returning ${result.length} ETFs`);
+        const queryTime = Date.now() - queryStart;
+        console.log(`getEtfs returning ${result.length} ETFs in ${queryTime}ms`);
+        
+        if (queryTime > 3000) {
+          console.warn(`Slow query detected: ${queryTime}ms (should be < 3000ms)`);
+        }
+        
         return result;
       } catch (error: any) {
         lastError = error;

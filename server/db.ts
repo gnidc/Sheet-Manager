@@ -90,8 +90,8 @@ export function getPool(): pg.Pool {
       // Serverless 환경에서는 연결 수를 제한
       max: isVercel ? 1 : 10, // Vercel에서는 최대 1개 연결 (serverless 제약)
       min: 0, // Serverless에서는 최소 연결 수를 0으로 설정 (필요할 때만 연결)
-      idleTimeoutMillis: isVercel ? 3000 : 30000, // Vercel에서는 3초로 단축 (더 빠른 정리)
-      connectionTimeoutMillis: isVercel ? 1500 : 5000, // Vercel에서는 1.5초로 단축 (더 빠른 실패)
+      idleTimeoutMillis: isVercel ? 2000 : 30000, // Vercel에서는 2초로 단축 (더 빠른 정리)
+      connectionTimeoutMillis: isVercel ? 1000 : 5000, // Vercel에서는 1초로 단축 (더 빠른 실패)
       // SSL 설정 (Supabase는 SSL이 필요할 수 있음)
       ssl: isVercel ? { rejectUnauthorized: false } : undefined,
       // Keep-alive 설정으로 연결 유지

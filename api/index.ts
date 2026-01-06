@@ -101,9 +101,9 @@ async function initializeApp() {
 export default async function (req: any, res: any) {
   const startTime = Date.now();
   
-  // Vercel의 타임아웃은 10초 (Hobby), 60초 (Pro)이지만 안전하게 9초로 설정
-  // 초기화는 빠르게 완료되어야 하므로 타임아웃을 조금 늘림
-  const TIMEOUT_MS = 9000;
+  // Vercel의 타임아웃은 10초 (Hobby), 60초 (Pro)이지만 안전하게 8초로 설정
+  // 초기화와 첫 요청이 빠르게 완료되어야 함
+  const TIMEOUT_MS = 8000;
   let timeoutCleared = false;
   const timeout = setTimeout(() => {
     if (!timeoutCleared && !res.headersSent) {
@@ -143,8 +143,9 @@ export default async function (req: any, res: any) {
     
     // Promise.race를 사용하여 handler 실행을 모니터링
     const handlerPromise = handler(req, res);
+    const handlerTimeout = 7000; // handler 실행 타임아웃 (초기화 시간 제외)
     const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error("Handler execution timeout")), 8000);
+      setTimeout(() => reject(new Error("Handler execution timeout")), handlerTimeout);
     });
     
     try {
