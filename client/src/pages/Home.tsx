@@ -144,7 +144,7 @@ export default function Home() {
             <TabsTrigger value="strategies">Strategies</TabsTrigger>
             <TabsTrigger value="favorites" className="gap-2">
               <Lightbulb className="h-4 w-4 text-yellow-500" />
-              추천ETF
+              관심(추천)ETF
             </TabsTrigger>
             <TabsTrigger value="etf-trends" className="gap-2">
               <Newspaper className="h-4 w-4" />
