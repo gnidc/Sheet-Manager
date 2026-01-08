@@ -26,7 +26,7 @@ app.use(express.urlencoded({ extended: false }));
 app.set("trust proxy", 1);
 
 // Vercel에서는 메모리 스토어 사용 (서버리스 환경)
-// Vercel 서버리스에서는 checkPeriod를 매우 크게 설정하여 백그라운드 작업 최소화
+// Vercel 서버리스에서는 checkPeriod를 비활성화하여 백그라운드 작업 방지
 const isVercel = !!process.env.VERCEL;
 app.use(
   session({
@@ -39,11 +39,11 @@ app.use(
       maxAge: 24 * 60 * 60 * 1000,
       sameSite: "lax",
     },
-    store: new (MemoryStore(session))({
-      // Vercel에서는 checkPeriod를 매우 크게 설정하여 백그라운드 작업 방지
-      // 서버리스 환경에서는 세션이 함수 종료 시 자동으로 정리되므로 주기적 체크 불필요
-      checkPeriod: isVercel ? 86400000 * 365 : 86400000, // Vercel: 1년, 로컬: 24시간
-    }),
+    store: isVercel 
+      ? undefined // Vercel에서는 MemoryStore를 사용하지 않음 (메모리만 사용)
+      : new (MemoryStore(session))({
+          checkPeriod: 86400000, // 로컬: 24시간
+        }),
   })
 );
 
@@ -197,19 +197,11 @@ export default async function (req: any, res: any) {
         }
       });
       
-      // handlerPromise가 완료되면 확인
+      // handlerPromise가 완료되면 즉시 resolve
+      // serverless-http는 응답이 완료되면 Promise를 resolve함
       handlerPromise.then(() => {
-        // 응답이 이미 전송되었는지 확인
-        if (res.finished || res.headersSent) {
-          resolveOnce();
-        } else {
-          // 응답이 아직 전송되지 않았다면 짧은 시간 후 다시 확인
-          setTimeout(() => {
-            if (res.finished || res.headersSent) {
-              resolveOnce();
-            }
-          }, 100);
-        }
+        // handlerPromise가 완료되면 응답도 완료된 것으로 간주
+        resolveOnce();
       }).catch((err) => {
         if (!resolved) {
           resolved = true;
@@ -218,13 +210,13 @@ export default async function (req: any, res: any) {
         }
       });
       
-      // 주기적으로 응답 상태 확인 (fallback)
+      // 주기적으로 응답 상태 확인 (fallback - handlerPromise가 완료되지 않는 경우 대비)
       const checkInterval = setInterval(() => {
         if (res.finished || res.headersSent) {
           clearInterval(checkInterval);
           resolveOnce();
         }
-      }, 100);
+      }, 50); // 더 자주 확인 (50ms)
       
       // 타임아웃 시 interval 정리
       timeout.unref?.();
