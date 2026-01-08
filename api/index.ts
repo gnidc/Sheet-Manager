@@ -26,6 +26,8 @@ app.use(express.urlencoded({ extended: false }));
 app.set("trust proxy", 1);
 
 // Vercel에서는 메모리 스토어 사용 (서버리스 환경)
+// Vercel 서버리스에서는 checkPeriod를 매우 크게 설정하여 백그라운드 작업 최소화
+const isVercel = !!process.env.VERCEL;
 app.use(
   session({
     secret: process.env.SESSION_SECRET || "default-secret-change-in-production",
@@ -38,7 +40,9 @@ app.use(
       sameSite: "lax",
     },
     store: new (MemoryStore(session))({
-      checkPeriod: 86400000, // 24 hours
+      // Vercel에서는 checkPeriod를 매우 크게 설정하여 백그라운드 작업 방지
+      // 서버리스 환경에서는 세션이 함수 종료 시 자동으로 정리되므로 주기적 체크 불필요
+      checkPeriod: isVercel ? 86400000 * 365 : 86400000, // Vercel: 1년, 로컬: 24시간
     }),
   })
 );
@@ -256,6 +260,19 @@ export default async function (req: any, res: any) {
         // 연결 풀 정리 실패는 로그만 남기고 무시
         console.warn("Failed to reset pool in finally:", err);
       }
+      
+      // 응답이 아직 완료되지 않았다면 명시적으로 종료
+      if (!res.finished && !res.headersSent) {
+        try {
+          res.end();
+        } catch (err) {
+          // 이미 종료되었을 수 있음
+        }
+      }
+      
+      // 함수 종료를 명시적으로 처리
+      // Vercel 서버리스 함수는 이 시점에서 종료되어야 함
+      console.log("Request handler completed, function should exit now");
     }
   }
 }
