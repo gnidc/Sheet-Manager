@@ -1,6 +1,12 @@
 // Vercel 서버리스 함수용 Express 앱 래퍼
+// Vercel 환경에서는 환경 변수가 자동으로 주입되므로 dotenv 불필요
+// 로컬 개발 환경에서만 dotenv 사용
 import { config } from "dotenv";
-config(); // Load .env file
+// Vercel 환경에서는 .env 파일이 없으므로 config()가 아무것도 로드하지 않음
+// 하지만 dotenv가 "injecting env (0)" 로그를 출력하므로 조건부로 실행
+if (!process.env.VERCEL) {
+  config(); // Load .env file (로컬 개발 환경에서만)
+}
 
 import express from "express";
 import session from "express-session";
@@ -147,80 +153,46 @@ export default async function (req: any, res: any) {
     // handler 실행
     const handlerStart = Date.now();
     
-    // serverless-http handler는 Promise를 반환하지만, 
-    // 응답이 완료된 후에도 내부적으로 연결을 유지할 수 있음
-    // 따라서 응답이 완료되면 즉시 종료 처리
+    // serverless-http handler는 Promise를 반환함
+    // handlerPromise가 완료되면 응답도 완료된 것으로 간주
     const handlerPromise = handler(req, res);
     
-    // 응답이 완료될 때까지 기다림
-    // res.finished 또는 res.headersSent를 확인하여 응답 완료 감지
-    await new Promise<void>((resolve, reject) => {
-      const handlerTimeout = 7000; // handler 실행 타임아웃
-      let resolved = false;
-      
-      const resolveOnce = () => {
-        if (resolved) return;
-        resolved = true;
-        clearTimeout(timeout);
-        const handlerTime = Date.now() - handlerStart;
-        const totalTime = Date.now() - startTime;
-        
-        if (totalTime > 5000) {
-          console.warn(`Slow request: total ${totalTime}ms, handler ${handlerTime}ms`);
-        } else {
-          console.log(`Request completed - init: ${initTime}ms, handler: ${handlerTime}ms, total: ${totalTime}ms`);
-        }
-        resolve();
-      };
-      
-      const timeout = setTimeout(() => {
-        if (!resolved) {
-          resolved = true;
-          if (!res.headersSent) {
-            res.status(504).json({ message: "Request processing timeout" });
-          }
-          console.error(`Handler timeout after ${Date.now() - handlerStart}ms`);
+    // handlerPromise가 완료될 때까지 기다림
+    // Vercel의 실제 타임아웃(10초 Hobby, 60초 Pro)에 맞춰 타임아웃 설정
+    // 하지만 handlerPromise가 완료되면 즉시 resolve하므로 대부분 빠르게 완료됨
+    try {
+      // Vercel의 실제 타임아웃보다 짧게 설정 (안전 마진)
+      // Hobby: 10초, Pro: 60초이므로 8초로 설정 (Hobby 기준)
+      const handlerTimeout = 8000;
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => {
           reject(new Error("Handler execution timeout"));
-        }
-      }, handlerTimeout);
-      
-      // 응답이 완료되면 resolve
-      res.once('finish', resolveOnce);
-      res.once('close', resolveOnce);
-      
-      // 에러 발생 시 reject
-      res.once('error', (err) => {
-        if (!resolved) {
-          resolved = true;
-          clearTimeout(timeout);
-          reject(err);
-        }
+        }, handlerTimeout);
       });
       
       // handlerPromise가 완료되면 즉시 resolve
-      // serverless-http는 응답이 완료되면 Promise를 resolve함
-      handlerPromise.then(() => {
-        // handlerPromise가 완료되면 응답도 완료된 것으로 간주
-        resolveOnce();
-      }).catch((err) => {
-        if (!resolved) {
-          resolved = true;
-          clearTimeout(timeout);
-          reject(err);
-        }
-      });
+      await Promise.race([handlerPromise, timeoutPromise]);
       
-      // 주기적으로 응답 상태 확인 (fallback - handlerPromise가 완료되지 않는 경우 대비)
-      const checkInterval = setInterval(() => {
-        if (res.finished || res.headersSent) {
-          clearInterval(checkInterval);
-          resolveOnce();
-        }
-      }, 50); // 더 자주 확인 (50ms)
+      const handlerTime = Date.now() - handlerStart;
+      const totalTime = Date.now() - startTime;
       
-      // 타임아웃 시 interval 정리
-      timeout.unref?.();
-    });
+      if (totalTime > 5000) {
+        console.warn(`Slow request: total ${totalTime}ms, handler ${handlerTime}ms`);
+      } else {
+        console.log(`Request completed - init: ${initTime}ms, handler: ${handlerTime}ms, total: ${totalTime}ms`);
+      }
+    } catch (timeoutError: any) {
+      if (timeoutError.message === "Handler execution timeout") {
+        const handlerTime = Date.now() - handlerStart;
+        console.error(`Handler timeout after ${handlerTime}ms`);
+        if (!res.headersSent) {
+          res.status(504).json({ message: "Request processing timeout" });
+        }
+        throw timeoutError;
+      } else {
+        throw timeoutError;
+      }
+    }
   } catch (error: any) {
     timeoutCleared = true;
     clearTimeout(timeout);
