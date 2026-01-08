@@ -11,6 +11,8 @@ import { createServer } from "http";
 import serverless from "serverless-http";
 
 const app = express();
+// Vercel 서버리스 환경에서는 httpServer가 필요 없지만,
+// registerRoutes가 httpServer를 요구하므로 생성 (실제로는 사용되지 않음)
 const httpServer = createServer(app);
 
 declare module "express-session" {
@@ -138,46 +140,91 @@ export default async function (req: any, res: any) {
       return;
     }
     
-    // handler 실행 (비동기로 실행하되 타임아웃은 handler 내부에서 처리)
+    // handler 실행
     const handlerStart = Date.now();
     
-    // Promise.race를 사용하여 handler 실행을 모니터링
+    // serverless-http handler는 Promise를 반환하지만, 
+    // 응답이 완료된 후에도 내부적으로 연결을 유지할 수 있음
+    // 따라서 응답이 완료되면 즉시 종료 처리
     const handlerPromise = handler(req, res);
-    const handlerTimeout = 7000; // handler 실행 타임아웃 (초기화 시간 제외)
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error("Handler execution timeout")), handlerTimeout);
-    });
     
-    try {
-      // handler가 완료될 때까지 기다림 (모든 비동기 작업이 완료되도록)
-      await Promise.race([handlerPromise, timeoutPromise]);
-      const handlerTime = Date.now() - handlerStart;
-      const totalTime = Date.now() - startTime;
+    // 응답이 완료될 때까지 기다림
+    // res.finished 또는 res.headersSent를 확인하여 응답 완료 감지
+    await new Promise<void>((resolve, reject) => {
+      const handlerTimeout = 7000; // handler 실행 타임아웃
+      let resolved = false;
       
-      if (totalTime > 5000) {
-        console.warn(`Slow request: total ${totalTime}ms, handler ${handlerTime}ms`);
-      } else {
-        console.log(`Request completed - init: ${initTime}ms, handler: ${handlerTime}ms, total: ${totalTime}ms`);
-      }
-    } catch (timeoutError: any) {
-      if (timeoutError.message === "Handler execution timeout") {
-        console.error(`Handler timeout after ${Date.now() - handlerStart}ms`);
-        if (!res.headersSent) {
-          res.status(504).json({ message: "Request processing timeout" });
+      const resolveOnce = () => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(timeout);
+        const handlerTime = Date.now() - handlerStart;
+        const totalTime = Date.now() - startTime;
+        
+        if (totalTime > 5000) {
+          console.warn(`Slow request: total ${totalTime}ms, handler ${handlerTime}ms`);
+        } else {
+          console.log(`Request completed - init: ${initTime}ms, handler: ${handlerTime}ms, total: ${totalTime}ms`);
         }
-      } else {
-        throw timeoutError;
-      }
-    }
-    
-    // handler Promise를 반환하기 전에 모든 비동기 작업이 완료되었는지 확인
-    // handlerPromise가 완료될 때까지 기다림 (finally 블록에서 DB 연결을 정리하기 전에)
-    try {
-      await handlerPromise;
-    } catch (err) {
-      // handler에서 발생한 에러는 이미 처리되었으므로 무시
-      console.warn("Handler promise error (already handled):", err);
-    }
+        resolve();
+      };
+      
+      const timeout = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          if (!res.headersSent) {
+            res.status(504).json({ message: "Request processing timeout" });
+          }
+          console.error(`Handler timeout after ${Date.now() - handlerStart}ms`);
+          reject(new Error("Handler execution timeout"));
+        }
+      }, handlerTimeout);
+      
+      // 응답이 완료되면 resolve
+      res.once('finish', resolveOnce);
+      res.once('close', resolveOnce);
+      
+      // 에러 발생 시 reject
+      res.once('error', (err) => {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timeout);
+          reject(err);
+        }
+      });
+      
+      // handlerPromise가 완료되면 확인
+      handlerPromise.then(() => {
+        // 응답이 이미 전송되었는지 확인
+        if (res.finished || res.headersSent) {
+          resolveOnce();
+        } else {
+          // 응답이 아직 전송되지 않았다면 짧은 시간 후 다시 확인
+          setTimeout(() => {
+            if (res.finished || res.headersSent) {
+              resolveOnce();
+            }
+          }, 100);
+        }
+      }).catch((err) => {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timeout);
+          reject(err);
+        }
+      });
+      
+      // 주기적으로 응답 상태 확인 (fallback)
+      const checkInterval = setInterval(() => {
+        if (res.finished || res.headersSent) {
+          clearInterval(checkInterval);
+          resolveOnce();
+        }
+      }, 100);
+      
+      // 타임아웃 시 interval 정리
+      timeout.unref?.();
+    });
   } catch (error: any) {
     timeoutCleared = true;
     clearTimeout(timeout);
