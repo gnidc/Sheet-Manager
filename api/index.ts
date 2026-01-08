@@ -88,11 +88,15 @@ async function initializeApp() {
       const routesTime = Date.now() - routesStart;
       console.log(`Routes registered in ${routesTime}ms`);
 
+      // 404 핸들러는 registerRoutes 내부에서 처리되므로 여기서는 에러 핸들러만 설정
       app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
         console.error("Express error:", err);
         const status = err.status || err.statusCode || 500;
         const message = err.message || "Internal Server Error";
-        res.status(status).json({ message });
+        // 응답이 아직 전송되지 않았다면 에러 응답 전송
+        if (!res.headersSent) {
+          res.status(status).json({ message });
+        }
       });
 
       // 프로덕션에서는 정적 파일 서빙 (API 경로 제외)
