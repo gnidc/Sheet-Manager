@@ -11,6 +11,16 @@ import * as cheerio from "cheerio";
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
 const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH;
 
+// 환경 변수 확인 (디버깅)
+if (process.env.VERCEL) {
+  console.log("=== Vercel 환경 변수 확인 ===");
+  console.log("ADMIN_USERNAME exists:", !!ADMIN_USERNAME);
+  console.log("ADMIN_PASSWORD_HASH exists:", !!ADMIN_PASSWORD_HASH);
+  console.log("SESSION_SECRET exists:", !!process.env.SESSION_SECRET);
+  console.log("DATABASE_URL exists:", !!process.env.DATABASE_URL);
+  console.log("NODE_ENV:", process.env.NODE_ENV);
+}
+
 function requireAdmin(req: Request, res: Response, next: NextFunction) {
   if (!req.session?.isAdmin) {
     return res.status(401).json({ message: "Unauthorized" });
