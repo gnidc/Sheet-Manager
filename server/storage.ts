@@ -98,9 +98,24 @@ export class DatabaseStorage implements IStorage {
         
         if (isConnectionError && attempt < maxRetries) {
           console.log(`Connection error detected, will retry...`);
-          // Pool 재설정
-          const { resetPool } = await import("./db.js");
-          resetPool();
+          // Pool 재설정 (async이므로 await 사용)
+          try {
+            const { resetPool } = await import("./db.js");
+            // 빠른 재시도를 위해 타임아웃 설정
+            await Promise.race([
+              resetPool(),
+              new Promise((_, reject) => 
+                setTimeout(() => reject(new Error("Reset timeout")), 500)
+              )
+            ]).catch((err) => {
+              // 타임아웃이 발생해도 계속 진행 (연결은 이미 닫히고 있을 수 있음)
+              if (err.message !== "Reset timeout") {
+                console.warn("Error resetting pool:", err);
+              }
+            });
+          } catch (err) {
+            console.warn("Failed to reset pool during retry:", err);
+          }
           // 다음 시도에서 새로운 연결을 시도하도록 함
           continue;
         }

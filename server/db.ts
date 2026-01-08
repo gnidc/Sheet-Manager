@@ -67,26 +67,43 @@ let _pool: pg.Pool | null = null;
 let _db: ReturnType<typeof drizzle> | null = null;
 
 // Pool 재설정 함수 (연결 에러 시 사용)
-export function resetPool() {
+// async 함수로 변경하여 연결이 완전히 닫힐 때까지 기다림
+export async function resetPool(): Promise<void> {
   if (_pool) {
-    // Vercel 환경에서는 즉시 종료 (타임아웃 방지)
-    const isVercel = !!process.env.VERCEL;
-    if (isVercel) {
-      // Vercel에서는 모든 연결을 즉시 종료
-      _pool.end().then(() => {
+    const poolToClose = _pool;
+    _pool = null; // 먼저 null로 설정하여 새로운 요청이 이 풀을 사용하지 않도록 함
+    _db = null;
+    
+    try {
+      // Vercel 환경에서는 즉시 종료 (타임아웃 방지)
+      const isVercel = !!process.env.VERCEL;
+      
+      if (isVercel) {
+        // Vercel에서는 타임아웃을 짧게 설정하여 빠르게 종료
+        await Promise.race([
+          poolToClose.end(),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error("Pool close timeout")), 1000)
+          )
+        ]).catch((err) => {
+          // 타임아웃이 발생해도 계속 진행 (연결은 이미 닫히고 있을 수 있음)
+          if (err.message !== "Pool close timeout") {
+            console.error("Error closing pool:", err);
+          } else {
+            console.warn("Pool close timeout - forcing termination");
+          }
+        });
         console.log("Pool closed in Vercel environment");
-      }).catch((err) => {
-        console.error("Error closing pool:", err);
-      });
-    } else {
-      // 로컬 환경에서는 graceful shutdown
-      _pool.end().catch((err) => {
-        console.error("Error closing pool:", err);
-      });
+      } else {
+        // 로컬 환경에서는 graceful shutdown
+        await poolToClose.end().catch((err) => {
+          console.error("Error closing pool:", err);
+        });
+      }
+    } catch (err) {
+      console.error("Unexpected error in resetPool:", err);
     }
   }
-  _pool = null;
-  _db = null;
   console.log("Pool reset - will create new connection on next request");
 }
 

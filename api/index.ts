@@ -149,6 +149,7 @@ export default async function (req: any, res: any) {
     });
     
     try {
+      // handler가 완료될 때까지 기다림 (모든 비동기 작업이 완료되도록)
       await Promise.race([handlerPromise, timeoutPromise]);
       const handlerTime = Date.now() - handlerStart;
       const totalTime = Date.now() - startTime;
@@ -169,7 +170,14 @@ export default async function (req: any, res: any) {
       }
     }
     
-    return handlerPromise;
+    // handler Promise를 반환하기 전에 모든 비동기 작업이 완료되었는지 확인
+    // handlerPromise가 완료될 때까지 기다림 (finally 블록에서 DB 연결을 정리하기 전에)
+    try {
+      await handlerPromise;
+    } catch (err) {
+      // handler에서 발생한 에러는 이미 처리되었으므로 무시
+      console.warn("Handler promise error (already handled):", err);
+    }
   } catch (error: any) {
     timeoutCleared = true;
     clearTimeout(timeout);
@@ -190,10 +198,12 @@ export default async function (req: any, res: any) {
   } finally {
     // Vercel 서버리스 환경에서는 요청 완료 후 반드시 데이터베이스 연결 풀 정리
     // finally 블록에서 실행하여 성공/실패 여부와 관계없이 항상 실행되도록 함
+    // 모든 비동기 작업(handlerPromise 포함)이 완료된 후 실행
     if (process.env.VERCEL && process.env.NODE_ENV === "production") {
       try {
         const { resetPool } = await import("../server/db.js");
-        resetPool();
+        // resetPool은 이제 async 함수이므로 await 사용
+        await resetPool();
         console.log("Database pool reset in finally block (Vercel)");
       } catch (err) {
         // 연결 풀 정리 실패는 로그만 남기고 무시
