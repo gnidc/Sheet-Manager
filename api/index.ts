@@ -166,6 +166,7 @@ export default async function (req: any, res: any) {
     
     // handler 실행
     const handlerStart = Date.now();
+    console.log(`Handler 시작 - path: ${req.path}, method: ${req.method}`); // 디버깅
     
     // serverless-http handler는 Promise를 반환함
     // handlerPromise가 완료되면 응답도 완료된 것으로 간주
@@ -175,10 +176,14 @@ export default async function (req: any, res: any) {
     try {
       // handlerPromise가 완료될 때까지 직접 기다림
       // serverless-http가 제공하는 Promise를 믿고 기다리는 방식
+      console.log("Handler Promise 대기 시작"); // 디버깅
       await handlerPromise;
+      console.log("Handler Promise 완료"); // 디버깅
       
       const handlerTime = Date.now() - handlerStart;
       const totalTime = Date.now() - startTime;
+      
+      console.log(`Handler 완료 - handler: ${handlerTime}ms, total: ${totalTime}ms, headersSent: ${res.headersSent}, finished: ${res.finished}`); // 디버깅
       
       if (totalTime > 5000) {
         console.warn(`Slow request: total ${totalTime}ms, handler ${handlerTime}ms`);
@@ -189,12 +194,15 @@ export default async function (req: any, res: any) {
       // 응답이 전송되지 않았다면 에러 응답 전송 (fallback)
       if (!res.headersSent && !res.finished) {
         console.warn("Response not sent by handler, sending default response");
+        console.warn(`Response 상태 - headersSent: ${res.headersSent}, finished: ${res.finished}, path: ${req.path}`); // 디버깅
         try {
           res.status(500).json({ message: "Internal server error: response not sent" });
         } catch (err) {
           // 응답 전송 중 에러 발생 (이미 전송되었을 수 있음)
           console.warn("Failed to send error response (may already be sent):", err);
         }
+      } else {
+        console.log(`Response 전송 확인 - headersSent: ${res.headersSent}, finished: ${res.finished}`); // 디버깅
       }
     } catch (handlerError: any) {
       // handler 실행 중 에러 발생

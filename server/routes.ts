@@ -133,6 +133,7 @@ export async function registerRoutes(
   });
 
   app.get(api.etfs.list.path, async (req, res) => {
+    console.log("ETF 로직 시작"); // 디버깅: 라우팅 확인
     const startTime = Date.now();
     try {
       const search = req.query.search as string | undefined;
@@ -143,15 +144,19 @@ export async function registerRoutes(
       console.log(`[${new Date().toISOString()}] GET /api/etfs - params:`, { search, mainCategory, subCategory, country });
       
       const queryStart = Date.now();
+      console.log("ETF 데이터베이스 쿼리 시작"); // 디버깅: 쿼리 시작 확인
       const etfs = await storage.getEtfs({ search, mainCategory, subCategory, country });
       const queryTime = Date.now() - queryStart;
       
       console.log(`[${new Date().toISOString()}] GET /api/etfs - result count: ${etfs.length}, query time: ${queryTime}ms`);
+      console.log("ETF 데이터베이스 쿼리 완료, 응답 전송 시작"); // 디버깅: 응답 전송 확인
       
       const totalTime = Date.now() - startTime;
       console.log(`[${new Date().toISOString()}] GET /api/etfs - total time: ${totalTime}ms`);
       
+      // 응답 전송 확인
       res.json(etfs);
+      console.log("ETF 응답 전송 완료"); // 디버깅: 응답 전송 완료 확인
     } catch (error: any) {
       const totalTime = Date.now() - startTime;
       console.error(`[${new Date().toISOString()}] Error in GET /api/etfs (after ${totalTime}ms):`, error);
