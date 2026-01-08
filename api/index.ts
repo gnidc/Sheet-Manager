@@ -128,6 +128,28 @@ async function initializeApp() {
 export default async function (req: any, res: any) {
   const startTime = Date.now();
   
+  // Vercel 요청 객체에서 경로가 누락되는 것을 방지
+  // Vercel은 req.url 대신 다른 속성을 사용할 수 있으므로 확인
+  if (!req.url) {
+    // Vercel의 요청 객체 구조에 맞게 경로 추출
+    // Vercel은 headers['x-vercel-path'] 또는 query string에서 경로를 제공할 수 있음
+    req.url = req.path || req.originalUrl || req.headers?.['x-vercel-path'] || req.headers?.['x-invoke-path'] || '/';
+    console.log(`경로 복구 - path: ${req.path}, originalUrl: ${req.originalUrl}, url: ${req.url}, headers:`, {
+      'x-vercel-path': req.headers?.['x-vercel-path'],
+      'x-invoke-path': req.headers?.['x-invoke-path']
+    });
+  }
+  
+  // Express가 인식할 수 있도록 req.path도 설정
+  if (!req.path && req.url) {
+    req.path = req.url.split('?')[0]; // 쿼리 문자열 제거
+  }
+  
+  // originalUrl도 설정 (Express 라우터가 사용)
+  if (!req.originalUrl && req.url) {
+    req.originalUrl = req.url;
+  }
+  
   // Vercel의 타임아웃은 10초 (Hobby), 60초 (Pro), 300초 (Enterprise)
   // ETF 크롤링 등 긴 작업을 위해 60초로 설정 (Pro 플랜 기준)
   // Hobby 플랜 사용자는 Vercel의 10초 제한에 걸릴 수 있음
