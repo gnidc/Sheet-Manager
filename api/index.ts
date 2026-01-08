@@ -158,23 +158,6 @@ export default async function (req: any, res: any) {
       } else {
         console.log(`Request completed - init: ${initTime}ms, handler: ${handlerTime}ms, total: ${totalTime}ms`);
       }
-      
-      // Vercel 서버리스 환경에서는 요청 완료 후 즉시 연결 풀 정리
-      // 함수 종료 전에 연결을 명시적으로 종료하여 타임아웃 방지
-      if (process.env.VERCEL && process.env.NODE_ENV === "production") {
-        // 요청이 완료되면 즉시 연결 풀 정리
-        // 응답이 전송된 후 실행되도록 함
-        res.on('finish', async () => {
-          try {
-            const { resetPool } = await import("../server/db.js");
-            resetPool();
-            console.log("Database pool reset after response sent (Vercel)");
-          } catch (err) {
-            // 연결 풀 정리 실패는 무시 (다음 요청에서 재시도)
-            console.warn("Failed to reset pool:", err);
-          }
-        });
-      }
     } catch (timeoutError: any) {
       if (timeoutError.message === "Handler execution timeout") {
         console.error(`Handler timeout after ${Date.now() - handlerStart}ms`);
@@ -203,6 +186,19 @@ export default async function (req: any, res: any) {
         message: "Internal server error", 
         error: process.env.NODE_ENV === "development" ? error.message : undefined 
       });
+    }
+  } finally {
+    // Vercel 서버리스 환경에서는 요청 완료 후 반드시 데이터베이스 연결 풀 정리
+    // finally 블록에서 실행하여 성공/실패 여부와 관계없이 항상 실행되도록 함
+    if (process.env.VERCEL && process.env.NODE_ENV === "production") {
+      try {
+        const { resetPool } = await import("../server/db.js");
+        resetPool();
+        console.log("Database pool reset in finally block (Vercel)");
+      } catch (err) {
+        // 연결 풀 정리 실패는 로그만 남기고 무시
+        console.warn("Failed to reset pool in finally:", err);
+      }
     }
   }
 }
