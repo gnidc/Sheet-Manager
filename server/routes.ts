@@ -554,6 +554,20 @@ export async function registerRoutes(
     }
   }
 
+  // 404 핸들러 (모든 라우트 이후에 배치)
+  // API 경로에 대한 404는 JSON 응답으로 반환
+  app.use((req, res) => {
+    // API 경로인 경우 JSON 응답
+    if (req.path.startsWith("/api/")) {
+      res.status(404).json({ message: "API endpoint not found", path: req.path });
+    } else {
+      // 정적 파일 경로인 경우는 serveStatic에서 처리
+      // 여기서는 처리하지 않음 (next() 호출하지 않음)
+      // serveStatic이 처리하지 못한 경우 404 반환
+      res.status(404).json({ message: "Not found", path: req.path });
+    }
+  });
+
   return httpServer;
 }
 
