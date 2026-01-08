@@ -31,6 +31,15 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.set("trust proxy", 1);
 
+// 모든 API 응답에 Content-Type 헤더 설정
+app.use((req, res, next) => {
+  // API 경로인 경우에만 JSON Content-Type 설정
+  if (req.path.startsWith("/api/")) {
+    res.setHeader("Content-Type", "application/json");
+  }
+  next();
+});
+
 // Vercel에서는 메모리 스토어 사용 (서버리스 환경)
 // Vercel 서버리스에서는 checkPeriod를 비활성화하여 백그라운드 작업 방지
 const isVercel = !!process.env.VERCEL;
@@ -157,21 +166,26 @@ export default async function (req: any, res: any) {
     // handlerPromise가 완료되면 응답도 완료된 것으로 간주
     const handlerPromise = handler(req, res);
     
-    // handlerPromise가 완료될 때까지 기다림
-    // Vercel의 실제 타임아웃(10초 Hobby, 60초 Pro)에 맞춰 타임아웃 설정
-    // 하지만 handlerPromise가 완료되면 즉시 resolve하므로 대부분 빠르게 완료됨
+    // handlerPromise가 완료될 때까지 반드시 기다림
+    // 응답이 전송되기 전에 함수가 종료되지 않도록 보장
     try {
-      // Vercel의 실제 타임아웃보다 짧게 설정 (안전 마진)
-      // Hobby: 10초, Pro: 60초이므로 8초로 설정 (Hobby 기준)
-      const handlerTimeout = 8000;
-      const timeoutPromise = new Promise((_, reject) => {
+      // handlerPromise가 완료될 때까지 기다림
+      // Vercel의 실제 타임아웃(10초 Hobby, 60초 Pro)보다 짧게 설정
+      const handlerTimeout = 8000; // 8초 (Hobby 기준 안전 마진)
+      
+      // 타임아웃 Promise 생성
+      const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(() => {
           reject(new Error("Handler execution timeout"));
         }, handlerTimeout);
       });
       
-      // handlerPromise가 완료되면 즉시 resolve
+      // handlerPromise가 완료되거나 타임아웃될 때까지 기다림
       await Promise.race([handlerPromise, timeoutPromise]);
+      
+      // handlerPromise가 완료되었는지 확인
+      // 응답이 전송되었는지 확인하기 위해 짧은 시간 대기
+      await new Promise(resolve => setTimeout(resolve, 10));
       
       const handlerTime = Date.now() - handlerStart;
       const totalTime = Date.now() - startTime;
@@ -181,15 +195,27 @@ export default async function (req: any, res: any) {
       } else {
         console.log(`Request completed - init: ${initTime}ms, handler: ${handlerTime}ms, total: ${totalTime}ms`);
       }
+      
+      // 응답이 전송되지 않았다면 에러 응답 전송
+      if (!res.headersSent && !res.finished) {
+        console.warn("Response not sent by handler, sending default response");
+        res.status(500).json({ message: "Internal server error: response not sent" });
+      }
     } catch (timeoutError: any) {
       if (timeoutError.message === "Handler execution timeout") {
         const handlerTime = Date.now() - handlerStart;
         console.error(`Handler timeout after ${handlerTime}ms`);
+        // 타임아웃 시에도 반드시 JSON 응답 전송
         if (!res.headersSent) {
-          res.status(504).json({ message: "Request processing timeout" });
+          res.status(504).json({ 
+            message: "Request processing timeout",
+            error: "The server took too long to process your request"
+          });
         }
-        throw timeoutError;
+        // 타임아웃은 에러로 처리하지 않고 로그만 남김
+        // 응답은 이미 전송되었으므로 함수는 정상 종료
       } else {
+        // 다른 에러는 상위 catch 블록에서 처리
         throw timeoutError;
       }
     }
@@ -204,8 +230,9 @@ export default async function (req: any, res: any) {
       name: error.name,
     });
     
-    if (!res.headersSent) {
-      return res.status(500).json({ 
+    // 에러 발생 시에도 반드시 JSON 응답 전송
+    if (!res.headersSent && !res.finished) {
+      res.status(500).json({ 
         message: "Internal server error", 
         error: process.env.NODE_ENV === "development" ? error.message : undefined 
       });
@@ -225,12 +252,17 @@ export default async function (req: any, res: any) {
         console.warn("Failed to reset pool in finally:", err);
       }
       
-      // 응답이 아직 완료되지 않았다면 명시적으로 종료
-      if (!res.finished && !res.headersSent) {
+      // 응답이 전송되지 않았다면 에러 응답 전송 (빈 응답 방지)
+      if (!res.headersSent && !res.finished) {
+        console.error("Response not sent, sending error response");
         try {
-          res.end();
+          res.status(500).json({ 
+            message: "Internal server error: no response sent",
+            error: "The server failed to send a response"
+          });
         } catch (err) {
-          // 이미 종료되었을 수 있음
+          // 응답 전송 실패는 로그만 남김
+          console.error("Failed to send error response:", err);
         }
       }
       
