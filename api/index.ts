@@ -105,8 +105,10 @@ async function initializeApp() {
       }
 
       // serverless-http로 래핑
+      // Vercel의 요청 객체 구조에 맞게 설정
       handler = serverless(app, {
         binary: ["image/*", "application/pdf"],
+        requestId: 'x-vercel-id',
       });
 
       appInitialized = true;
@@ -166,7 +168,8 @@ export default async function (req: any, res: any) {
     
     // handler 실행
     const handlerStart = Date.now();
-    console.log(`Handler 시작 - path: ${req.path}, method: ${req.method}`); // 디버깅
+    // 경로 정보 확인 (디버깅)
+    console.log(`Handler 시작 - url: ${req.url}, path: ${req.path}, originalUrl: ${req.originalUrl}, method: ${req.method}`);
     
     // serverless-http handler는 Promise를 반환함
     // handlerPromise가 완료되면 응답도 완료된 것으로 간주
