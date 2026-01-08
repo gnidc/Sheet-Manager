@@ -187,9 +187,16 @@ export default async function (req: any, res: any) {
       // handlerPromise가 완료되거나 타임아웃될 때까지 기다림
       await Promise.race([handlerPromise, timeoutPromise]);
       
-      // handlerPromise가 완료되었는지 확인
-      // 응답이 전송되었는지 확인하기 위해 짧은 시간 대기
-      await new Promise(resolve => setTimeout(resolve, 10));
+      // handlerPromise가 완료되었지만 Express가 응답을 전송하는데 시간이 걸릴 수 있음
+      // serverless-http는 Express 앱을 래핑하지만, 실제 응답 전송은 비동기로 이루어질 수 있음
+      // 따라서 응답이 전송될 때까지 기다림
+      let responseCheckAttempts = 0;
+      const maxCheckAttempts = 100; // 최대 1초 대기 (100 * 10ms)
+      
+      while (!res.headersSent && !res.finished && responseCheckAttempts < maxCheckAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 10));
+        responseCheckAttempts++;
+      }
       
       const handlerTime = Date.now() - handlerStart;
       const totalTime = Date.now() - startTime;
@@ -201,9 +208,18 @@ export default async function (req: any, res: any) {
       }
       
       // 응답이 전송되지 않았다면 에러 응답 전송
+      // 하지만 이미 응답이 전송 중일 수 있으므로 주의
       if (!res.headersSent && !res.finished) {
-        console.warn("Response not sent by handler, sending default response");
-        res.status(500).json({ message: "Internal server error: response not sent" });
+        console.warn("Response not sent by handler after waiting, sending default response");
+        try {
+          res.status(500).json({ message: "Internal server error: response not sent" });
+        } catch (err) {
+          // 응답 전송 중 에러 발생 (이미 전송되었을 수 있음)
+          console.warn("Failed to send error response (may already be sent):", err);
+        }
+      } else {
+        // 응답이 전송되었음을 확인
+        console.log(`Response sent successfully - headersSent: ${res.headersSent}, finished: ${res.finished}`);
       }
     } catch (timeoutError: any) {
       if (timeoutError.message === "Handler execution timeout") {
