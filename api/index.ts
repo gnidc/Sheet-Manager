@@ -276,28 +276,24 @@ export default async function (req: any, res: any) {
       });
     }
   } finally {
-    // Vercel 서버리스 환경에서는 요청 완료 후 반드시 데이터베이스 연결 풀 정리
-    // finally 블록에서 실행하여 성공/실패 여부와 관계없이 항상 실행되도록 함
-    // 모든 비동기 작업(handlerPromise 포함)이 완료된 후 실행
-    if (process.env.VERCEL && process.env.NODE_ENV === "production") {
-      try {
-        const { resetPool } = await import("../server/db.js");
-        // resetPool은 이제 async 함수이므로 await 사용
-        await resetPool();
-        console.log("Database pool reset in finally block (Vercel)");
-      } catch (err) {
-        // 연결 풀 정리 실패는 로그만 남기고 무시
-        console.warn("Failed to reset pool in finally:", err);
+      // Vercel 서버리스 환경에서는 요청 완료 후 데이터베이스 연결 풀 정리
+      // 하지만 await하지 않고 즉시 반환하여 함수가 빠르게 종료되도록 함
+      if (process.env.VERCEL && process.env.NODE_ENV === "production") {
+        // resetPool()을 await하지 않고 즉시 호출만 함
+        // Vercel 환경에서는 resetPool이 내부적으로 await하지 않으므로 함수가 즉시 종료됨
+        import("../server/db.js").then(({ resetPool }) => {
+          resetPool().catch(() => {
+            // 에러는 무시 (백그라운드 작업)
+          });
+        }).catch(() => {
+          // import 실패도 무시
+        });
+        console.log("Database pool reset initiated in finally block (Vercel - non-blocking)");
       }
-      
-      // serverless-http의 Promise가 완료되었다면 응답은 이미 전송되었음
-      // 래퍼 객체의 headersSent/finished 상태는 신뢰할 수 없으므로 확인하지 않음
-      // (serverless-http가 내부적으로 다른 res 객체를 사용하기 때문)
       
       // 함수 종료를 명시적으로 처리
       // Vercel 서버리스 함수는 이 시점에서 종료되어야 함
       console.log("Request handler completed, function should exit now");
-    }
   }
 }
 
