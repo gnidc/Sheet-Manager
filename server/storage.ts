@@ -43,13 +43,19 @@ export class DatabaseStorage implements IStorage {
         if (attempt > 1) {
           console.log(`getEtfs retry attempt ${attempt}/${maxRetries}`);
           // 재시도 전에 대기 시간 증가 (연결이 재설정될 시간 제공)
-          await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-          // Pool 재설정 (새로운 연결 시도)
-          try {
-            const { resetPool } = await import("./db.js");
-            await resetPool();
-          } catch (err) {
-            console.warn("Failed to reset pool during retry:", err);
+          // Vercel 환경에서는 setTimeout을 최소화하여 함수 종료를 방해하지 않도록 함
+          if (!process.env.VERCEL) {
+            await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+            // Pool 재설정 (새로운 연결 시도) - 로컬 환경에서만
+            try {
+              const { resetPool } = await import("./db.js");
+              await resetPool();
+            } catch (err) {
+              console.warn("Failed to reset pool during retry:", err);
+            }
+          } else {
+            // Vercel 환경에서는 매우 짧은 대기만 수행
+            await new Promise(resolve => setTimeout(resolve, 100));
           }
         }
         
@@ -135,6 +141,15 @@ export class DatabaseStorage implements IStorage {
         
         if (isConnectionError && attempt < maxRetries) {
           console.log(`Connection error detected (${error.code || 'unknown'}), will retry after ${1000 * (attempt + 1)}ms...`);
+          // Vercel 환경에서는 resetPool()을 호출하지 않음 (함수 종료를 방해할 수 있음)
+          if (!process.env.VERCEL) {
+            try {
+              const { resetPool } = await import("./db.js");
+              await resetPool();
+            } catch (err) {
+              console.warn("Failed to reset pool during retry:", err);
+            }
+          }
           continue;
         }
         
