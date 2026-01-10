@@ -111,24 +111,11 @@ export async function resetPool(): Promise<void> {
     const isVercel = !!process.env.VERCEL;
     
     if (isVercel) {
-      // Vercel 환경에서는 pool.end()를 매우 짧은 타임아웃과 함께 시도
-      // 타임아웃이 발생하면 즉시 진행하여 함수 종료를 방해하지 않음
-      const closePromise = poolToClose.end().catch(() => {
-        // 에러는 무시
-      });
-      
-      // 50ms 타임아웃 - 매우 짧게 설정하여 함수 종료를 방해하지 않음
-      await Promise.race([
-        closePromise,
-        new Promise<void>((resolve) => {
-          setTimeout(() => {
-            // 타임아웃 발생 시 즉시 진행 (Pool 정리는 백그라운드에서 계속됨)
-            resolve();
-          }, 50);
-        })
-      ]);
-      
-      console.log("Pool reset in Vercel (attempted close with 50ms timeout)");
+      // Vercel 환경에서는 pool.end()를 전혀 호출하지 않음
+      // setTimeout도 사용하지 않음 (백그라운드 타이머 방지)
+      // 함수가 종료되면 Vercel이 모든 연결을 자동으로 정리함
+      // pool.end()나 setTimeout을 호출하면 함수 종료를 방해할 수 있음
+      console.log("Pool reset in Vercel (pool.end() not called - Vercel will cleanup automatically)");
     } else {
       // 로컬 환경에서는 graceful shutdown을 위해 await
       try {
@@ -211,12 +198,9 @@ export function getPool(): pg.Pool {
         });
       });
     } else {
-      // Vercel 환경에서는 이벤트 리스너를 최소화하고, statement_timeout은 쿼리 실행 시 직접 설정
-      // 이벤트 리스너가 함수 종료를 방해할 수 있으므로 최소화
-      _pool.on('error', () => {
-        // Vercel에서는 에러 발생 시 로그만 남기고 재연결 시도하지 않음
-        // (함수가 종료되므로 재연결이 불필요)
-      });
+      // Vercel 환경에서는 이벤트 리스너를 전혀 등록하지 않음
+      // 이벤트 리스너가 함수 종료를 방해할 수 있으므로 완전히 제거
+      // statement_timeout은 쿼리 실행 시 직접 설정하거나 DB 레벨에서 처리
     }
     
     console.log(`Database pool created (max: ${isVercel ? 1 : 10}, min: 0, Vercel: ${isVercel}, connectionTimeout: ${isVercel ? 8000 : 30000}ms, SSL: ${sslConfig ? 'enabled' : 'disabled'})`);
