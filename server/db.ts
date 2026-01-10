@@ -81,6 +81,17 @@ function getDatabaseUrl(): string {
   // Supabase/Pooler 연결이지만 sslmode가 없는 경우는 추가하지 않음
   // Pool의 ssl 옵션에서 처리
 
+  // Vercel 환경에서 더 상세한 로깅
+  if (process.env.VERCEL) {
+    try {
+      const url = new URL(connectionString);
+      console.log("DATABASE_URL parsed - Host:", url.hostname, "Port:", url.port, "Database:", url.pathname.substring(1));
+      console.log("SSL required:", connectionString.includes('supabase') || connectionString.includes('pooler'));
+    } catch (e) {
+      console.log("Could not parse DATABASE_URL as URL");
+    }
+  }
+  
   console.log("DATABASE_URL is set, length:", connectionString.length, "starts with:", connectionString.substring(0, 20));
   return connectionString;
 }
@@ -156,7 +167,9 @@ export function getPool(): pg.Pool {
       max: isVercel ? 1 : 10, // Vercel에서는 최대 1개 연결 (serverless 제약)
       min: 0, // Serverless에서는 최소 연결 수를 0으로 설정 (필요할 때만 연결)
       idleTimeoutMillis: isVercel ? 1000 : 30000, // Vercel에서는 1초로 단축 (매우 빠른 정리)
-      connectionTimeoutMillis: isVercel ? 1000 : 30000, // 로컬에서는 30초로 증가 (Supabase 연결 시간 고려)
+      // Vercel에서는 네트워크 지연과 SSL 핸드셰이크를 고려하여 연결 타임아웃 증가
+      // Hobby 플랜 타임아웃(10초) 내에서 쿼리 실행까지 완료할 수 있도록 설정
+      connectionTimeoutMillis: isVercel ? 8000 : 30000, // Vercel: 8초, 로컬: 30초
       // SSL 설정 - connection string의 sslmode와 함께 명시적으로 설정
       ssl: sslConfig,
       // Vercel에서는 keep-alive 비활성화 (연결을 빠르게 정리)
@@ -179,8 +192,10 @@ export function getPool(): pg.Pool {
     _pool.on('connect', async (client) => {
       // statement_timeout 설정 (쿼리 실행 시간 제한)
       try {
-        // 로컬에서는 30초, Vercel에서는 10초
-        await client.query(`SET statement_timeout = ${isVercel ? 10000 : 30000}`);
+        // Vercel Hobby 플랜은 10초 제한이 있으므로, 연결 타임아웃(8초) 후 남은 시간 고려
+        // 로컬에서는 30초, Vercel에서는 5초 (연결 타임아웃 8초 + 쿼리 5초 = 최대 13초지만 안전하게)
+        // 실제로는 Vercel Pro 플랜(60초)을 사용하면 더 여유 있음
+        await client.query(`SET statement_timeout = ${isVercel ? 5000 : 30000}`);
       } catch (err) {
         console.warn("Failed to set statement_timeout:", err);
       }
@@ -195,7 +210,7 @@ export function getPool(): pg.Pool {
       });
     });
     
-    console.log(`Database pool created (max: ${isVercel ? 1 : 10}, min: 0, Vercel: ${isVercel})`);
+    console.log(`Database pool created (max: ${isVercel ? 1 : 10}, min: 0, Vercel: ${isVercel}, connectionTimeout: ${isVercel ? 8000 : 30000}ms, SSL: ${sslConfig ? 'enabled' : 'disabled'})`);
   }
   return _pool;
 }
