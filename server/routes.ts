@@ -164,9 +164,14 @@ export async function registerRoutes(
       const totalTime = Date.now() - startTime;
       console.log(`[${new Date().toISOString()}] GET /api/etfs - total time: ${totalTime}ms`);
       
-      // 응답 전송 확인
+      // 응답 전송
+      // serverless-http가 응답을 제대로 감지하도록 명시적으로 처리
       res.json(etfs);
-      console.log("ETF 응답 전송 완료"); // 디버깅: 응답 전송 완료 확인
+      
+      // res.json()은 내부적으로 res.end()를 호출하여 응답을 완료함
+      // serverless-http는 이를 감지하여 Promise를 resolve함
+      // 로깅 시점에 headersSent가 false일 수 있지만, 실제로는 응답이 전송됨
+      console.log("ETF 응답 전송 완료 - headersSent:", res.headersSent, "finished:", res.finished);
     } catch (error: any) {
       const totalTime = Date.now() - startTime;
       console.error(`[${new Date().toISOString()}] Error in GET /api/etfs (after ${totalTime}ms):`, error);

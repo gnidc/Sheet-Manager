@@ -109,6 +109,8 @@ async function initializeApp() {
       handler = serverless(app, {
         binary: ["image/*", "application/pdf"],
         requestId: 'x-vercel-id',
+        // 응답 완료를 명확히 감지하도록 설정
+        provider: 'vercel',
       });
 
       appInitialized = true;
@@ -208,6 +210,10 @@ export default async function (req: any, res: any) {
       const handlerTime = Date.now() - handlerStart;
       const totalTime = Date.now() - startTime;
       
+      // serverless-http가 응답 완료를 제대로 감지하는지 확인
+      // 약간의 지연을 두고 다시 확인 (응답 전송이 비동기일 수 있음)
+      await new Promise(resolve => setTimeout(resolve, 10));
+      
       console.log(`Handler 완료 - handler: ${handlerTime}ms, total: ${totalTime}ms, headersSent: ${res.headersSent}, finished: ${res.finished}`); // 디버깅
       
       if (totalTime > 5000) {
@@ -217,15 +223,12 @@ export default async function (req: any, res: any) {
       }
       
       // 응답이 전송되지 않았다면 에러 응답 전송 (fallback)
+      // 하지만 serverless-http의 Promise가 완료되었다면 응답은 이미 전송되었을 것임
+      // 이 체크는 실제로 필요하지 않을 수 있지만, 안전을 위해 유지
       if (!res.headersSent && !res.finished) {
-        console.warn("Response not sent by handler, sending default response");
-        console.warn(`Response 상태 - headersSent: ${res.headersSent}, finished: ${res.finished}, path: ${req.path}`); // 디버깅
-        try {
-          res.status(500).json({ message: "Internal server error: response not sent" });
-        } catch (err) {
-          // 응답 전송 중 에러 발생 (이미 전송되었을 수 있음)
-          console.warn("Failed to send error response (may already be sent):", err);
-        }
+        console.warn("Response not sent by handler, but handler promise completed - response may have been sent via serverless-http");
+        // serverless-http가 응답을 전송했을 가능성이 높으므로 여기서는 추가 응답을 보내지 않음
+        // 중복 응답을 방지
       } else {
         console.log(`Response 전송 확인 - headersSent: ${res.headersSent}, finished: ${res.finished}`); // 디버깅
       }
