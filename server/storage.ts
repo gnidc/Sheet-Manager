@@ -78,12 +78,30 @@ export class DatabaseStorage implements IStorage {
           ? query.where(and(...conditions))
           : query;
         
-        // 쿼리 실행에 타임아웃 추가 (25초)
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error("Query timeout after 25 seconds")), 25000)
-        );
+        // 쿼리 실행에 타임아웃 추가
+        // Vercel 환경에서는 더 짧은 타임아웃 사용 (함수 타임아웃 고려)
+        const timeoutMs = process.env.VERCEL ? 8000 : 25000; // Vercel: 8초, 로컬: 25초
+        let timeoutId: NodeJS.Timeout | null = null;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            reject(new Error(`Query timeout after ${timeoutMs / 1000} seconds`));
+          }, timeoutMs);
+        });
         
-        const result = await Promise.race([queryPromise, timeoutPromise]) as Etf[];
+        try {
+          const result = await Promise.race([queryPromise, timeoutPromise]) as Etf[];
+          // 쿼리가 성공하면 타이머 정리
+          if (timeoutId) {
+            clearTimeout(timeoutId);
+          }
+          return result;
+        } catch (error) {
+          // 에러 발생 시에도 타이머 정리
+          if (timeoutId) {
+            clearTimeout(timeoutId);
+          }
+          throw error;
+        }
         
         const queryTime = Date.now() - queryStart;
         console.log(`getEtfs returning ${result.length} ETFs in ${queryTime}ms`);
