@@ -101,7 +101,7 @@ let _pool: pg.Pool | null = null;
 let _db: ReturnType<typeof drizzle> | null = null;
 
 // Pool 재설정 함수 (연결 에러 시 사용)
-// Vercel 환경에서는 await하지 않고 즉시 반환하여 함수 종료를 방해하지 않음
+// Vercel 환경에서는 pool.end()를 호출하지 않고 즉시 반환하여 함수 종료를 방해하지 않음
 export async function resetPool(): Promise<void> {
   if (_pool) {
     const poolToClose = _pool;
@@ -111,13 +111,10 @@ export async function resetPool(): Promise<void> {
     const isVercel = !!process.env.VERCEL;
     
     if (isVercel) {
-      // Vercel 환경에서는 pool.end()를 await하지 않음
-      // 백그라운드에서 종료되도록 하고 함수는 즉시 종료
-      // pool.end()가 완료되지 않아도 Vercel이 함수를 종료시키면 연결은 자동으로 정리됨
-      poolToClose.end().catch(() => {
-        // 에러는 무시 (백그라운드 작업)
-      });
-      console.log("Pool close initiated in Vercel (non-blocking)");
+      // Vercel 환경에서는 pool.end()를 호출하지 않음
+      // 함수가 종료되면 Vercel이 모든 연결을 자동으로 정리함
+      // pool.end()를 호출하면 내부적으로 무언가를 기다리면서 함수 종료를 방해할 수 있음
+      console.log("Pool reset in Vercel (pool.end() not called - Vercel will cleanup)");
     } else {
       // 로컬 환경에서는 graceful shutdown을 위해 await
       try {
