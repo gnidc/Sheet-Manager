@@ -279,18 +279,9 @@ export default async function (req: any, res: any) {
     }
   } finally {
       // Vercel 서버리스 환경에서는 요청 완료 후 즉시 종료
-      // Pool 참조를 명시적으로 null로 설정하여 가비지 컬렉션을 유도
-      // Pool 객체가 활성 상태로 남아있으면 Node.js 이벤트 루프가 종료되지 않음
-      if (process.env.VERCEL && process.env.NODE_ENV === "production") {
-        try {
-          // Pool 참조를 명시적으로 null로 설정
-          const { clearPoolReference } = await import("../server/db.js");
-          clearPoolReference();
-          console.log("Pool reference cleared in Vercel");
-        } catch (err) {
-          // 무시
-        }
-      } else {
+      // 모든 비동기 작업을 피하고 동기적으로만 처리
+      // await import()나 resetPool() 같은 비동기 작업은 함수 종료를 지연시킬 수 있음
+      if (!process.env.VERCEL || process.env.NODE_ENV !== "production") {
         // 로컬 환경에서만 Pool 정리
         try {
           const { resetPool } = await import("../server/db.js");
@@ -299,6 +290,8 @@ export default async function (req: any, res: any) {
           console.warn("Failed to reset pool:", err);
         }
       }
+      // Vercel 환경에서는 아무것도 하지 않음
+      // 함수가 종료되면 Vercel이 자동으로 모든 리소스를 정리함
       
       // 함수 종료를 명시적으로 처리
       // Vercel 서버리스 함수는 이 시점에서 종료되어야 함
