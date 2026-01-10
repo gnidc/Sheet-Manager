@@ -97,8 +97,15 @@ function getDatabaseUrl(): string {
 }
 
 // 지연 초기화: pool과 db를 함수로 만들어서 필요할 때 초기화
+// Vercel 환경에서는 각 요청마다 새로운 Pool이 생성되고 요청 종료 시 정리됨
 let _pool: pg.Pool | null = null;
 let _db: ReturnType<typeof drizzle> | null = null;
+
+// Pool 참조를 외부에서 접근할 수 있도록 export (Vercel에서 강제 정리용)
+export function clearPoolReference(): void {
+  _pool = null;
+  _db = null;
+}
 
 // Pool 재설정 함수 (연결 에러 시 사용)
 // Vercel 환경에서는 pool.end()를 호출하지 않고 즉시 반환하여 함수 종료를 방해하지 않음
