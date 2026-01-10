@@ -58,21 +58,28 @@ function getDatabaseUrl(): string {
     throw new Error("DATABASE_URL is empty after trimming.");
   }
 
-  // Supabase 또는 Pooler 연결인 경우 sslmode=require 추가 (Vercel/AWS 인프라에서 SSL 강제 필요)
-  if ((connectionString.includes('supabase') || connectionString.includes('pooler')) && !connectionString.includes('sslmode=')) {
+  // Supabase 또는 Pooler 연결인 경우 SSL 처리
+  // .env 파일에 이미 sslmode=require가 추가되어 있을 수 있음
+  // 하지만 connection string의 sslmode가 Pool의 ssl 옵션과 충돌할 수 있으므로 제거
+  // Pool의 ssl 옵션(rejectUnauthorized: false)을 사용하는 것이 더 안정적
+  if (connectionString.includes('sslmode=')) {
     try {
       const url = new URL(connectionString);
-      // 기존 쿼리 파라미터가 있는 경우 추가, 없는 경우 새로 생성
-      url.searchParams.set('sslmode', 'require');
+      // sslmode 파라미터 제거 (Pool의 ssl 옵션 사용)
+      url.searchParams.delete('sslmode');
       connectionString = url.toString();
-      console.log("Added sslmode=require to DATABASE_URL for Supabase/Pooler connection");
+      console.log("Removed sslmode from DATABASE_URL (will use Pool SSL config instead)");
     } catch (urlError) {
-      // URL 파싱 실패 시 문자열 방식으로 추가
-      const separator = connectionString.includes('?') ? '&' : '?';
-      connectionString = `${connectionString}${separator}sslmode=require`;
-      console.log("Added sslmode=require to DATABASE_URL (fallback method)");
+      // URL 파싱 실패 시 문자열 방식으로 제거
+      connectionString = connectionString.replace(/[?&]sslmode=[^&]*/g, '');
+      // ? 다음에 파라미터가 없으면 ? 제거
+      connectionString = connectionString.replace(/\?$/, '');
+      console.log("Removed sslmode from DATABASE_URL (fallback method)");
     }
   }
+  
+  // Supabase/Pooler 연결이지만 sslmode가 없는 경우는 추가하지 않음
+  // Pool의 ssl 옵션에서 처리
 
   console.log("DATABASE_URL is set, length:", connectionString.length, "starts with:", connectionString.substring(0, 20));
   return connectionString;
@@ -130,25 +137,32 @@ export function getPool(): pg.Pool {
     // Vercel serverless 환경에 최적화된 Pool 설정
     const isVercel = !!process.env.VERCEL;
     
-            _pool = new Pool({
-              connectionString,
-              // Serverless 환경에서는 연결 수를 제한
-              max: isVercel ? 1 : 10, // Vercel에서는 최대 1개 연결 (serverless 제약)
-              min: 0, // Serverless에서는 최소 연결 수를 0으로 설정 (필요할 때만 연결)
-              idleTimeoutMillis: isVercel ? 1000 : 30000, // Vercel에서는 1초로 단축 (매우 빠른 정리)
-              connectionTimeoutMillis: isVercel ? 1000 : 30000, // 로컬에서는 30초로 증가 (Supabase 연결 시간 고려)
-              // SSL 설정
-              // connection string에 sslmode=require가 추가되면 pg 라이브러리가 자동으로 SSL 사용
-              // 하지만 명시적으로 ssl 옵션도 설정하여 일관성 유지
-              // Supabase/Pooler 또는 Vercel 환경에서는 SSL 필수
-              // rejectUnauthorized: false는 Supabase의 자체 서명된 인증서를 허용하기 위함
-              ssl: connectionString.includes('supabase') || connectionString.includes('pooler') || isVercel
-                ? { rejectUnauthorized: false } 
-                : undefined,
-              // Vercel에서는 keep-alive 비활성화 (연결을 빠르게 정리)
-              keepAlive: !isVercel, // Vercel에서는 keep-alive 비활성화
-              keepAliveInitialDelayMillis: isVercel ? 0 : 0, // Vercel에서는 사용 안 함
-            });
+    // SSL 설정 결정
+    // Supabase/Pooler 연결은 항상 SSL 필요 (로컬/Vercel 모두)
+    // connection string에 sslmode가 있으면 pg가 처리하지만, Pool의 ssl 옵션도 명시적으로 설정
+    const needsSSL = connectionString.includes('supabase') || 
+                     connectionString.includes('pooler') || 
+                     connectionString.includes('sslmode=') ||
+                     isVercel;
+    
+    // rejectUnauthorized: false는 자체 서명된 인증서(Supabase 포함)를 허용하기 위함
+    // 로컬 개발 환경에서도 Supabase 연결 시 필요
+    // connection string의 sslmode와 관계없이 Pool 레벨에서 SSL 설정
+    const sslConfig = needsSSL ? { rejectUnauthorized: false } : undefined;
+    
+    _pool = new Pool({
+      connectionString,
+      // Serverless 환경에서는 연결 수를 제한
+      max: isVercel ? 1 : 10, // Vercel에서는 최대 1개 연결 (serverless 제약)
+      min: 0, // Serverless에서는 최소 연결 수를 0으로 설정 (필요할 때만 연결)
+      idleTimeoutMillis: isVercel ? 1000 : 30000, // Vercel에서는 1초로 단축 (매우 빠른 정리)
+      connectionTimeoutMillis: isVercel ? 1000 : 30000, // 로컬에서는 30초로 증가 (Supabase 연결 시간 고려)
+      // SSL 설정 - connection string의 sslmode와 함께 명시적으로 설정
+      ssl: sslConfig,
+      // Vercel에서는 keep-alive 비활성화 (연결을 빠르게 정리)
+      keepAlive: !isVercel, // Vercel에서는 keep-alive 비활성화
+      keepAliveInitialDelayMillis: isVercel ? 0 : 0, // Vercel에서는 사용 안 함
+    });
             
     // Pool 에러 핸들링 - 연결이 끊어졌을 때 재연결
     _pool.on('error', (err: any) => {
