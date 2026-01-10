@@ -221,11 +221,10 @@ export default async function (req: any, res: any) {
       const handlerTime = Date.now() - handlerStart;
       const totalTime = Date.now() - startTime;
       
-      // serverless-http가 응답 완료를 제대로 감지하는지 확인
-      // 약간의 지연을 두고 다시 확인 (응답 전송이 비동기일 수 있음)
-      await new Promise(resolve => setTimeout(resolve, 10));
+      // Vercel 환경에서는 setTimeout을 사용하지 않음 (백그라운드 타이머가 함수 종료를 방해할 수 있음)
+      // serverless-http의 Promise 완료를 응답 전송 완료로 간주
       
-      console.log(`Handler 완료 - handler: ${handlerTime}ms, total: ${totalTime}ms, headersSent: ${res.headersSent}, finished: ${res.finished}`); // 디버깅
+      console.log(`Handler 완료 - handler: ${handlerTime}ms, total: ${totalTime}ms`); // 디버깅
       
       if (totalTime > 5000) {
         console.warn(`Slow request: total ${totalTime}ms, handler ${handlerTime}ms`);

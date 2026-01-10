@@ -113,20 +113,23 @@ export async function resetPool(): Promise<void> {
       const isVercel = !!process.env.VERCEL;
       
       if (isVercel) {
-        // Vercel에서는 타임아웃을 짧게 설정하여 빠르게 종료
-        await Promise.race([
-          poolToClose.end(),
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error("Pool close timeout")), 1000)
-          )
-        ]).catch((err) => {
-          // 타임아웃이 발생해도 계속 진행 (연결은 이미 닫히고 있을 수 있음)
-          if (err.message !== "Pool close timeout") {
-            console.error("Error closing pool:", err);
-          } else {
-            console.warn("Pool close timeout - forcing termination");
-          }
+        // Vercel에서는 타임아웃을 매우 짧게 설정하여 빠르게 종료
+        // pool.end()가 완료되지 않아도 타임아웃 후 진행하여 함수가 종료되도록 함
+        const closePromise = poolToClose.end().catch((err) => {
+          // 에러는 무시 (이미 연결이 닫혔을 수 있음)
         });
+        
+        // 100ms 타임아웃 - Vercel 서버리스 함수가 빠르게 종료되도록 함
+        await Promise.race([
+          closePromise,
+          new Promise<void>((resolve) => 
+            setTimeout(() => {
+              // 타임아웃 발생 시 즉시 resolve하여 함수 종료
+              resolve();
+            }, 100)
+          )
+        ]);
+        
         console.log("Pool closed in Vercel environment");
       } else {
         // 로컬 환경에서는 graceful shutdown
@@ -178,37 +181,44 @@ export function getPool(): pg.Pool {
     });
             
     // Pool 에러 핸들링 - 연결이 끊어졌을 때 재연결
-    _pool.on('error', (err: any) => {
-      console.error('Unexpected error on idle client', err);
-      // 연결이 끊어졌을 때 Pool을 재설정
-      if (err.code === 'ECONNRESET' || err.code === 'EPIPE' || err.message?.includes('Connection terminated')) {
-        console.log('Connection error detected, resetting pool...');
-        _pool = null;
-        _db = null;
-      }
-    });
-    
-    // 연결 생성 시 설정 및 이벤트 핸들러 등록
-    _pool.on('connect', async (client) => {
-      // statement_timeout 설정 (쿼리 실행 시간 제한)
-      try {
-        // Vercel Hobby 플랜은 10초 제한이 있으므로, 연결 타임아웃(8초) 후 남은 시간 고려
-        // 로컬에서는 30초, Vercel에서는 5초 (연결 타임아웃 8초 + 쿼리 5초 = 최대 13초지만 안전하게)
-        // 실제로는 Vercel Pro 플랜(60초)을 사용하면 더 여유 있음
-        await client.query(`SET statement_timeout = ${isVercel ? 5000 : 30000}`);
-      } catch (err) {
-        console.warn("Failed to set statement_timeout:", err);
-      }
-      
-      // 클라이언트 에러 핸들링
-      client.on('error', (err) => {
-        console.error('Client error:', err);
+    // Vercel 환경에서는 이벤트 리스너를 최소화하여 함수 종료를 방해하지 않도록 함
+    if (!isVercel) {
+      _pool.on('error', (err: any) => {
+        console.error('Unexpected error on idle client', err);
+        // 연결이 끊어졌을 때 Pool을 재설정
+        if (err.code === 'ECONNRESET' || err.code === 'EPIPE' || err.message?.includes('Connection terminated')) {
+          console.log('Connection error detected, resetting pool...');
+          _pool = null;
+          _db = null;
+        }
       });
       
-      client.on('end', () => {
-        console.log('Client connection ended');
+      // 연결 생성 시 설정 및 이벤트 핸들러 등록 (로컬 환경에서만)
+      _pool.on('connect', async (client) => {
+        // statement_timeout 설정 (쿼리 실행 시간 제한)
+        try {
+          await client.query(`SET statement_timeout = 30000`);
+        } catch (err) {
+          console.warn("Failed to set statement_timeout:", err);
+        }
+        
+        // 클라이언트 에러 핸들링
+        client.on('error', (err) => {
+          console.error('Client error:', err);
+        });
+        
+        client.on('end', () => {
+          console.log('Client connection ended');
+        });
       });
-    });
+    } else {
+      // Vercel 환경에서는 이벤트 리스너를 최소화하고, statement_timeout은 쿼리 실행 시 직접 설정
+      // 이벤트 리스너가 함수 종료를 방해할 수 있으므로 최소화
+      _pool.on('error', () => {
+        // Vercel에서는 에러 발생 시 로그만 남기고 재연결 시도하지 않음
+        // (함수가 종료되므로 재연결이 불필요)
+      });
+    }
     
     console.log(`Database pool created (max: ${isVercel ? 1 : 10}, min: 0, Vercel: ${isVercel}, connectionTimeout: ${isVercel ? 8000 : 30000}ms, SSL: ${sslConfig ? 'enabled' : 'disabled'})`);
   }
