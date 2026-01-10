@@ -101,44 +101,32 @@ let _pool: pg.Pool | null = null;
 let _db: ReturnType<typeof drizzle> | null = null;
 
 // Pool 재설정 함수 (연결 에러 시 사용)
-// async 함수로 변경하여 연결이 완전히 닫힐 때까지 기다림
+// Vercel 환경에서는 await하지 않고 즉시 반환하여 함수 종료를 방해하지 않음
 export async function resetPool(): Promise<void> {
   if (_pool) {
     const poolToClose = _pool;
     _pool = null; // 먼저 null로 설정하여 새로운 요청이 이 풀을 사용하지 않도록 함
     _db = null;
     
-    try {
-      // Vercel 환경에서는 즉시 종료 (타임아웃 방지)
-      const isVercel = !!process.env.VERCEL;
-      
-      if (isVercel) {
-        // Vercel에서는 타임아웃을 매우 짧게 설정하여 빠르게 종료
-        // pool.end()가 완료되지 않아도 타임아웃 후 진행하여 함수가 종료되도록 함
-        const closePromise = poolToClose.end().catch((err) => {
-          // 에러는 무시 (이미 연결이 닫혔을 수 있음)
-        });
-        
-        // 100ms 타임아웃 - Vercel 서버리스 함수가 빠르게 종료되도록 함
-        await Promise.race([
-          closePromise,
-          new Promise<void>((resolve) => 
-            setTimeout(() => {
-              // 타임아웃 발생 시 즉시 resolve하여 함수 종료
-              resolve();
-            }, 100)
-          )
-        ]);
-        
-        console.log("Pool closed in Vercel environment");
-      } else {
-        // 로컬 환경에서는 graceful shutdown
+    const isVercel = !!process.env.VERCEL;
+    
+    if (isVercel) {
+      // Vercel 환경에서는 pool.end()를 await하지 않음
+      // 백그라운드에서 종료되도록 하고 함수는 즉시 종료
+      // pool.end()가 완료되지 않아도 Vercel이 함수를 종료시키면 연결은 자동으로 정리됨
+      poolToClose.end().catch(() => {
+        // 에러는 무시 (백그라운드 작업)
+      });
+      console.log("Pool close initiated in Vercel (non-blocking)");
+    } else {
+      // 로컬 환경에서는 graceful shutdown을 위해 await
+      try {
         await poolToClose.end().catch((err) => {
           console.error("Error closing pool:", err);
         });
+      } catch (err) {
+        console.error("Unexpected error in resetPool:", err);
       }
-    } catch (err) {
-      console.error("Unexpected error in resetPool:", err);
     }
   }
   console.log("Pool reset - will create new connection on next request");
