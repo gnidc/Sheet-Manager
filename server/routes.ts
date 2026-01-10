@@ -107,7 +107,9 @@ export async function registerRoutes(
   
   app.get("/api/auth/me", (req, res) => {
     console.log("/api/auth/me - sessionID:", req.sessionID, "isAdmin:", req.session?.isAdmin);
-    res.json({ isAdmin: !!req.session?.isAdmin });
+    const response = { isAdmin: !!req.session?.isAdmin };
+    // serverless-http가 응답을 제대로 감지하도록 명시적으로 상태 코드와 함께 응답
+    res.status(200).json(response);
   });
   // Real-time price update endpoint
   app.post("/api/etfs/:id/refresh", async (req, res) => {

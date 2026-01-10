@@ -31,11 +31,23 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.set("trust proxy", 1);
 
-// 모든 API 응답에 Content-Type 헤더 설정
+// 모든 API 응답에 Content-Type 헤더 설정 및 응답 완료 보장
 app.use((req, res, next) => {
   // API 경로인 경우에만 JSON Content-Type 설정
   if (req.path.startsWith("/api/")) {
     res.setHeader("Content-Type", "application/json");
+    
+    // serverless-http가 응답을 제대로 감지하도록 보장
+    // 원본 res.json을 래핑하여 응답 완료를 명확히 함
+    const originalJson = res.json.bind(res);
+    res.json = function(body: any) {
+      const result = originalJson(body);
+      // 응답이 전송되지 않았다면 명시적으로 종료
+      if (!res.headersSent && !res.finished) {
+        res.end();
+      }
+      return result;
+    };
   }
   next();
 });
@@ -221,15 +233,16 @@ export default async function (req: any, res: any) {
         console.log(`Request completed - init: ${initTime}ms, handler: ${handlerTime}ms, total: ${totalTime}ms`);
       }
       
-      // 응답이 전송되지 않았다면 에러 응답 전송 (fallback)
-      // 하지만 serverless-http의 Promise가 완료되었다면 응답은 이미 전송되었을 것임
-      // 이 체크는 실제로 필요하지 않을 수 있지만, 안전을 위해 유지
-      if (!res.headersSent && !res.finished) {
-        console.warn("Response not sent by handler, but handler promise completed - response may have been sent via serverless-http");
-        // serverless-http가 응답을 전송했을 가능성이 높으므로 여기서는 추가 응답을 보내지 않음
-        // 중복 응답을 방지
+      // serverless-http의 Promise가 완료되었다면 응답은 이미 전송되었을 것임
+      // 하지만 Express의 res 객체 상태가 업데이트되지 않았을 수 있음
+      // serverless-http는 내부적으로 응답을 래핑하므로, 실제 응답 상태를 확인하기 어려움
+      // 따라서 Promise가 완료되면 응답이 전송된 것으로 간주
+      if (res.headersSent || res.finished) {
+        console.log(`Response 전송 확인 - headersSent: ${res.headersSent}, finished: ${res.finished}`);
       } else {
-        console.log(`Response 전송 확인 - headersSent: ${res.headersSent}, finished: ${res.finished}`); // 디버깅
+        // Promise가 완료되었지만 상태가 업데이트되지 않은 경우
+        // serverless-http가 응답을 처리했을 가능성이 높으므로 로그만 남김
+        console.log("Handler promise completed - response should have been sent by serverless-http");
       }
     } catch (handlerError: any) {
       // handler 실행 중 에러 발생
@@ -278,18 +291,14 @@ export default async function (req: any, res: any) {
         console.warn("Failed to reset pool in finally:", err);
       }
       
-      // 응답이 전송되지 않았다면 에러 응답 전송 (빈 응답 방지)
+      // 응답 상태 확인 (디버깅)
+      // serverless-http의 Promise가 완료되었다면 응답은 이미 처리되었을 가능성이 높음
+      // 하지만 Express의 res 객체 상태가 업데이트되지 않았을 수 있음
       if (!res.headersSent && !res.finished) {
-        console.error("Response not sent, sending error response");
-        try {
-          res.status(500).json({ 
-            message: "Internal server error: no response sent",
-            error: "The server failed to send a response"
-          });
-        } catch (err) {
-          // 응답 전송 실패는 로그만 남김
-          console.error("Failed to send error response:", err);
-        }
+        console.warn("Response status check in finally - headersSent: false, finished: false");
+        console.warn("This may indicate that serverless-http did not properly send the response");
+        // 중복 응답을 방지하기 위해 여기서는 응답을 보내지 않음
+        // 하지만 실제로 응답이 전송되지 않았다면 클라이언트는 에러를 받게 됨
       }
       
       // 함수 종료를 명시적으로 처리
