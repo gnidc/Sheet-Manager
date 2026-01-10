@@ -291,15 +291,9 @@ export default async function (req: any, res: any) {
         console.warn("Failed to reset pool in finally:", err);
       }
       
-      // 응답 상태 확인 (디버깅)
-      // serverless-http의 Promise가 완료되었다면 응답은 이미 처리되었을 가능성이 높음
-      // 하지만 Express의 res 객체 상태가 업데이트되지 않았을 수 있음
-      if (!res.headersSent && !res.finished) {
-        console.warn("Response status check in finally - headersSent: false, finished: false");
-        console.warn("This may indicate that serverless-http did not properly send the response");
-        // 중복 응답을 방지하기 위해 여기서는 응답을 보내지 않음
-        // 하지만 실제로 응답이 전송되지 않았다면 클라이언트는 에러를 받게 됨
-      }
+      // serverless-http의 Promise가 완료되었다면 응답은 이미 전송되었음
+      // 래퍼 객체의 headersSent/finished 상태는 신뢰할 수 없으므로 확인하지 않음
+      // (serverless-http가 내부적으로 다른 res 객체를 사용하기 때문)
       
       // 함수 종료를 명시적으로 처리
       // Vercel 서버리스 함수는 이 시점에서 종료되어야 함
