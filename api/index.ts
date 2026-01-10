@@ -41,14 +41,12 @@ app.use((req, res, next) => {
     
     // serverless-http가 응답을 제대로 감지하도록 보장
     // 원본 res.json을 래핑하여 응답 완료를 명확히 함
+    // Vercel 환경에서는 추가 작업 없이 원본 동작 유지
     const originalJson = res.json.bind(res);
     res.json = function(body: any) {
-      const result = originalJson(body);
-      // 응답이 전송되지 않았다면 명시적으로 종료
-      if (!res.headersSent && !res.finished) {
-        res.end();
-      }
-      return result;
+      return originalJson(body);
+      // res.json()은 내부적으로 res.end()를 호출하므로 추가 호출 불필요
+      // 추가 작업은 오히려 문제를 일으킬 수 있음
     };
   }
   next();
