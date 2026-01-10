@@ -111,33 +111,24 @@ export async function resetPool(): Promise<void> {
     const isVercel = !!process.env.VERCEL;
     
     if (isVercel) {
-      // Vercel 환경에서는 pool.end()를 호출하지 않음
-      // 대신 Pool의 모든 활성 클라이언트 연결을 즉시 종료
-      // pool.end()를 호출하면 내부적으로 무언가를 기다리면서 함수 종료를 방해할 수 있음
-      try {
-        // Pool의 모든 활성 클라이언트를 즉시 종료 (공개 API 사용)
-        // @ts-ignore - totalCount는 공개 속성이지만 타입 정의에 없을 수 있음
-        const totalClients = poolToClose.totalCount || 0;
-        if (totalClients > 0) {
-          // 모든 클라이언트의 연결을 즉시 종료
-          // Pool의 내부 클라이언트 배열에 접근하여 종료
-          const poolAny = poolToClose as any;
-          if (poolAny._clients && Array.isArray(poolAny._clients)) {
-            poolAny._clients.forEach((client: any) => {
-              try {
-                if (client && typeof client.end === 'function') {
-                  client.end();
-                }
-              } catch (e) {
-                // 무시
-              }
-            });
-          }
-        }
-      } catch (e) {
-        // Pool 정리 실패는 무시
-      }
-      console.log("Pool reset in Vercel (pool.end() not called - Vercel will cleanup)");
+      // Vercel 환경에서는 pool.end()를 매우 짧은 타임아웃과 함께 시도
+      // 타임아웃이 발생하면 즉시 진행하여 함수 종료를 방해하지 않음
+      const closePromise = poolToClose.end().catch(() => {
+        // 에러는 무시
+      });
+      
+      // 50ms 타임아웃 - 매우 짧게 설정하여 함수 종료를 방해하지 않음
+      await Promise.race([
+        closePromise,
+        new Promise<void>((resolve) => {
+          setTimeout(() => {
+            // 타임아웃 발생 시 즉시 진행 (Pool 정리는 백그라운드에서 계속됨)
+            resolve();
+          }, 50);
+        })
+      ]);
+      
+      console.log("Pool reset in Vercel (attempted close with 50ms timeout)");
     } else {
       // 로컬 환경에서는 graceful shutdown을 위해 await
       try {
