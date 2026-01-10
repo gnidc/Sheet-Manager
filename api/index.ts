@@ -53,8 +53,11 @@ app.use((req, res, next) => {
 });
 
 // Vercel에서는 메모리 스토어 사용 (서버리스 환경)
-// Vercel 서버리스에서는 checkPeriod를 비활성화하여 백그라운드 작업 방지
+// store를 undefined로 설정하면 express-session이 내부적으로 기본 MemoryStore를 생성하고
+// 이것이 setInterval 타이머를 실행하여 함수 종료를 방해함
+// 따라서 Vercel 환경에서도 MemoryStore를 명시적으로 사용하되 checkPeriod: 0으로 설정하여 타이머를 비활성화
 const isVercel = !!process.env.VERCEL;
+const MemoryStore = MemoryStoreFactory(session);
 app.use(
   session({
     secret: process.env.SESSION_SECRET || "default-secret-change-in-production",
@@ -66,11 +69,11 @@ app.use(
       maxAge: 24 * 60 * 60 * 1000,
       sameSite: "lax",
     },
-    store: isVercel 
-      ? undefined // Vercel에서는 MemoryStore를 사용하지 않음 (메모리만 사용)
-      : new (MemoryStore(session))({
-          checkPeriod: 86400000, // 로컬: 24시간
-        }),
+    // Vercel(서버리스) 환경이면 checkPeriod: 0으로 설정하여 setInterval 타이머 생성을 차단
+    // 로컬 환경에서는 checkPeriod: 86400000 (24시간)으로 설정
+    store: new MemoryStore({
+      checkPeriod: isVercel ? 0 : 86400000,
+    }),
   })
 );
 
