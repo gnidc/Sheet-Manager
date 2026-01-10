@@ -106,11 +106,10 @@ async function initializeApp() {
 
       // serverless-http로 래핑
       // Vercel의 요청 객체 구조에 맞게 설정
+      // serverless-http는 기본적으로 Vercel을 지원하며 별도의 provider 설정 불필요
       handler = serverless(app, {
         binary: ["image/*", "application/pdf"],
         requestId: 'x-vercel-id',
-        // 응답 완료를 명확히 감지하도록 설정
-        provider: 'vercel',
       });
 
       appInitialized = true;
