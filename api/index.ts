@@ -10,11 +10,13 @@ if (!process.env.VERCEL) {
 
 import express from "express";
 import session from "express-session";
-import MemoryStore from "memorystore";
+import MemoryStoreFactory from "memorystore";
 import { registerRoutes } from "../server/routes.js";
 import { serveStatic } from "../server/static.js";
 import { createServer } from "http";
 import serverless from "serverless-http";
+
+const MemoryStore = MemoryStoreFactory(session);
 
 const app = express();
 // Vercel 서버리스 환경에서는 httpServer가 필요 없지만,
@@ -57,7 +59,6 @@ app.use((req, res, next) => {
 // 이것이 setInterval 타이머를 실행하여 함수 종료를 방해함
 // 따라서 Vercel 환경에서도 MemoryStore를 명시적으로 사용하되 checkPeriod: 0으로 설정하여 타이머를 비활성화
 const isVercel = !!process.env.VERCEL;
-const MemoryStore = MemoryStoreFactory(session);
 app.use(
   session({
     secret: process.env.SESSION_SECRET || "default-secret-change-in-production",
