@@ -276,19 +276,18 @@ export default async function (req: any, res: any) {
       });
     }
   } finally {
-      // Vercel 서버리스 환경에서는 요청 완료 후 데이터베이스 연결 풀 정리
-      // 하지만 await하지 않고 즉시 반환하여 함수가 빠르게 종료되도록 함
-      if (process.env.VERCEL && process.env.NODE_ENV === "production") {
-        // resetPool()을 await하지 않고 즉시 호출만 함
-        // Vercel 환경에서는 resetPool이 내부적으로 await하지 않으므로 함수가 즉시 종료됨
-        import("../server/db.js").then(({ resetPool }) => {
-          resetPool().catch(() => {
-            // 에러는 무시 (백그라운드 작업)
-          });
-        }).catch(() => {
-          // import 실패도 무시
-        });
-        console.log("Database pool reset initiated in finally block (Vercel - non-blocking)");
+      // Vercel 서버리스 환경에서는 Pool 정리를 전혀 수행하지 않음
+      // 함수가 종료되면 Vercel이 자동으로 모든 연결을 정리함
+      // resetPool()을 호출하면 내부적으로 무언가를 기다리면서 함수 종료를 방해할 수 있음
+      // 따라서 Vercel 환경에서는 아무것도 하지 않음
+      if (!process.env.VERCEL || process.env.NODE_ENV !== "production") {
+        // 로컬 환경에서만 Pool 정리
+        try {
+          const { resetPool } = await import("../server/db.js");
+          await resetPool();
+        } catch (err) {
+          console.warn("Failed to reset pool:", err);
+        }
       }
       
       // 함수 종료를 명시적으로 처리
