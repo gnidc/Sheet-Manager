@@ -34,16 +34,23 @@ export interface IStorage {
 
 export class DatabaseStorage implements IStorage {
   async getEtfs(params?: { search?: string; mainCategory?: string; subCategory?: string; country?: string }): Promise<Etf[]> {
-    const maxRetries = 2; // 재시도 횟수 감소 (3 -> 2)
+    const maxRetries = 3; // 재시도 횟수 증가 (2 -> 3)
     let lastError: any;
-    const queryStart = Date.now();
     
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      const queryStart = Date.now();
       try {
         if (attempt > 1) {
           console.log(`getEtfs retry attempt ${attempt}/${maxRetries}`);
-          // 재시도 전에 짧은 대기 (더 짧게)
-          await new Promise(resolve => setTimeout(resolve, 50 * attempt));
+          // 재시도 전에 대기 시간 증가 (연결이 재설정될 시간 제공)
+          await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+          // Pool 재설정 (새로운 연결 시도)
+          try {
+            const { resetPool } = await import("./db.js");
+            await resetPool();
+          } catch (err) {
+            console.warn("Failed to reset pool during retry:", err);
+          }
         }
         
         const conditions = [];
@@ -66,13 +73,17 @@ export class DatabaseStorage implements IStorage {
 
         const query = db.select().from(etfs);
         
-        // conditions가 비어있지 않을 때만 where 절 추가
-        let result;
-        if (conditions.length > 0) {
-          result = await query.where(and(...conditions));
-        } else {
-          result = await query;
-        }
+        // 쿼리에 타임아웃 설정
+        const queryPromise = conditions.length > 0 
+          ? query.where(and(...conditions))
+          : query;
+        
+        // 쿼리 실행에 타임아웃 추가 (25초)
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error("Query timeout after 25 seconds")), 25000)
+        );
+        
+        const result = await Promise.race([queryPromise, timeoutPromise]) as Etf[];
         
         const queryTime = Date.now() - queryStart;
         console.log(`getEtfs returning ${result.length} ETFs in ${queryTime}ms`);
@@ -84,7 +95,11 @@ export class DatabaseStorage implements IStorage {
         return result;
       } catch (error: any) {
         lastError = error;
-        console.error(`Error in getEtfs (attempt ${attempt}/${maxRetries}):`, error.message);
+        const queryTime = Date.now() - queryStart;
+        console.error(`Error in getEtfs (attempt ${attempt}/${maxRetries}, after ${queryTime}ms):`, error.message);
+        if (error.code) {
+          console.error(`Error code: ${error.code}`);
+        }
         
         // 연결 관련 에러인 경우 재시도
         const isConnectionError = 
@@ -92,37 +107,23 @@ export class DatabaseStorage implements IStorage {
           error.code === 'EPIPE' ||
           error.code === 'ETIMEDOUT' ||
           error.code === 'ENOTFOUND' ||
+          error.code === '57P01' || // PostgreSQL: terminating connection due to administrator command
+          error.code === '57P02' || // PostgreSQL: terminating connection due to crash
+          error.code === '57P03' || // PostgreSQL: terminating connection due to idle-in-transaction timeout
           error.message?.includes('Connection terminated') ||
           error.message?.includes('timeout') ||
-          error.message?.includes('Connection closed');
+          error.message?.includes('Connection closed') ||
+          error.message?.includes('Query timeout');
         
         if (isConnectionError && attempt < maxRetries) {
-          console.log(`Connection error detected, will retry...`);
-          // Pool 재설정 (async이므로 await 사용)
-          try {
-            const { resetPool } = await import("./db.js");
-            // 빠른 재시도를 위해 타임아웃 설정
-            await Promise.race([
-              resetPool(),
-              new Promise((_, reject) => 
-                setTimeout(() => reject(new Error("Reset timeout")), 500)
-              )
-            ]).catch((err) => {
-              // 타임아웃이 발생해도 계속 진행 (연결은 이미 닫히고 있을 수 있음)
-              if (err.message !== "Reset timeout") {
-                console.warn("Error resetting pool:", err);
-              }
-            });
-          } catch (err) {
-            console.warn("Failed to reset pool during retry:", err);
-          }
-          // 다음 시도에서 새로운 연결을 시도하도록 함
+          console.log(`Connection error detected (${error.code || 'unknown'}), will retry after ${1000 * (attempt + 1)}ms...`);
           continue;
         }
         
         // 재시도할 수 없는 에러이거나 최대 재시도 횟수에 도달한 경우
         if (attempt === maxRetries) {
           console.error("Error in getEtfs (final):", error);
+          console.error("Error code:", error.code);
           console.error("Error stack:", error.stack);
           throw error;
         }

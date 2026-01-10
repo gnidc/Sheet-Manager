@@ -31,7 +31,13 @@ export async function setupVite(server: Server, app: Express) {
 
   app.use(vite.middlewares);
 
+  // API 경로가 아닌 경우에만 클라이언트 앱 서빙
   app.use("*", async (req, res, next) => {
+    // API 경로는 건너뛰기 (이미 routes.ts에서 처리됨)
+    if (req.path.startsWith("/api/")) {
+      return next();
+    }
+
     const url = req.originalUrl;
 
     try {

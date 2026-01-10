@@ -120,14 +120,17 @@ export function getPool(): pg.Pool {
               max: isVercel ? 1 : 10, // Vercel에서는 최대 1개 연결 (serverless 제약)
               min: 0, // Serverless에서는 최소 연결 수를 0으로 설정 (필요할 때만 연결)
               idleTimeoutMillis: isVercel ? 1000 : 30000, // Vercel에서는 1초로 단축 (매우 빠른 정리)
-              connectionTimeoutMillis: isVercel ? 1000 : 5000, // Vercel에서는 1초로 단축 (더 빠른 실패)
-              // SSL 설정 (Supabase는 SSL이 필요할 수 있음)
-              ssl: isVercel ? { rejectUnauthorized: false } : undefined,
+              connectionTimeoutMillis: isVercel ? 1000 : 30000, // 로컬에서는 30초로 증가 (Supabase 연결 시간 고려)
+              // SSL 설정 (Supabase는 SSL이 필요함)
+              // 로컬 개발 환경에서도 SSL을 사용해야 Supabase에 연결 가능
+              ssl: connectionString.includes('supabase') || connectionString.includes('pooler') 
+                ? { rejectUnauthorized: false } 
+                : (isVercel ? { rejectUnauthorized: false } : undefined),
               // Vercel에서는 keep-alive 비활성화 (연결을 빠르게 정리)
               keepAlive: !isVercel, // Vercel에서는 keep-alive 비활성화
               keepAliveInitialDelayMillis: isVercel ? 0 : 0, // Vercel에서는 사용 안 함
             });
-    
+            
     // Pool 에러 핸들링 - 연결이 끊어졌을 때 재연결
     _pool.on('error', (err: any) => {
       console.error('Unexpected error on idle client', err);
@@ -139,8 +142,17 @@ export function getPool(): pg.Pool {
       }
     });
     
-    // 연결 종료 시 Pool 정리
-    _pool.on('connect', (client) => {
+    // 연결 생성 시 설정 및 이벤트 핸들러 등록
+    _pool.on('connect', async (client) => {
+      // statement_timeout 설정 (쿼리 실행 시간 제한)
+      try {
+        // 로컬에서는 30초, Vercel에서는 10초
+        await client.query(`SET statement_timeout = ${isVercel ? 10000 : 30000}`);
+      } catch (err) {
+        console.warn("Failed to set statement_timeout:", err);
+      }
+      
+      // 클라이언트 에러 핸들링
       client.on('error', (err) => {
         console.error('Client error:', err);
       });

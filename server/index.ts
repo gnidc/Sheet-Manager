@@ -106,6 +106,15 @@ app.use((req, res, next) => {
     await setupVite(httpServer, app);
   }
 
+  // API 경로에 대한 404 핸들러 (Vite/serveStatic 이후에 등록)
+  // Vite/serveStatic의 catch-all이 API 경로를 건너뛰므로 여기서 처리
+  app.use((req, res) => {
+    if (req.path.startsWith("/api/")) {
+      res.status(404).json({ message: "API endpoint not found", path: req.path });
+    }
+    // API가 아닌 경로는 Vite/serveStatic이 처리하므로 여기서는 처리하지 않음
+  });
+
   // ALWAYS serve the app on the port specified in the environment variable PORT
   // Other ports are firewalled. Default to 3000 if not specified.
   // this serves both the API and the client.
