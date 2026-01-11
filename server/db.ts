@@ -120,48 +120,14 @@ export async function forceClosePool(): Promise<void> {
   const isVercel = !!process.env.VERCEL;
   
   if (isVercel) {
-    // Vercel 환경에서는 모든 클라이언트를 강제로 종료
-    try {
-      // Pool의 내부 클라이언트 배열에 접근하여 모든 연결 종료
-      const poolAny = poolToClose as any;
-      
-      // 모든 대기 중인 연결 종료
-      if (poolAny._pendingQueue && Array.isArray(poolAny._pendingQueue)) {
-        poolAny._pendingQueue.forEach((item: any) => {
-          if (item && typeof item.callback === 'function') {
-            try {
-              item.callback(new Error('Pool closed'));
-            } catch (e) {
-              // 무시
-            }
-          }
-        });
-      }
-      
-      // 모든 활성 클라이언트 종료
-      if (poolAny._clients && Array.isArray(poolAny._clients)) {
-        poolAny._clients.forEach((client: any) => {
-          try {
-            if (client && typeof client.end === 'function') {
-              client.end();
-            }
-          } catch (e) {
-            // 무시
-          }
-        });
-      }
-      
-      // Pool을 종료 상태로 설정
-      poolAny._ended = true;
-      poolAny.totalCount = 0;
-      poolAny.idleCount = 0;
-      poolAny.waitingCount = 0;
-      
-    } catch (e) {
-      // 무시
-    }
+    // Vercel 환경에서는 pool.end()를 호출하되 await하지 않음
+    // pool.end()가 완료되지 않아도 함수가 종료되도록 함
+    // 비동기 작업이므로 Promise를 반환하지만 await하지 않음
+    poolToClose.end().catch(() => {
+      // 에러는 무시 (이미 종료되었을 수 있음)
+    });
     
-    console.log("Pool forcefully closed in Vercel");
+    console.log("Pool end() called in Vercel (non-blocking)");
   } else {
     // 로컬 환경에서는 정상적으로 종료
     try {
