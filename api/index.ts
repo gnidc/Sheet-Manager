@@ -222,7 +222,7 @@ export default async function (req: any, res: any) {
     timeoutCleared = true;
     clearTimeout(timeout);
     const totalTime = Date.now() - startTime;
-    console.error(`Error in serverless handler (after ${totalTime}ms):`, error);
+    console.error(`Critical Handler Error (after ${totalTime}ms):`, error);
     console.error("Error details:", {
       message: error.message,
       code: error.code,
@@ -236,6 +236,10 @@ export default async function (req: any, res: any) {
         error: process.env.NODE_ENV === "development" ? error.message : undefined 
       });
     }
+    
+    // 에러 발생 시에도 명시적으로 return하여 함수 종료
+    console.log("Error handler completed. Terminating execution context.");
+    return;
   } finally {
     timeoutCleared = true;
     clearTimeout(timeout);
