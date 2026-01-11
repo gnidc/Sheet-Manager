@@ -8,7 +8,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import * as schema from "../shared/schema.js";
 
-const { Pool } = pg;
+const { Pool, Client } = pg;
 
 // 지연 초기화를 위한 함수
 function getDatabaseUrl(): string {
@@ -246,11 +246,45 @@ export function getPool(): pg.Pool {
   return _pool;
 }
 
-export function getDb() {
-  if (!_db) {
-    _db = drizzle(getPool(), { schema });
+// Vercel 환경에서 Client를 사용하여 쿼리를 실행하는 helper 함수
+export async function executeWithClient<T>(callback: (db: ReturnType<typeof drizzle>) => Promise<T>): Promise<T> {
+  const connectionString = getDatabaseUrl();
+  const needsSSL = connectionString.includes('supabase') || 
+                   connectionString.includes('pooler') || 
+                   connectionString.includes('sslmode=');
+  const sslConfig = needsSSL ? { rejectUnauthorized: false } : undefined;
+  
+  const client = new Client({
+    connectionString,
+    ssl: sslConfig,
+    connectionTimeoutMillis: 8000,
+  });
+  
+  try {
+    await client.connect();
+    const db = drizzle(client, { schema });
+    return await callback(db);
+  } finally {
+    await client.end();
   }
-  return _db;
+}
+
+export function getDb() {
+  const isVercel = !!process.env.VERCEL;
+  
+  if (isVercel) {
+    // Vercel 환경에서는 Pool을 사용하지 않고, executeWithClient를 사용해야 함
+    // 하지만 기존 코드 호환성을 위해 Proxy를 통해 경고를 출력하고
+    // 실제로는 각 메서드 호출마다 새로운 Client를 생성하도록 시도
+    // 이것은 완벽하지 않지만, 최소한의 변경으로 전환 가능
+    throw new Error("getDb() should not be used in Vercel - use executeWithClient() instead");
+  } else {
+    // 로컬 환경에서는 기존과 동일하게 Pool 사용
+    if (!_db) {
+      _db = drizzle(getPool(), { schema });
+    }
+    return _db;
+  }
 }
 
 // 기존 코드와의 호환성을 위해 export (완전 지연 초기화)
@@ -267,14 +301,42 @@ const poolProxy = new Proxy({} as pg.Pool, {
   }
 });
 
+// Vercel 환경에서 db 객체를 위한 Proxy
+// 각 메서드 호출 시마다 새로운 Client를 생성하고 닫음
 const dbProxy = new Proxy({} as ReturnType<typeof drizzle>, {
   get(_target, prop, _receiver) {
-    const db = getDb();
-    const value = (db as any)[prop];
-    if (typeof value === 'function') {
-      return value.bind(db);
+    const isVercel = !!process.env.VERCEL;
+    
+    if (!isVercel) {
+      // 로컬 환경에서는 기존과 동일하게 Pool 사용
+      const db = getDb();
+      const value = (db as any)[prop];
+      if (typeof value === 'function') {
+        return value.bind(db);
+      }
+      return value;
     }
-    return value;
+    
+    // Vercel 환경에서는 각 메서드 호출 시마다 새로운 Client를 생성하고 닫음
+    // Drizzle의 메서드들은 lazy하게 실행되므로, 실제 쿼리 실행 시점에 Client를 생성해야 함
+    // 따라서 Proxy를 통해 메서드를 래핑하여 각 호출 시마다 새로운 Client를 생성
+    return function(...args: any[]) {
+      return (async () => {
+        const client = createClient();
+        try {
+          await client.connect();
+          const db = drizzle(client, { schema });
+          const method = (db as any)[prop];
+          if (typeof method === 'function') {
+            const result = await method.apply(db, args);
+            return result;
+          }
+          return method;
+        } finally {
+          await client.end();
+        }
+      })();
+    };
   }
 });
 
