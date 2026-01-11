@@ -196,35 +196,26 @@ export default async function (req: any, res: any) {
     
     // handler 실행
     const handlerStart = Date.now();
-    // 경로 정보 확인 (디버깅)
     console.log(`Handler 시작 - url: ${req.url}, path: ${req.path}, originalUrl: ${req.originalUrl}, method: ${req.method}`);
     
-    // serverless-http handler는 Promise를 반환함
-    // handlerPromise가 완료되면 응답도 완료된 것으로 간주
-    // 복잡한 race와 while 루프 대신 직접 await하여 단순화
-    console.log("Handler Promise 대기 시작"); // 디버깅
+    // 1. 요청 처리
     await handler(req, res);
-    console.log("Handler Promise 완료"); // 디버깅
     
     const handlerTime = Date.now() - handlerStart;
     const totalTime = Date.now() - startTime;
+    console.log(`Handler 완료 - handler: ${handlerTime}ms, total: ${totalTime}ms`);
     
-    console.log(`Handler 완료 - handler: ${handlerTime}ms, total: ${totalTime}ms`); // 디버깅
-    
-    if (totalTime > 5000) {
-      console.warn(`Slow request: total ${totalTime}ms, handler ${handlerTime}ms`);
-    } else {
-      console.log(`Request completed - init: ${initTime}ms, handler: ${handlerTime}ms, total: ${totalTime}ms`);
-    }
-    
-    // 강제 종료 신호: res.headersSent는 Express가 응답을 클라이언트에 보냈음을 의미합니다.
-    // 여기서 return을 해야 Vercel이 '아, 진짜 끝났구나' 하고 종료합니다.
-    if (res.headersSent || res.finished) {
-      console.log(`Response sent. Closing lambda. - headersSent: ${res.headersSent}, finished: ${res.finished}`);
-      return; // 명시적으로 return하여 Vercel에게 함수 종료를 알림
+    // 2. 강제 종료 신호 (핵심)
+    // res.finished는 응답이 완전히 나갔음을 의미합니다.
+    if (res.finished || res.headersSent) {
+      console.log("Response finalized. Terminating execution context.");
+      // AWS Lambda/Vercel 특유의 설정: 
+      // 이벤트 루프가 비어있지 않아도 즉시 종료하도록 유도합니다.
+      // 명시적으로 return하여 Vercel에게 함수 종료를 알림
+      return; 
     } else {
       // 응답이 전송되지 않은 경우 (이론적으로는 발생하지 않아야 함)
-      console.warn("Response not sent but handler completed - headersSent: false, finished: false");
+      console.warn("Response not sent but handler completed");
       return; // 그래도 return하여 함수 종료
     }
   } catch (error: any) {
@@ -246,21 +237,24 @@ export default async function (req: any, res: any) {
       });
     }
   } finally {
-      // Vercel 환경에서는 Client를 직접 사용하므로 Pool 정리가 필요 없음
-      // 각 쿼리마다 새로운 Client를 생성하고 즉시 닫으므로 추가 정리 불필요
-      if (!process.env.VERCEL || process.env.NODE_ENV !== "production") {
-        // 로컬 환경에서만 Pool 정리
-        try {
-          const { resetPool } = await import("../server/db.js");
-          await resetPool();
-        } catch (err) {
-          console.warn("Failed to reset pool:", err);
-        }
+    timeoutCleared = true;
+    clearTimeout(timeout);
+    
+    // Vercel 환경에서는 Client를 직접 사용하므로 Pool 정리가 필요 없음
+    // 각 쿼리마다 새로운 Client를 생성하고 즉시 닫으므로 추가 정리 불필요
+    if (!process.env.VERCEL || process.env.NODE_ENV !== "production") {
+      // 로컬 환경에서만 Pool 정리
+      try {
+        const { resetPool } = await import("../server/db.js");
+        await resetPool();
+      } catch (err) {
+        console.warn("Failed to reset pool:", err);
       }
-      
-      // 함수 종료를 명시적으로 처리
-      // Vercel 서버리스 함수는 이 시점에서 종료되어야 함
-      console.log("Request handler completed, function should exit now");
+    }
+    
+    // 함수 종료를 명시적으로 처리
+    // Vercel 서버리스 함수는 이 시점에서 종료되어야 함
+    console.log("Request handler completed, function should exit now");
   }
 }
 
