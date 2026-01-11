@@ -57,6 +57,16 @@ app.use((req, res, next) => {
 // 이것이 setInterval 타이머를 실행하여 함수 종료를 방해함
 // 따라서 Vercel 환경에서도 MemoryStore를 명시적으로 사용하되 checkPeriod: 0으로 설정하여 타이머를 비활성화
 const isVercel = !!process.env.VERCEL;
+
+// MemoryStore 인스턴스를 변수로 빼서 관리
+// checkPeriod: 0이면 setInterval이 아예 실행 안 됨
+const sessionStore = new MemoryStore({
+  checkPeriod: isVercel ? 0 : 86400000, // Vercel: 0 (타이머 비활성화), 로컬: 24시간
+});
+
+// checkPeriod가 제대로 설정되었는지 로그로 확인
+console.log(`Session store created - checkPeriod: ${isVercel ? 0 : 86400000}, isVercel: ${isVercel}`);
+
 app.use(
   session({
     secret: process.env.SESSION_SECRET || "default-secret-change-in-production",
@@ -68,11 +78,7 @@ app.use(
       maxAge: 24 * 60 * 60 * 1000,
       sameSite: "lax",
     },
-    // Vercel(서버리스) 환경이면 checkPeriod: 0으로 설정하여 setInterval 타이머 생성을 차단
-    // 로컬 환경에서는 checkPeriod: 86400000 (24시간)으로 설정
-    store: new MemoryStore({
-      checkPeriod: isVercel ? 0 : 86400000,
-    }),
+    store: sessionStore, // 변수로 관리되는 MemoryStore 사용
   })
 );
 
@@ -211,53 +217,30 @@ export default async function (req: any, res: any) {
     // serverless-http handler는 Promise를 반환함
     // handlerPromise가 완료되면 응답도 완료된 것으로 간주
     // 복잡한 race와 while 루프 대신 직접 await하여 단순화
-    const handlerPromise = handler(req, res);
+    console.log("Handler Promise 대기 시작"); // 디버깅
+    await handler(req, res);
+    console.log("Handler Promise 완료"); // 디버깅
     
-    try {
-      // handlerPromise가 완료될 때까지 직접 기다림
-      // serverless-http가 제공하는 Promise를 믿고 기다리는 방식
-      console.log("Handler Promise 대기 시작"); // 디버깅
-      await handlerPromise;
-      console.log("Handler Promise 완료"); // 디버깅
-      
-      const handlerTime = Date.now() - handlerStart;
-      const totalTime = Date.now() - startTime;
-      
-      // Vercel 환경에서는 setTimeout을 사용하지 않음 (백그라운드 타이머가 함수 종료를 방해할 수 있음)
-      // serverless-http의 Promise 완료를 응답 전송 완료로 간주
-      
-      console.log(`Handler 완료 - handler: ${handlerTime}ms, total: ${totalTime}ms`); // 디버깅
-      
-      if (totalTime > 5000) {
-        console.warn(`Slow request: total ${totalTime}ms, handler ${handlerTime}ms`);
-      } else {
-        console.log(`Request completed - init: ${initTime}ms, handler: ${handlerTime}ms, total: ${totalTime}ms`);
-      }
-      
-      // serverless-http의 Promise가 완료되었다면 응답은 이미 전송되었을 것임
-      // 하지만 Express의 res 객체 상태가 업데이트되지 않았을 수 있음
-      // serverless-http는 내부적으로 응답을 래핑하므로, 실제 응답 상태를 확인하기 어려움
-      // 따라서 Promise가 완료되면 응답이 전송된 것으로 간주
-      if (res.headersSent || res.finished) {
-        console.log(`Response 전송 확인 - headersSent: ${res.headersSent}, finished: ${res.finished}`);
-      } else {
-        // Promise가 완료되었지만 상태가 업데이트되지 않은 경우
-        // serverless-http가 응답을 처리했을 가능성이 높으므로 로그만 남김
-        console.log("Handler promise completed - response should have been sent by serverless-http");
-      }
-    } catch (handlerError: any) {
-      // handler 실행 중 에러 발생
-      const handlerTime = Date.now() - handlerStart;
-      console.error(`Handler error after ${handlerTime}ms:`, handlerError);
-      
-      // 에러 발생 시에도 반드시 JSON 응답 전송
-      if (!res.headersSent) {
-        res.status(500).json({ 
-          message: "Internal server error",
-          error: process.env.NODE_ENV === "development" ? handlerError.message : undefined
-        });
-      }
-      // 에러는 상위 catch 블록에서도 처리되므로 여기서는 로그만 남김
+    const handlerTime = Date.now() - handlerStart;
+    const totalTime = Date.now() - startTime;
+    
+    console.log(`Handler 완료 - handler: ${handlerTime}ms, total: ${totalTime}ms`); // 디버깅
+    
+    if (totalTime > 5000) {
+      console.warn(`Slow request: total ${totalTime}ms, handler ${handlerTime}ms`);
+    } else {
+      console.log(`Request completed - init: ${initTime}ms, handler: ${handlerTime}ms, total: ${totalTime}ms`);
+    }
+    
+    // 강제 종료 신호: res.headersSent는 Express가 응답을 클라이언트에 보냈음을 의미합니다.
+    // 여기서 return을 해야 Vercel이 '아, 진짜 끝났구나' 하고 종료합니다.
+    if (res.headersSent || res.finished) {
+      console.log(`Response sent. Closing lambda. - headersSent: ${res.headersSent}, finished: ${res.finished}`);
+      return; // 명시적으로 return하여 Vercel에게 함수 종료를 알림
+    } else {
+      // 응답이 전송되지 않은 경우 (이론적으로는 발생하지 않아야 함)
+      console.warn("Response not sent but handler completed - headersSent: false, finished: false");
+      return; // 그래도 return하여 함수 종료
     }
   } catch (error: any) {
     timeoutCleared = true;
