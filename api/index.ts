@@ -278,20 +278,10 @@ export default async function (req: any, res: any) {
       });
     }
   } finally {
-      // Vercel 서버리스 환경에서는 요청 완료 후 Pool을 강제로 종료
-      // Pool 객체가 활성 상태로 남아있으면 이벤트 루프가 종료되지 않음
-      if (process.env.VERCEL && process.env.NODE_ENV === "production") {
-        try {
-          // 비동기 작업이지만 매우 빠르게 완료되어야 함
-          // Pool의 모든 연결을 강제로 종료하여 이벤트 루프가 종료되도록 함
-          const { forceClosePool } = await import("../server/db.js");
-          await forceClosePool();
-          console.log("Pool forcefully closed in Vercel finally block");
-        } catch (err) {
-          // 에러는 무시 (Pool이 이미 종료되었을 수 있음)
-        }
-      } else {
-        // 로컬 환경에서는 정상적으로 Pool 정리
+      // Vercel 환경에서는 Client를 직접 사용하므로 Pool 정리가 필요 없음
+      // 각 쿼리마다 새로운 Client를 생성하고 즉시 닫으므로 추가 정리 불필요
+      if (!process.env.VERCEL || process.env.NODE_ENV !== "production") {
+        // 로컬 환경에서만 Pool 정리
         try {
           const { resetPool } = await import("../server/db.js");
           await resetPool();

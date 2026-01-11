@@ -1,4 +1,4 @@
-import { db } from "./db.js";
+import { db, executeWithClient } from "./db.js";
 import {
   etfs,
   etfTrends,
@@ -77,6 +77,43 @@ export class DatabaseStorage implements IStorage {
           conditions.push(eq(etfs.country, params.country));
         }
 
+        // Vercel 환경에서는 executeWithClient를 사용하여 각 쿼리마다 새로운 Client를 생성하고 닫음
+        if (process.env.VERCEL) {
+          const result = await executeWithClient(async (db) => {
+            const query = db.select().from(etfs);
+            const queryPromise = conditions.length > 0 
+              ? query.where(and(...conditions))
+              : query;
+            
+            // 쿼리 실행에 타임아웃 추가
+            const timeoutMs = 8000; // Vercel: 8초
+            let timeoutId: NodeJS.Timeout | null = null;
+            const timeoutPromise = new Promise<never>((_, reject) => {
+              timeoutId = setTimeout(() => {
+                reject(new Error(`Query timeout after ${timeoutMs / 1000} seconds`));
+              }, timeoutMs);
+            });
+            
+            try {
+              const result = await Promise.race([queryPromise, timeoutPromise]) as Etf[];
+              if (timeoutId) {
+                clearTimeout(timeoutId);
+              }
+              return result;
+            } catch (error) {
+              if (timeoutId) {
+                clearTimeout(timeoutId);
+              }
+              throw error;
+            }
+          });
+          
+          const queryTime = Date.now() - queryStart;
+          console.log(`getEtfs returning ${result.length} ETFs in ${queryTime}ms`);
+          return result;
+        }
+        
+        // 로컬 환경에서는 기존 방식 사용 (Pool)
         const query = db.select().from(etfs);
         
         // 쿼리에 타임아웃 설정
@@ -85,8 +122,7 @@ export class DatabaseStorage implements IStorage {
           : query;
         
         // 쿼리 실행에 타임아웃 추가
-        // Vercel 환경에서는 더 짧은 타임아웃 사용 (함수 타임아웃 고려)
-        const timeoutMs = process.env.VERCEL ? 8000 : 25000; // Vercel: 8초, 로컬: 25초
+        const timeoutMs = 25000; // 로컬: 25초
         let timeoutId: NodeJS.Timeout | null = null;
         const timeoutPromise = new Promise<never>((_, reject) => {
           timeoutId = setTimeout(() => {
@@ -100,6 +136,9 @@ export class DatabaseStorage implements IStorage {
           if (timeoutId) {
             clearTimeout(timeoutId);
           }
+          
+          const queryTime = Date.now() - queryStart;
+          console.log(`getEtfs returning ${result.length} ETFs in ${queryTime}ms`);
           return result;
         } catch (error) {
           // 에러 발생 시에도 타이머 정리
@@ -167,16 +206,37 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getEtf(id: number): Promise<Etf | undefined> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [etf] = await db.select().from(etfs).where(eq(etfs.id, id));
+        return etf;
+      });
+    }
     const [etf] = await db.select().from(etfs).where(eq(etfs.id, id));
     return etf;
   }
 
   async createEtf(insertEtf: InsertEtf): Promise<Etf> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [etf] = await db.insert(etfs).values(insertEtf).returning();
+        return etf;
+      });
+    }
     const [etf] = await db.insert(etfs).values(insertEtf).returning();
     return etf;
   }
 
   async updateEtf(id: number, updates: UpdateEtfRequest): Promise<Etf> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [updated] = await db.update(etfs)
+          .set(updates)
+          .where(eq(etfs.id, id))
+          .returning();
+        return updated;
+      });
+    }
     const [updated] = await db.update(etfs)
       .set(updates)
       .where(eq(etfs.id, id))
@@ -185,31 +245,73 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteEtf(id: number): Promise<void> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        await db.delete(etfs).where(eq(etfs.id, id));
+      });
+    }
     await db.delete(etfs).where(eq(etfs.id, id));
   }
+  
   async getRecommendedEtfs(): Promise<Etf[]> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(etfs).where(eq(etfs.isRecommended, true));
+      });
+    }
     return await db.select().from(etfs).where(eq(etfs.isRecommended, true));
   }
 
   async getTrendingEtfs(): Promise<Etf[]> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(etfs).orderBy(desc(etfs.trendScore)).limit(5);
+      });
+    }
     return await db.select().from(etfs).orderBy(desc(etfs.trendScore)).limit(5);
   }
 
   async getEtfTrends(): Promise<EtfTrend[]> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(etfTrends).orderBy(desc(etfTrends.createdAt));
+      });
+    }
     return await db.select().from(etfTrends).orderBy(desc(etfTrends.createdAt));
   }
 
   async getEtfTrend(id: number): Promise<EtfTrend | undefined> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [trend] = await db.select().from(etfTrends).where(eq(etfTrends.id, id));
+        return trend;
+      });
+    }
     const [trend] = await db.select().from(etfTrends).where(eq(etfTrends.id, id));
     return trend;
   }
 
   async createEtfTrend(trend: InsertEtfTrend): Promise<EtfTrend> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [newTrend] = await db.insert(etfTrends).values(trend).returning();
+        return newTrend;
+      });
+    }
     const [newTrend] = await db.insert(etfTrends).values(trend).returning();
     return newTrend;
   }
 
   async updateEtfTrend(id: number, comment: string): Promise<EtfTrend> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [updated] = await db.update(etfTrends)
+          .set({ comment })
+          .where(eq(etfTrends.id, id))
+          .returning();
+        return updated;
+      });
+    }
     const [updated] = await db.update(etfTrends)
       .set({ comment })
       .where(eq(etfTrends.id, id))
@@ -218,6 +320,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteEtfTrend(id: number): Promise<void> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        await db.delete(etfTrends).where(eq(etfTrends.id, id));
+      });
+    }
     await db.delete(etfTrends).where(eq(etfTrends.id, id));
   }
 
@@ -226,6 +333,18 @@ export class DatabaseStorage implements IStorage {
     const days = periodDays[period];
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
+    
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select()
+          .from(etfPriceHistory)
+          .where(and(
+            eq(etfPriceHistory.etfId, etfId),
+            gte(etfPriceHistory.date, startDate)
+          ))
+          .orderBy(etfPriceHistory.date);
+      });
+    }
     
     return await db.select()
       .from(etfPriceHistory)
