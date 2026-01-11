@@ -278,11 +278,20 @@ export default async function (req: any, res: any) {
       });
     }
   } finally {
-      // Vercel 서버리스 환경에서는 요청 완료 후 즉시 종료
-      // 모든 비동기 작업을 피하고 동기적으로만 처리
-      // await import()나 resetPool() 같은 비동기 작업은 함수 종료를 지연시킬 수 있음
-      if (!process.env.VERCEL || process.env.NODE_ENV !== "production") {
-        // 로컬 환경에서만 Pool 정리
+      // Vercel 서버리스 환경에서는 요청 완료 후 Pool을 강제로 종료
+      // Pool 객체가 활성 상태로 남아있으면 이벤트 루프가 종료되지 않음
+      if (process.env.VERCEL && process.env.NODE_ENV === "production") {
+        try {
+          // 비동기 작업이지만 매우 빠르게 완료되어야 함
+          // Pool의 모든 연결을 강제로 종료하여 이벤트 루프가 종료되도록 함
+          const { forceClosePool } = await import("../server/db.js");
+          await forceClosePool();
+          console.log("Pool forcefully closed in Vercel finally block");
+        } catch (err) {
+          // 에러는 무시 (Pool이 이미 종료되었을 수 있음)
+        }
+      } else {
+        // 로컬 환경에서는 정상적으로 Pool 정리
         try {
           const { resetPool } = await import("../server/db.js");
           await resetPool();
@@ -290,8 +299,6 @@ export default async function (req: any, res: any) {
           console.warn("Failed to reset pool:", err);
         }
       }
-      // Vercel 환경에서는 아무것도 하지 않음
-      // 함수가 종료되면 Vercel이 자동으로 모든 리소스를 정리함
       
       // 함수 종료를 명시적으로 처리
       // Vercel 서버리스 함수는 이 시점에서 종료되어야 함
