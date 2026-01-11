@@ -9,21 +9,18 @@ if (!process.env.VERCEL) {
 }
 
 import express from "express";
-import session from "express-session";
-import MemoryStoreFactory from "memorystore";
+import cookieSession from "cookie-session";
 import { registerRoutes } from "../server/routes.js";
 import { serveStatic } from "../server/static.js";
 import { createServer } from "http";
 import serverless from "serverless-http";
-
-const MemoryStore = MemoryStoreFactory(session);
 
 const app = express();
 // Vercel 서버리스 환경에서는 httpServer가 필요 없지만,
 // registerRoutes가 httpServer를 요구하므로 생성 (실제로는 사용되지 않음)
 const httpServer = createServer(app);
 
-declare module "express-session" {
+declare module "cookie-session" {
   interface SessionData {
     isAdmin?: boolean;
   }
@@ -52,33 +49,21 @@ app.use((req, res, next) => {
   next();
 });
 
-// Vercel에서는 메모리 스토어 사용 (서버리스 환경)
-// store를 undefined로 설정하면 express-session이 내부적으로 기본 MemoryStore를 생성하고
-// 이것이 setInterval 타이머를 실행하여 함수 종료를 방해함
-// 따라서 Vercel 환경에서도 MemoryStore를 명시적으로 사용하되 checkPeriod: 0으로 설정하여 타이머를 비활성화
+// Vercel에서는 cookie-session 사용 (타이머를 사용하지 않음)
+// cookie-session은 쿠키에 직접 저장하므로 setInterval 타이머가 없어 Vercel에 적합
+// express-session의 MemoryStore는 setInterval을 사용하여 함수 종료를 방해함
 const isVercel = !!process.env.VERCEL;
 
-// MemoryStore 인스턴스를 변수로 빼서 관리
-// checkPeriod: 0이면 setInterval이 아예 실행 안 됨
-const sessionStore = new MemoryStore({
-  checkPeriod: isVercel ? 0 : 86400000, // Vercel: 0 (타이머 비활성화), 로컬: 24시간
-});
-
-// checkPeriod가 제대로 설정되었는지 로그로 확인
-console.log(`Session store created - checkPeriod: ${isVercel ? 0 : 86400000}, isVercel: ${isVercel}`);
+console.log(`Using cookie-session (no timers) - isVercel: ${isVercel}`);
 
 app.use(
-  session({
-    secret: process.env.SESSION_SECRET || "default-secret-change-in-production",
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      secure: process.env.NODE_ENV === "production",
-      httpOnly: true,
-      maxAge: 24 * 60 * 60 * 1000,
-      sameSite: "lax",
-    },
-    store: sessionStore, // 변수로 관리되는 MemoryStore 사용
+  cookieSession({
+    name: "session",
+    keys: [process.env.SESSION_SECRET || "default-secret-change-in-production"],
+    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    secure: process.env.NODE_ENV === "production",
+    httpOnly: true,
+    sameSite: "lax",
   })
 );
 

@@ -86,27 +86,21 @@ export async function registerRoutes(
     }
     
     req.session.isAdmin = true;
-    req.session.save((err) => {
-      if (err) {
-        console.log("Session save error:", err);
-        return res.status(500).json({ message: "Session save failed" });
-      }
-      console.log("Login successful, session saved, sessionID:", req.sessionID);
-      res.json({ success: true, isAdmin: true });
-    });
+    // cookie-session은 자동으로 저장되므로 save() 호출 불필요
+    // cookie-session은 sessionID를 지원하지 않으므로 로그에서 제외
+    console.log("Login successful, session saved");
+    res.json({ success: true, isAdmin: true });
   });
   
   app.post("/api/auth/logout", (req, res) => {
-    req.session.destroy((err) => {
-      if (err) {
-        return res.status(500).json({ message: "Logout failed" });
-      }
-      res.json({ success: true });
-    });
+    // cookie-session은 destroy()를 동기적으로 처리
+    req.session = null;
+    res.json({ success: true });
   });
   
   app.get("/api/auth/me", (req, res) => {
-    console.log("/api/auth/me - sessionID:", req.sessionID, "isAdmin:", req.session?.isAdmin);
+    // cookie-session은 sessionID를 지원하지 않으므로 로그에서 제외
+    console.log("/api/auth/me - isAdmin:", req.session?.isAdmin);
     const response = { isAdmin: !!req.session?.isAdmin };
     // serverless-http가 응답을 제대로 감지하도록 명시적으로 상태 코드와 함께 응답
     res.status(200).json(response);
