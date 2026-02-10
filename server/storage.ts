@@ -1,275 +1,67 @@
 import { db, executeWithClient } from "./db.js";
 import {
-  etfs,
   etfTrends,
-  etfPriceHistory,
-  type Etf,
-  type InsertEtf,
-  type UpdateEtfRequest,
+  autoTradeRules,
+  tradingOrders,
+  bookmarks,
+  users,
+  userTradingConfigs,
   type EtfTrend,
   type InsertEtfTrend,
-  type EtfPriceHistory,
-  type HistoryPeriod
+  type AutoTradeRule,
+  type InsertAutoTradeRule,
+  type TradingOrder,
+  type InsertTradingOrder,
+  type Bookmark,
+  type InsertBookmark,
+  type User,
+  type InsertUser,
+  type UserTradingConfig,
+  type InsertUserTradingConfig,
 } from "../shared/schema.js";
-import { eq, ilike, and, desc, gte, sql } from "drizzle-orm";
+import { eq, and, desc, isNull } from "drizzle-orm";
 
 export interface IStorage {
-  getEtfs(params?: { search?: string; mainCategory?: string; subCategory?: string; country?: string }): Promise<Etf[]>;
-  getEtf(id: number): Promise<Etf | undefined>;
-  createEtf(etf: InsertEtf): Promise<Etf>;
-  updateEtf(id: number, updates: UpdateEtfRequest): Promise<Etf>;
-  deleteEtf(id: number): Promise<void>;
-  getRecommendedEtfs(): Promise<Etf[]>;
-  getTrendingEtfs(): Promise<Etf[]>;
-  
+  // ETF Trends
   getEtfTrends(): Promise<EtfTrend[]>;
   getEtfTrend(id: number): Promise<EtfTrend | undefined>;
   createEtfTrend(trend: InsertEtfTrend): Promise<EtfTrend>;
   updateEtfTrend(id: number, comment: string): Promise<EtfTrend>;
   deleteEtfTrend(id: number): Promise<void>;
   
-  // Price history
-  getEtfPriceHistory(etfId: number, period: HistoryPeriod): Promise<EtfPriceHistory[]>;
+  // Trading - Auto Trade Rules
+  getAutoTradeRules(userId?: number): Promise<AutoTradeRule[]>;
+  getAutoTradeRule(id: number): Promise<AutoTradeRule | undefined>;
+  getActiveAutoTradeRules(userId?: number): Promise<AutoTradeRule[]>;
+  createAutoTradeRule(rule: InsertAutoTradeRule): Promise<AutoTradeRule>;
+  updateAutoTradeRule(id: number, updates: Partial<InsertAutoTradeRule>): Promise<AutoTradeRule>;
+  deleteAutoTradeRule(id: number): Promise<void>;
+  
+  // Trading - Orders
+  getTradingOrders(limit?: number, userId?: number): Promise<TradingOrder[]>;
+  createTradingOrder(order: InsertTradingOrder): Promise<TradingOrder>;
+  updateTradingOrder(id: number, updates: Partial<InsertTradingOrder>): Promise<TradingOrder>;
+
+  // Bookmarks
+  getBookmarks(userId?: number): Promise<Bookmark[]>;
+  getBookmarkById(id: number): Promise<Bookmark | undefined>;
+  createBookmark(bookmark: InsertBookmark): Promise<Bookmark>;
+  updateBookmark(id: number, updates: Partial<InsertBookmark>): Promise<Bookmark>;
+  deleteBookmark(id: number): Promise<void>;
+
+  // Users
+  getUserByGoogleId(googleId: string): Promise<User | undefined>;
+  createUser(user: InsertUser): Promise<User>;
+  getUser(id: number): Promise<User | undefined>;
+
+  // User Trading Configs
+  getUserTradingConfig(userId: number): Promise<UserTradingConfig | undefined>;
+  upsertUserTradingConfig(config: InsertUserTradingConfig): Promise<UserTradingConfig>;
+  deleteUserTradingConfig(userId: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
-  async getEtfs(params?: { search?: string; mainCategory?: string; subCategory?: string; country?: string }): Promise<Etf[]> {
-    const maxRetries = 3; // 재시도 횟수 증가 (2 -> 3)
-    let lastError: any;
-    
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      const queryStart = Date.now();
-      try {
-        if (attempt > 1) {
-          console.log(`getEtfs retry attempt ${attempt}/${maxRetries}`);
-          // 재시도 전에 대기 시간 증가 (연결이 재설정될 시간 제공)
-          // Vercel 환경에서는 setTimeout을 최소화하여 함수 종료를 방해하지 않도록 함
-          if (!process.env.VERCEL) {
-            await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-            // Pool 재설정 (새로운 연결 시도) - 로컬 환경에서만
-            try {
-              const { resetPool } = await import("./db.js");
-              await resetPool();
-            } catch (err) {
-              console.warn("Failed to reset pool during retry:", err);
-            }
-          } else {
-            // Vercel 환경에서는 매우 짧은 대기만 수행
-            await new Promise(resolve => setTimeout(resolve, 100));
-          }
-        }
-        
-        const conditions = [];
-        
-        if (params?.search) {
-          conditions.push(ilike(etfs.name, `%${params.search}%`));
-        }
-        
-        if (params?.mainCategory) {
-          conditions.push(eq(etfs.mainCategory, params.mainCategory));
-        }
-
-        if (params?.subCategory) {
-          conditions.push(eq(etfs.subCategory, params.subCategory));
-        }
-
-        if (params?.country) {
-          conditions.push(eq(etfs.country, params.country));
-        }
-
-        // Vercel 환경에서는 executeWithClient를 사용하여 각 쿼리마다 새로운 Client를 생성하고 닫음
-        if (process.env.VERCEL) {
-          const result = await executeWithClient(async (db) => {
-            const query = db.select().from(etfs);
-            const queryPromise = conditions.length > 0 
-              ? query.where(and(...conditions))
-              : query;
-            
-            // 쿼리 실행에 타임아웃 추가
-            const timeoutMs = 8000; // Vercel: 8초
-            let timeoutId: NodeJS.Timeout | null = null;
-            const timeoutPromise = new Promise<never>((_, reject) => {
-              timeoutId = setTimeout(() => {
-                reject(new Error(`Query timeout after ${timeoutMs / 1000} seconds`));
-              }, timeoutMs);
-            });
-            
-            try {
-              const result = await Promise.race([queryPromise, timeoutPromise]) as Etf[];
-              if (timeoutId) {
-                clearTimeout(timeoutId);
-              }
-              return result;
-            } catch (error) {
-              if (timeoutId) {
-                clearTimeout(timeoutId);
-              }
-              throw error;
-            }
-          });
-          
-          const queryTime = Date.now() - queryStart;
-          console.log(`getEtfs returning ${result.length} ETFs in ${queryTime}ms`);
-          return result;
-        }
-        
-        // 로컬 환경에서는 기존 방식 사용 (Pool)
-        const query = db.select().from(etfs);
-        
-        // 쿼리에 타임아웃 설정
-        const queryPromise = conditions.length > 0 
-          ? query.where(and(...conditions))
-          : query;
-        
-        // 쿼리 실행에 타임아웃 추가
-        const timeoutMs = 25000; // 로컬: 25초
-        let timeoutId: NodeJS.Timeout | null = null;
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          timeoutId = setTimeout(() => {
-            reject(new Error(`Query timeout after ${timeoutMs / 1000} seconds`));
-          }, timeoutMs);
-        });
-        
-        try {
-          const result = await Promise.race([queryPromise, timeoutPromise]) as Etf[];
-          // 쿼리가 성공하면 타이머 정리
-          if (timeoutId) {
-            clearTimeout(timeoutId);
-          }
-          
-          const queryTime = Date.now() - queryStart;
-          console.log(`getEtfs returning ${result.length} ETFs in ${queryTime}ms`);
-          return result;
-        } catch (error) {
-          // 에러 발생 시에도 타이머 정리
-          if (timeoutId) {
-            clearTimeout(timeoutId);
-          }
-          throw error;
-        }
-        
-        const queryTime = Date.now() - queryStart;
-        console.log(`getEtfs returning ${result.length} ETFs in ${queryTime}ms`);
-        
-        if (queryTime > 3000) {
-          console.warn(`Slow query detected: ${queryTime}ms (should be < 3000ms)`);
-        }
-        
-        return result;
-      } catch (error: any) {
-        lastError = error;
-        const queryTime = Date.now() - queryStart;
-        console.error(`Error in getEtfs (attempt ${attempt}/${maxRetries}, after ${queryTime}ms):`, error.message);
-        if (error.code) {
-          console.error(`Error code: ${error.code}`);
-        }
-        
-        // 연결 관련 에러인 경우 재시도
-        const isConnectionError = 
-          error.code === 'ECONNRESET' ||
-          error.code === 'EPIPE' ||
-          error.code === 'ETIMEDOUT' ||
-          error.code === 'ENOTFOUND' ||
-          error.code === '57P01' || // PostgreSQL: terminating connection due to administrator command
-          error.code === '57P02' || // PostgreSQL: terminating connection due to crash
-          error.code === '57P03' || // PostgreSQL: terminating connection due to idle-in-transaction timeout
-          error.message?.includes('Connection terminated') ||
-          error.message?.includes('timeout') ||
-          error.message?.includes('Connection closed') ||
-          error.message?.includes('Query timeout');
-        
-        if (isConnectionError && attempt < maxRetries) {
-          console.log(`Connection error detected (${error.code || 'unknown'}), will retry after ${1000 * (attempt + 1)}ms...`);
-          // Vercel 환경에서는 resetPool()을 호출하지 않음 (함수 종료를 방해할 수 있음)
-          if (!process.env.VERCEL) {
-            try {
-              const { resetPool } = await import("./db.js");
-              await resetPool();
-            } catch (err) {
-              console.warn("Failed to reset pool during retry:", err);
-            }
-          }
-          continue;
-        }
-        
-        // 재시도할 수 없는 에러이거나 최대 재시도 횟수에 도달한 경우
-        if (attempt === maxRetries) {
-          console.error("Error in getEtfs (final):", error);
-          console.error("Error code:", error.code);
-          console.error("Error stack:", error.stack);
-          throw error;
-        }
-      }
-    }
-    
-    throw lastError;
-  }
-
-  async getEtf(id: number): Promise<Etf | undefined> {
-    if (process.env.VERCEL) {
-      return await executeWithClient(async (db) => {
-        const [etf] = await db.select().from(etfs).where(eq(etfs.id, id));
-        return etf;
-      });
-    }
-    const [etf] = await db.select().from(etfs).where(eq(etfs.id, id));
-    return etf;
-  }
-
-  async createEtf(insertEtf: InsertEtf): Promise<Etf> {
-    if (process.env.VERCEL) {
-      return await executeWithClient(async (db) => {
-        const [etf] = await db.insert(etfs).values(insertEtf).returning();
-        return etf;
-      });
-    }
-    const [etf] = await db.insert(etfs).values(insertEtf).returning();
-    return etf;
-  }
-
-  async updateEtf(id: number, updates: UpdateEtfRequest): Promise<Etf> {
-    if (process.env.VERCEL) {
-      return await executeWithClient(async (db) => {
-        const [updated] = await db.update(etfs)
-          .set(updates)
-          .where(eq(etfs.id, id))
-          .returning();
-        return updated;
-      });
-    }
-    const [updated] = await db.update(etfs)
-      .set(updates)
-      .where(eq(etfs.id, id))
-      .returning();
-    return updated;
-  }
-
-  async deleteEtf(id: number): Promise<void> {
-    if (process.env.VERCEL) {
-      return await executeWithClient(async (db) => {
-        await db.delete(etfs).where(eq(etfs.id, id));
-      });
-    }
-    await db.delete(etfs).where(eq(etfs.id, id));
-  }
-  
-  async getRecommendedEtfs(): Promise<Etf[]> {
-    if (process.env.VERCEL) {
-      return await executeWithClient(async (db) => {
-        return await db.select().from(etfs).where(eq(etfs.isRecommended, true));
-      });
-    }
-    return await db.select().from(etfs).where(eq(etfs.isRecommended, true));
-  }
-
-  async getTrendingEtfs(): Promise<Etf[]> {
-    if (process.env.VERCEL) {
-      return await executeWithClient(async (db) => {
-        return await db.select().from(etfs).orderBy(desc(etfs.trendScore)).limit(5);
-      });
-    }
-    return await db.select().from(etfs).orderBy(desc(etfs.trendScore)).limit(5);
-  }
+  // ========== ETF Trends ==========
 
   async getEtfTrends(): Promise<EtfTrend[]> {
     if (process.env.VERCEL) {
@@ -328,31 +120,269 @@ export class DatabaseStorage implements IStorage {
     await db.delete(etfTrends).where(eq(etfTrends.id, id));
   }
 
-  async getEtfPriceHistory(etfId: number, period: HistoryPeriod): Promise<EtfPriceHistory[]> {
-    const periodDays = { "1M": 30, "3M": 90, "6M": 180, "1Y": 365 };
-    const days = periodDays[period];
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - days);
-    
+  // ========== Trading - Auto Trade Rules ==========
+  
+  async getAutoTradeRules(userId?: number): Promise<AutoTradeRule[]> {
+    const condition = userId ? eq(autoTradeRules.userId, userId) : undefined;
     if (process.env.VERCEL) {
       return await executeWithClient(async (db) => {
-        return await db.select()
-          .from(etfPriceHistory)
-          .where(and(
-            eq(etfPriceHistory.etfId, etfId),
-            gte(etfPriceHistory.date, startDate)
-          ))
-          .orderBy(etfPriceHistory.date);
+        const query = db.select().from(autoTradeRules);
+        if (condition) return await query.where(condition).orderBy(desc(autoTradeRules.createdAt));
+        return await query.orderBy(desc(autoTradeRules.createdAt));
       });
     }
-    
-    return await db.select()
-      .from(etfPriceHistory)
-      .where(and(
-        eq(etfPriceHistory.etfId, etfId),
-        gte(etfPriceHistory.date, startDate)
-      ))
-      .orderBy(etfPriceHistory.date);
+    const query = db.select().from(autoTradeRules);
+    if (condition) return await query.where(condition).orderBy(desc(autoTradeRules.createdAt));
+    return await query.orderBy(desc(autoTradeRules.createdAt));
+  }
+
+  async getAutoTradeRule(id: number): Promise<AutoTradeRule | undefined> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [rule] = await db.select().from(autoTradeRules).where(eq(autoTradeRules.id, id));
+        return rule;
+      });
+    }
+    const [rule] = await db.select().from(autoTradeRules).where(eq(autoTradeRules.id, id));
+    return rule;
+  }
+
+  async getActiveAutoTradeRules(userId?: number): Promise<AutoTradeRule[]> {
+    const conditions = [eq(autoTradeRules.isActive, true), eq(autoTradeRules.status, "active")];
+    if (userId) conditions.push(eq(autoTradeRules.userId, userId));
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(autoTradeRules).where(and(...conditions));
+      });
+    }
+    return await db.select().from(autoTradeRules).where(and(...conditions));
+  }
+
+  async createAutoTradeRule(rule: InsertAutoTradeRule): Promise<AutoTradeRule> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [newRule] = await db.insert(autoTradeRules).values(rule).returning();
+        return newRule;
+      });
+    }
+    const [newRule] = await db.insert(autoTradeRules).values(rule).returning();
+    return newRule;
+  }
+
+  async updateAutoTradeRule(id: number, updates: Partial<InsertAutoTradeRule>): Promise<AutoTradeRule> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [updated] = await db.update(autoTradeRules)
+          .set(updates)
+          .where(eq(autoTradeRules.id, id))
+          .returning();
+        return updated;
+      });
+    }
+    const [updated] = await db.update(autoTradeRules)
+      .set(updates)
+      .where(eq(autoTradeRules.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteAutoTradeRule(id: number): Promise<void> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        await db.delete(autoTradeRules).where(eq(autoTradeRules.id, id));
+      });
+    }
+    await db.delete(autoTradeRules).where(eq(autoTradeRules.id, id));
+  }
+
+  // ========== Trading - Orders ==========
+  
+  async getTradingOrders(limit: number = 50, userId?: number): Promise<TradingOrder[]> {
+    const condition = userId ? eq(tradingOrders.userId, userId) : undefined;
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const query = db.select().from(tradingOrders);
+        if (condition) return await query.where(condition).orderBy(desc(tradingOrders.createdAt)).limit(limit);
+        return await query.orderBy(desc(tradingOrders.createdAt)).limit(limit);
+      });
+    }
+    const query = db.select().from(tradingOrders);
+    if (condition) return await query.where(condition).orderBy(desc(tradingOrders.createdAt)).limit(limit);
+    return await query.orderBy(desc(tradingOrders.createdAt)).limit(limit);
+  }
+
+  async createTradingOrder(order: InsertTradingOrder): Promise<TradingOrder> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [newOrder] = await db.insert(tradingOrders).values(order).returning();
+        return newOrder;
+      });
+    }
+    const [newOrder] = await db.insert(tradingOrders).values(order).returning();
+    return newOrder;
+  }
+
+  async updateTradingOrder(id: number, updates: Partial<InsertTradingOrder>): Promise<TradingOrder> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [updated] = await db.update(tradingOrders)
+          .set(updates)
+          .where(eq(tradingOrders.id, id))
+          .returning();
+        return updated;
+      });
+    }
+    const [updated] = await db.update(tradingOrders)
+      .set(updates)
+      .where(eq(tradingOrders.id, id))
+      .returning();
+    return updated;
+  }
+
+  // ========== Bookmarks ==========
+
+  async getBookmarks(userId?: number): Promise<Bookmark[]> {
+    // userId가 있으면 해당 유저의 북마크만 반환, 없으면 전체(기존 admin용) 반환
+    const condition = userId ? eq(bookmarks.userId, userId) : isNull(bookmarks.userId);
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(bookmarks).where(condition).orderBy(bookmarks.sortOrder, bookmarks.createdAt);
+      });
+    }
+    return await db.select().from(bookmarks).where(condition).orderBy(bookmarks.sortOrder, bookmarks.createdAt);
+  }
+
+  async createBookmark(bookmark: InsertBookmark): Promise<Bookmark> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [newBookmark] = await db.insert(bookmarks).values(bookmark).returning();
+        return newBookmark;
+      });
+    }
+    const [newBookmark] = await db.insert(bookmarks).values(bookmark).returning();
+    return newBookmark;
+  }
+
+  async getBookmarkById(id: number): Promise<Bookmark | undefined> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [bookmark] = await db.select().from(bookmarks).where(eq(bookmarks.id, id));
+        return bookmark;
+      });
+    }
+    const [bookmark] = await db.select().from(bookmarks).where(eq(bookmarks.id, id));
+    return bookmark;
+  }
+
+  async updateBookmark(id: number, updates: Partial<InsertBookmark>): Promise<Bookmark> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [updated] = await db.update(bookmarks)
+          .set(updates)
+          .where(eq(bookmarks.id, id))
+          .returning();
+        return updated;
+      });
+    }
+    const [updated] = await db.update(bookmarks)
+      .set(updates)
+      .where(eq(bookmarks.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteBookmark(id: number): Promise<void> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        await db.delete(bookmarks).where(eq(bookmarks.id, id));
+      });
+    }
+    await db.delete(bookmarks).where(eq(bookmarks.id, id));
+  }
+
+  // ========== Users ==========
+
+  async getUserByGoogleId(googleId: string): Promise<User | undefined> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [user] = await db.select().from(users).where(eq(users.googleId, googleId));
+        return user;
+      });
+    }
+    const [user] = await db.select().from(users).where(eq(users.googleId, googleId));
+    return user;
+  }
+
+  async createUser(user: InsertUser): Promise<User> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [newUser] = await db.insert(users).values(user).returning();
+        return newUser;
+      });
+    }
+    const [newUser] = await db.insert(users).values(user).returning();
+    return newUser;
+  }
+
+  async getUser(id: number): Promise<User | undefined> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [user] = await db.select().from(users).where(eq(users.id, id));
+        return user;
+      });
+    }
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user;
+  }
+
+  // ========== User Trading Configs ==========
+
+  async getUserTradingConfig(userId: number): Promise<UserTradingConfig | undefined> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [config] = await db.select().from(userTradingConfigs).where(eq(userTradingConfigs.userId, userId));
+        return config;
+      });
+    }
+    const [config] = await db.select().from(userTradingConfigs).where(eq(userTradingConfigs.userId, userId));
+    return config;
+  }
+
+  async upsertUserTradingConfig(config: InsertUserTradingConfig): Promise<UserTradingConfig> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        // userId 기준 upsert
+        const existing = await db.select().from(userTradingConfigs).where(eq(userTradingConfigs.userId, config.userId));
+        if (existing.length > 0) {
+          const [updated] = await db.update(userTradingConfigs)
+            .set({ ...config, updatedAt: new Date() })
+            .where(eq(userTradingConfigs.userId, config.userId))
+            .returning();
+          return updated;
+        }
+        const [created] = await db.insert(userTradingConfigs).values(config).returning();
+        return created;
+      });
+    }
+    const existing = await db.select().from(userTradingConfigs).where(eq(userTradingConfigs.userId, config.userId));
+    if (existing.length > 0) {
+      const [updated] = await db.update(userTradingConfigs)
+        .set({ ...config, updatedAt: new Date() })
+        .where(eq(userTradingConfigs.userId, config.userId))
+        .returning();
+      return updated;
+    }
+    const [created] = await db.insert(userTradingConfigs).values(config).returning();
+    return created;
+  }
+
+  async deleteUserTradingConfig(userId: number): Promise<void> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        await db.delete(userTradingConfigs).where(eq(userTradingConfigs.userId, userId));
+      });
+    }
+    await db.delete(userTradingConfigs).where(eq(userTradingConfigs.userId, userId));
   }
 }
 

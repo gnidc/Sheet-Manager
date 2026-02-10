@@ -23,6 +23,10 @@ const httpServer = createServer(app);
 declare module "cookie-session" {
   interface SessionData {
     isAdmin?: boolean;
+    userId?: number;
+    userEmail?: string;
+    userName?: string;
+    userPicture?: string;
   }
 }
 
@@ -60,10 +64,11 @@ app.use(
   cookieSession({
     name: "session",
     keys: [process.env.SESSION_SECRET || "default-secret-change-in-production"],
-    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    // maxAge 미설정 → 브라우저 종료 시 세션 쿠키 만료 (기본값)
+    // "로그인 유지" 체크 시 로그인 핸들러에서 req.sessionOptions.maxAge = 24시간으로 동적 설정
     secure: process.env.NODE_ENV === "production",
     httpOnly: true,
-    sameSite: "lax",
+    sameSite: "lax" as const,
   })
 );
 

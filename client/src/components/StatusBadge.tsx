@@ -2,7 +2,7 @@ import { cn } from "@/lib/utils";
 
 interface StatusBadgeProps {
   children: React.ReactNode;
-  variant?: 'default' | 'outline' | 'secondary' | 'accent' | 'success' | 'warning';
+  variant?: 'default' | 'outline' | 'secondary' | 'accent' | 'success' | 'warning' | 'destructive';
   className?: string;
 }
 
@@ -14,6 +14,7 @@ export function StatusBadge({ children, variant = 'default', className }: Status
     accent: "bg-accent/10 text-accent-foreground border-accent/20 dark:text-accent",
     success: "bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-400",
     warning: "bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-400",
+    destructive: "bg-red-500/10 text-red-700 border-red-500/20 dark:text-red-400",
   };
 
   return (

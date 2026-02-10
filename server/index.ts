@@ -7,6 +7,7 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 
+
 const app = express();
 const httpServer = createServer(app);
 
@@ -19,6 +20,10 @@ declare module "http" {
 declare module "express-session" {
   interface SessionData {
     isAdmin?: boolean;
+    userId?: number;
+    userEmail?: string;
+    userName?: string;
+    userPicture?: string;
   }
 }
 
@@ -42,7 +47,8 @@ app.use(
     cookie: {
       secure: process.env.NODE_ENV === "production",
       httpOnly: true,
-      maxAge: 24 * 60 * 60 * 1000,
+      // maxAge 미설정 → 브라우저 종료 시 세션 쿠키 만료 (기본값)
+      // "로그인 유지" 체크 시 로그인 핸들러에서 24시간으로 동적 설정
       sameSite: "lax",
     },
   })
@@ -116,9 +122,6 @@ app.use((req, res, next) => {
   });
 
   // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 3000 if not specified.
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || "3000", 10);
   httpServer.listen(
     port,

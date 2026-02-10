@@ -1,7 +1,7 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import type { Server } from "http";
 import { storage } from "./storage.js";
-import { api } from "../shared/routes.js";
+
 import { z } from "zod";
 import axios from "axios";
 import bcrypt from "bcryptjs";
@@ -10,6 +10,7 @@ import * as cheerio from "cheerio";
 
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
 const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH;
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 
 // 환경 변수 확인 (디버깅)
 if (process.env.VERCEL) {
@@ -18,12 +19,21 @@ if (process.env.VERCEL) {
   console.log("ADMIN_PASSWORD_HASH exists:", !!ADMIN_PASSWORD_HASH);
   console.log("SESSION_SECRET exists:", !!process.env.SESSION_SECRET);
   console.log("DATABASE_URL exists:", !!process.env.DATABASE_URL);
+  console.log("GOOGLE_CLIENT_ID exists:", !!GOOGLE_CLIENT_ID);
   console.log("NODE_ENV:", process.env.NODE_ENV);
 }
 
 function requireAdmin(req: Request, res: Response, next: NextFunction) {
   if (!req.session?.isAdmin) {
     return res.status(401).json({ message: "Unauthorized" });
+  }
+  next();
+}
+
+// 로그인한 사용자 (Google 유저 또는 Admin) 필요
+function requireUser(req: Request, res: Response, next: NextFunction) {
+  if (!req.session?.userId && !req.session?.isAdmin) {
+    return res.status(401).json({ message: "로그인이 필요합니다" });
   }
   next();
 }
@@ -62,7 +72,7 @@ export async function registerRoutes(
   });
 
   app.post("/api/auth/login", async (req, res) => {
-    const { username, password } = req.body;
+    const { username, password, rememberMe } = req.body;
     
     if (!username || !password) {
       return res.status(400).json({ message: "Username and password required" });
@@ -86,287 +96,158 @@ export async function registerRoutes(
     }
     
     req.session.isAdmin = true;
-    // cookie-session은 자동으로 저장되므로 save() 호출 불필요
-    // cookie-session은 sessionID를 지원하지 않으므로 로그에서 제외
-    console.log("Login successful, session saved");
+
+    // "로그인 유지" 체크 시 쿠키 만료를 24시간으로 설정
+    const REMEMBER_MAX_AGE = 24 * 60 * 60 * 1000; // 24시간
+    if (rememberMe) {
+      // express-session (로컬 개발)
+      if (req.session.cookie) {
+        req.session.cookie.maxAge = REMEMBER_MAX_AGE;
+      }
+      // cookie-session (Vercel)
+      if ((req as any).sessionOptions) {
+        (req as any).sessionOptions.maxAge = REMEMBER_MAX_AGE;
+      }
+    }
+
+    console.log("Login successful, rememberMe:", !!rememberMe);
     res.json({ success: true, isAdmin: true });
   });
   
   app.post("/api/auth/logout", (req, res) => {
-    // cookie-session은 destroy()를 동기적으로 처리
-    req.session = null;
-    res.json({ success: true });
+    // 모든 세션 정보 초기화 (admin + user)
+    if (process.env.VERCEL) {
+      // Vercel: cookie-session → null 할당으로 쿠키 제거
+      req.session = null;
+      return res.json({ success: true });
+    }
+    // 로컬: express-session → destroy()로 세션 제거
+    if (req.session?.destroy) {
+      req.session.destroy((err) => {
+        if (err) {
+          console.error("Session destroy error:", err);
+        }
+        res.clearCookie("connect.sid");
+        res.json({ success: true });
+      });
+    } else {
+      // fallback
+      req.session = null as any;
+      res.json({ success: true });
+    }
   });
   
   app.get("/api/auth/me", (req, res) => {
-    // cookie-session은 sessionID를 지원하지 않으므로 로그에서 제외
-    console.log("/api/auth/me - isAdmin:", req.session?.isAdmin);
-    const response = { isAdmin: !!req.session?.isAdmin };
-    // serverless-http가 응답을 제대로 감지하도록 명시적으로 상태 코드와 함께 응답
+    console.log("/api/auth/me - isAdmin:", req.session?.isAdmin, "userId:", req.session?.userId);
+    const response = {
+      isAdmin: !!req.session?.isAdmin,
+      userId: req.session?.userId || null,
+      userEmail: req.session?.userEmail || null,
+      userName: req.session?.userName || null,
+      userPicture: req.session?.userPicture || null,
+    };
     res.status(200).json(response);
   });
-  // Real-time price update endpoint
-  app.post("/api/etfs/:id/refresh", async (req, res) => {
+
+  // Google OAuth 로그인/계정생성
+  app.post("/api/auth/google", async (req, res) => {
+    const { credential, accessToken, userInfo, rememberMe } = req.body;
+
+    if (!credential && !accessToken) {
+      return res.status(400).json({ message: "Google credential or accessToken is required" });
+    }
+
+    if (!GOOGLE_CLIENT_ID) {
+      return res.status(503).json({ message: "Google OAuth is not configured" });
+    }
+
     try {
-      const etf = await storage.getEtf(Number(req.params.id));
-      if (!etf) return res.status(404).json({ message: "ETF not found" });
+      let googleId: string;
+      let email: string;
+      let name: string;
+      let picture: string | null;
 
-      // In a real app, we would use Alpha Vantage or Finnhub here.
-      // For this demo, we'll simulate a price fetch if no API key is set.
-      const API_KEY = process.env.FINNHUB_API_KEY;
-      let price = etf.currentPrice ? parseFloat(etf.currentPrice) : 10000;
-      let change = 0;
+      if (credential) {
+        // 방법 1: ID 토큰 검증 (One Tap / renderButton 방식)
+        const verifyRes = await axios.get(
+          `https://oauth2.googleapis.com/tokeninfo?id_token=${credential}`,
+          { timeout: 5000 }
+        );
 
-      if (API_KEY) {
-        const response = await axios.get(`https://finnhub.io/api/v1/quote?symbol=${etf.code}&token=${API_KEY}`);
-        price = response.data.c;
-        change = response.data.dp;
+        const payload = verifyRes.data;
+
+        if (payload.aud !== GOOGLE_CLIENT_ID) {
+          return res.status(401).json({ message: "Invalid token audience" });
+        }
+
+        googleId = payload.sub;
+        email = payload.email;
+        name = payload.name || payload.email;
+        picture = payload.picture || null;
       } else {
-        // Mock some movement
-        price = price * (1 + (Math.random() * 0.02 - 0.01));
-        change = (Math.random() * 4 - 2);
-      }
-
-      const updated = await storage.updateEtf(etf.id, {
-        currentPrice: price.toString(),
-        dailyChangeRate: change.toString()
-      });
-
-      res.json(updated);
-    } catch (err) {
-      res.status(500).json({ message: "Failed to refresh price" });
-    }
-  });
-
-  app.get(api.etfs.list.path, async (req, res) => {
-    console.log("ETF 로직 시작"); // 디버깅: 라우팅 확인
-    const startTime = Date.now();
-    try {
-      const search = req.query.search as string | undefined;
-      const mainCategory = req.query.mainCategory as string | undefined;
-      const subCategory = req.query.subCategory as string | undefined;
-      const country = req.query.country as string | undefined;
-      
-      console.log(`[${new Date().toISOString()}] GET /api/etfs - params:`, { search, mainCategory, subCategory, country });
-      
-      const queryStart = Date.now();
-      console.log("ETF 데이터베이스 쿼리 시작"); // 디버깅: 쿼리 시작 확인
-      const etfs = await storage.getEtfs({ search, mainCategory, subCategory, country });
-      const queryTime = Date.now() - queryStart;
-      
-      console.log(`[${new Date().toISOString()}] GET /api/etfs - result count: ${etfs.length}, query time: ${queryTime}ms`);
-      console.log("ETF 데이터베이스 쿼리 완료, 응답 전송 시작"); // 디버깅: 응답 전송 확인
-      
-      const totalTime = Date.now() - startTime;
-      console.log(`[${new Date().toISOString()}] GET /api/etfs - total time: ${totalTime}ms`);
-      
-      // 응답 전송
-      // serverless-http가 응답을 제대로 감지하도록 명시적으로 처리
-      res.json(etfs);
-      
-      // res.json()은 내부적으로 res.end()를 호출하여 응답을 완료함
-      // serverless-http는 이를 감지하여 Promise를 resolve함
-      // 로깅 시점에 headersSent가 false일 수 있지만, 실제로는 응답이 전송됨
-      console.log("ETF 응답 전송 완료 - headersSent:", res.headersSent, "finished:", res.finished);
-    } catch (error: any) {
-      const totalTime = Date.now() - startTime;
-      console.error(`[${new Date().toISOString()}] Error in GET /api/etfs (after ${totalTime}ms):`, error);
-      console.error("Error details:", {
-        message: error.message,
-        code: error.code,
-        name: error.name,
-        stack: error.stack?.split('\n').slice(0, 5).join('\n')
-      });
-      
-      // 더 자세한 에러 정보 제공
-      const errorResponse: any = {
-        message: "Failed to fetch ETFs",
-        error: error.message || "Unknown error",
-      };
-      
-      // 개발 환경이나 특정 에러의 경우 더 자세한 정보 제공
-      if (process.env.NODE_ENV === "development" || error.code) {
-        errorResponse.code = error.code;
-        errorResponse.name = error.name;
-      }
-      
-      // 타임아웃 에러인 경우 명확히 표시
-      if (error.code === 'ETIMEDOUT' || error.message?.includes('timeout')) {
-        errorResponse.message = "Database connection timeout. Please try again.";
-      }
-      
-      res.status(500).json(errorResponse);
-    }
-  });
-
-  app.get(api.etfs.get.path, async (req, res) => {
-    const etf = await storage.getEtf(Number(req.params.id));
-    if (!etf) {
-      return res.status(404).json({ message: 'ETF not found' });
-    }
-    res.json(etf);
-  });
-
-  app.post(api.etfs.create.path, requireAdmin, async (req, res) => {
-    try {
-      const input = api.etfs.create.input.parse(req.body);
-      const etf = await storage.createEtf(input);
-      res.status(201).json(etf);
-    } catch (err) {
-      if (err instanceof z.ZodError) {
-        return res.status(400).json({
-          message: err.errors[0].message,
-          field: err.errors[0].path.join('.'),
-        });
-      }
-      throw err;
-    }
-  });
-
-  app.put(api.etfs.update.path, requireAdmin, async (req, res) => {
-    try {
-      const input = api.etfs.update.input.parse(req.body);
-      const etf = await storage.updateEtf(Number(req.params.id), input);
-      if (!etf) {
-        return res.status(404).json({ message: 'ETF not found' });
-      }
-      res.json(etf);
-    } catch (err) {
-      if (err instanceof z.ZodError) {
-        return res.status(400).json({
-          message: err.errors[0].message,
-          field: err.errors[0].path.join('.'),
-        });
-      }
-      throw err;
-    }
-  });
-
-  app.delete(api.etfs.delete.path, requireAdmin, async (req, res) => {
-    await storage.deleteEtf(Number(req.params.id));
-    res.status(204).send();
-  });
-
-  app.get("/api/trends", async (req, res) => {
-    const trends = await storage.getTrendingEtfs();
-    res.json(trends);
-  });
-
-
-  app.get("/api/recommended", async (req, res) => {
-    const recommended = await storage.getRecommendedEtfs();
-    res.json(recommended);
-  });
-
-  // Price history for performance charts
-  app.get("/api/etfs/:id/history", async (req, res) => {
-    try {
-      const etfId = Number(req.params.id);
-      const period = (req.query.period as string) || "1M";
-      
-      if (!["1M", "3M", "6M", "1Y"].includes(period)) {
-        return res.status(400).json({ message: "Invalid period. Use 1M, 3M, 6M, or 1Y" });
-      }
-      
-      const etf = await storage.getEtf(etfId);
-      if (!etf) {
-        return res.status(404).json({ message: "ETF not found" });
-      }
-      
-      // Try to fetch real data from Korea Investment API if configured
-      if (kisApi.isConfigured() && etf.code) {
-        try {
-          const kisData = await kisApi.getEtfDailyPrices(etf.code, period as any);
-          if (kisData.length > 0) {
-            console.log(`Using KIS API data for ${etf.code}: ${kisData.length} records`);
-            res.json(kisData.map(d => ({
-              date: new Date(d.date).toISOString(),
-              closePrice: d.closePrice
-            })));
-            return;
+        // 방법 2: Access Token + UserInfo (OAuth2 popup 방식)
+        // access_token으로 직접 userinfo를 서버에서 검증
+        const verifyRes = await axios.get(
+          `https://www.googleapis.com/oauth2/v3/userinfo`,
+          { 
+            headers: { Authorization: `Bearer ${accessToken}` },
+            timeout: 5000 
           }
-        } catch (kisError) {
-          console.error("KIS API error, falling back to simulation:", kisError);
+        );
+
+        const payload = verifyRes.data;
+
+        googleId = payload.sub;
+        email = payload.email;
+        name = payload.name || payload.email;
+        picture = payload.picture || null;
+      }
+
+      if (!googleId || !email) {
+        return res.status(400).json({ message: "Invalid Google profile data" });
+      }
+
+      // DB에서 유저 찾기 또는 생성
+      let user = await storage.getUserByGoogleId(googleId);
+      if (!user) {
+        user = await storage.createUser({ googleId, email, name, picture });
+        console.log(`[Auth] New Google user created: ${email} (id: ${user.id})`);
+      } else {
+        console.log(`[Auth] Existing Google user logged in: ${email} (id: ${user.id})`);
+      }
+
+      // 세션 설정
+      req.session.userId = user.id;
+      req.session.userEmail = user.email;
+      req.session.userName = user.name || undefined;
+      req.session.userPicture = user.picture || undefined;
+
+      // "로그인 유지" 체크 시 쿠키 만료를 24시간으로 설정
+      const REMEMBER_MAX_AGE = 24 * 60 * 60 * 1000;
+      if (rememberMe) {
+        if (req.session.cookie) {
+          req.session.cookie.maxAge = REMEMBER_MAX_AGE;
+        }
+        if ((req as any).sessionOptions) {
+          (req as any).sessionOptions.maxAge = REMEMBER_MAX_AGE;
         }
       }
-      
-      // Check for cached historical data
-      const realHistory = await storage.getEtfPriceHistory(etfId, period as any);
-      
-      if (realHistory.length > 0) {
-        res.json(realHistory);
-        return;
-      }
-      
-      // Generate simulated historical data based on ETF characteristics
-      const basePrice = etf.currentPrice ? parseFloat(etf.currentPrice) : 10000;
-      const periodDays: Record<string, number> = { "1M": 30, "3M": 90, "6M": 180, "1Y": 365 };
-      const days = periodDays[period];
-      
-      // Parse yield to determine expected annual return
-      let annualReturn = 0.05; // Default 5% annual return
-      if (etf.yield) {
-        const yieldMatch = etf.yield.match(/([\d.]+)/);
-        if (yieldMatch) {
-          annualReturn = parseFloat(yieldMatch[1]) / 100;
-        }
-      }
-      
-      // Calculate daily expected return based on period
-      const dailyReturn = annualReturn / 365;
-      
-      // Volatility based on ETF category (covered call typically lower volatility)
-      let volatility = 0.015; // 1.5% daily volatility as base
-      if (etf.mainCategory?.includes('커버드콜')) {
-        volatility = 0.008; // Lower volatility for covered call
-      } else if (etf.mainCategory?.includes('액티브')) {
-        volatility = 0.018; // Higher volatility for active
-      }
-      
-      // Seed random for consistent results per ETF
-      const seedRandom = (seed: number, offset: number) => {
-        const x = Math.sin(seed * 12.9898 + offset * 78.233) * 43758.5453;
-        return x - Math.floor(x);
-      };
-      
-      // Generate price history starting from past
-      const history = [];
-      const now = new Date();
-      
-      // Generate path and then normalize to end at current price
-      const rawPrices: number[] = [];
-      let tempPrice = 100; // Start with normalized 100
-      
-      for (let i = 0; i <= days; i++) {
-        rawPrices.push(tempPrice);
-        
-        // Random component with ETF-specific seed
-        const random = seedRandom(etfId * 1000, i) * 2 - 1; // -1 to 1
-        
-        // Add trend + random walk
-        const dailyChange = dailyReturn + (random * volatility);
-        tempPrice = tempPrice * (1 + dailyChange);
-      }
-      
-      // Scale prices so that the last value equals basePrice
-      const scaleFactor = basePrice / rawPrices[rawPrices.length - 1];
-      
-      for (let i = 0; i <= days; i++) {
-        const date = new Date(now);
-        date.setDate(date.getDate() - (days - i));
-        
-        history.push({
-          date: date.toISOString(),
-          closePrice: (rawPrices[i] * scaleFactor).toFixed(2)
-        });
-      }
-      
-      res.json(history);
-    } catch (err) {
-      console.error("Failed to get price history:", err);
-      res.status(500).json({ message: "Failed to get price history" });
+
+      res.json({
+        success: true,
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          picture: user.picture,
+        },
+      });
+    } catch (err: any) {
+      console.error("[Auth] Google OAuth error:", err.message);
+      res.status(401).json({ message: "Google 인증에 실패했습니다" });
     }
   });
+  // ETF CRUD 라우트 제거됨 (Tracked ETFs 삭제)
 
   app.get("/api/etf-trends", async (req, res) => {
     try {
@@ -461,243 +342,895 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/seed", requireAdmin, async (req, res) => {
+  // seed/export/import 라우트 제거됨 (Tracked ETFs 삭제)
+
+  // ========== KIS 자동매매 API ==========
+
+  // 헬퍼: 현재 세션의 사용자 인증정보를 가져오는 함수
+  // admin이면 env 기반 (null 반환), 일반 유저면 DB에서 조회
+  async function getUserCredentials(req: Request): Promise<{ userId: number; creds: kisApi.UserKisCredentials } | null> {
+    if (req.session?.isAdmin) {
+      return null; // admin은 기존 env 기반 사용
+    }
+    const userId = req.session?.userId;
+    if (!userId) return null;
+
+    const config = await storage.getUserTradingConfig(userId);
+    if (!config) return null;
+
+    return {
+      userId,
+      creds: {
+        appKey: config.appKey,
+        appSecret: config.appSecret,
+        accountNo: config.accountNo,
+        accountProductCd: config.accountProductCd || "01",
+        mockTrading: config.mockTrading ?? true,
+      },
+    };
+  }
+
+  // ---- 사용자 KIS 인증정보 관리 ----
+
+  // 인증정보 조회 (마스킹됨)
+  app.get("/api/trading/config", requireUser, async (req, res) => {
     try {
-      await seedDatabase(true);
-      const etfs = await storage.getEtfs();
-      res.json({ success: true, count: etfs.length });
-    } catch (err) {
-      res.status(500).json({ message: "Failed to seed database" });
+      // admin은 env 기반 사용
+      if (req.session?.isAdmin) {
+        const st = kisApi.getTradingStatus();
+        return res.json({
+          configured: st.tradingConfigured,
+          isAdmin: true,
+          accountNo: st.accountNo,
+          mockTrading: st.mockTrading,
+        });
+      }
+
+      const userId = req.session?.userId;
+      if (!userId) return res.status(401).json({ message: "로그인이 필요합니다" });
+
+      const config = await storage.getUserTradingConfig(userId);
+      if (!config) {
+        return res.json({ configured: false });
+      }
+
+      res.json({
+        configured: true,
+        appKey: config.appKey.slice(0, 6) + "****",
+        accountNo: config.accountNo.slice(0, 4) + "****",
+        accountProductCd: config.accountProductCd,
+        mockTrading: config.mockTrading,
+        updatedAt: config.updatedAt,
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "설정 조회 실패" });
     }
   });
 
-  app.get("/api/export", async (req, res) => {
+  // 인증정보 등록/수정
+  app.post("/api/trading/config", requireUser, async (req, res) => {
     try {
-      const etfs = await storage.getEtfs();
-      const exportData = etfs.map(etf => {
-        const { id, currentPrice, dailyChangeRate, lastUpdated, trendScore, isRecommended, ...data } = etf;
-        return data;
+      const userId = req.session?.userId;
+      if (!userId) {
+        return res.status(400).json({ message: "Google 계정으로 로그인한 사용자만 개별 설정이 가능합니다" });
+      }
+
+      const { appKey, appSecret, accountNo, accountProductCd, mockTrading } = req.body;
+
+      if (!appKey || !appSecret || !accountNo) {
+        return res.status(400).json({ message: "앱 키, 앱 시크릿, 계좌번호는 필수입니다" });
+      }
+
+      const creds: kisApi.UserKisCredentials = {
+        appKey,
+        appSecret,
+        accountNo,
+        accountProductCd: accountProductCd || "01",
+        mockTrading: mockTrading ?? true,
+      };
+
+      // 인증 검증
+      const validation = await kisApi.validateUserCredentials(userId, creds);
+      if (!validation.success) {
+        return res.status(400).json({ message: `인증 실패: ${validation.message}` });
+      }
+
+      // DB에 저장
+      const config = await storage.upsertUserTradingConfig({
+        userId,
+        appKey,
+        appSecret,
+        accountNo,
+        accountProductCd: accountProductCd || "01",
+        mockTrading: mockTrading ?? true,
       });
-      res.json({ 
-        exportedAt: new Date().toISOString(),
-        count: exportData.length,
-        data: exportData 
+
+      res.json({
+        success: true,
+        message: "KIS API 설정이 저장되었습니다",
+        config: {
+          configured: true,
+          appKey: config.appKey.slice(0, 6) + "****",
+          accountNo: config.accountNo.slice(0, 4) + "****",
+          mockTrading: config.mockTrading,
+        },
       });
-    } catch (err) {
-      res.status(500).json({ message: "Failed to export data" });
+    } catch (error: any) {
+      console.error("Failed to save trading config:", error);
+      res.status(500).json({ message: error.message || "설정 저장 실패" });
     }
   });
 
-  app.post("/api/import", async (req, res) => {
+  // 인증정보 삭제
+  app.delete("/api/trading/config", requireUser, async (req, res) => {
     try {
-      const { data } = req.body;
-      if (!Array.isArray(data)) {
-        return res.status(400).json({ message: "Invalid data format. Expected { data: [...] }" });
+      const userId = req.session?.userId;
+      if (!userId) return res.status(400).json({ message: "권한 없음" });
+
+      await storage.deleteUserTradingConfig(userId);
+      kisApi.clearUserTokenCache(userId);
+      res.json({ success: true, message: "KIS API 설정이 삭제되었습니다" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "설정 삭제 실패" });
+    }
+  });
+
+  // KIS API 연결 상태
+  app.get("/api/trading/status", requireUser, async (req, res) => {
+    try {
+      const userCreds = await getUserCredentials(req);
+      if (userCreds) {
+        const status = kisApi.getUserTradingStatus(userCreds.creds);
+        return res.json(status);
       }
+      // admin 또는 인증정보 없는 유저 → env 기반 상태
+      const status = kisApi.getTradingStatus();
       
-      if (data.length === 0) {
-        return res.status(400).json({ message: "Data array is empty" });
-      }
-      
-      const errors: string[] = [];
-      for (let i = 0; i < data.length; i++) {
-        const etf = data[i];
-        if (!etf.code || !etf.name || !etf.mainCategory) {
-          errors.push(`Item ${i}: missing required fields (code, name, mainCategory)`);
+      // 일반 유저이면서 config 없는 경우 unconfigured로 표시
+      if (!req.session?.isAdmin && req.session?.userId) {
+        const config = await storage.getUserTradingConfig(req.session.userId);
+        if (!config) {
+          return res.json({ configured: false, tradingConfigured: false, mockTrading: false, accountNo: "", accountProductCd: "01", needsSetup: true });
         }
       }
-      
-      if (errors.length > 0) {
-        return res.status(400).json({ message: "Validation failed", errors });
-      }
-      
-      const existing = await storage.getEtfs();
-      for (const etf of existing) {
-        await storage.deleteEtf(etf.id);
-      }
-      
-      let imported = 0;
-      for (const etfData of data) {
-        await storage.createEtf(etfData);
-        imported++;
-      }
-      
-      res.json({ success: true, imported });
-    } catch (err) {
-      console.error("Import error:", err);
-      res.status(500).json({ message: "Failed to import data" });
+      res.json(status);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "상태 조회 실패" });
     }
   });
 
-  // Background task to periodically update scores and recommendations
-  // Vercel serverless 환경에서는 setInterval을 사용하지 않음
-  // Serverless 함수는 요청이 끝나면 종료되므로 백그라운드 작업이 실행되지 않음
-  // 이 기능은 로컬 개발 환경에서만 실행
-  if (process.env.NODE_ENV !== "production" || !process.env.VERCEL) {
-    setInterval(async () => {
-      try {
-        const all = await storage.getEtfs();
-        for (const etf of all) {
-          // Randomly update scores for demo trends
-          const newScore = Math.floor(Math.random() * 100);
-          const shouldRecommend = newScore > 85;
-          await storage.updateEtf(etf.id, { 
-            trendScore: newScore.toString(),
-            isRecommended: shouldRecommend 
+  // 계좌 잔고 조회
+  app.get("/api/trading/balance", requireUser, async (req, res) => {
+    try {
+      const userCreds = await getUserCredentials(req);
+      if (userCreds) {
+        const balance = await kisApi.getUserAccountBalance(userCreds.userId, userCreds.creds);
+        return res.json(balance);
+      }
+      const balance = await kisApi.getAccountBalance();
+      res.json(balance);
+    } catch (error: any) {
+      console.error("Failed to get balance:", error);
+      res.status(500).json({ message: error.message || "잔고 조회 실패" });
+    }
+  });
+
+  // 현재가 조회
+  app.get("/api/trading/price/:stockCode", requireUser, async (req, res) => {
+    try {
+      const priceData = await kisApi.getCurrentPrice(req.params.stockCode);
+      if (!priceData) {
+        return res.status(404).json({ message: "가격 정보를 찾을 수 없습니다" });
+      }
+      res.json(priceData);
+    } catch (error: any) {
+      console.error("Failed to get price:", error);
+      res.status(500).json({ message: error.message || "가격 조회 실패" });
+    }
+  });
+
+  // 매매 주문
+  app.post("/api/trading/order", requireUser, async (req, res) => {
+    try {
+      const { stockCode, stockName, orderType, quantity, price, orderMethod } = req.body;
+      
+      if (!stockCode || !orderType || !quantity) {
+        return res.status(400).json({ message: "종목코드, 주문유형, 수량은 필수입니다" });
+      }
+      
+      if (!["buy", "sell"].includes(orderType)) {
+        return res.status(400).json({ message: "주문유형은 buy 또는 sell이어야 합니다" });
+      }
+      
+      // 사용자별 인증정보 분기
+      const userCreds = await getUserCredentials(req);
+      let result;
+      if (userCreds) {
+        result = await kisApi.userPlaceOrder(userCreds.userId, userCreds.creds, {
+          stockCode,
+          orderType,
+          quantity: Number(quantity),
+          price: price ? Number(price) : undefined,
+          orderMethod: orderMethod || "limit",
+        });
+      } else {
+        result = await kisApi.placeOrder({
+          stockCode,
+          orderType,
+          quantity: Number(quantity),
+          price: price ? Number(price) : undefined,
+          orderMethod: orderMethod || "limit",
+        });
+      }
+      
+      // 주문 결과를 DB에 기록
+      const userId = req.session?.userId || null;
+      const order = await storage.createTradingOrder({
+        stockCode,
+        stockName: stockName || stockCode,
+        orderType,
+        orderMethod: orderMethod || "limit",
+        quantity: Number(quantity),
+        price: price ? String(price) : null,
+        totalAmount: result.success && price ? String(Number(price) * Number(quantity)) : null,
+        status: result.success ? "filled" : "failed",
+        kisOrderNo: result.orderNo || null,
+        errorMessage: result.success ? null : result.message,
+        executedAt: result.success ? new Date() : null,
+        userId,
+      });
+      
+      res.json({ ...result, order });
+    } catch (error: any) {
+      console.error("Failed to place order:", error);
+      res.status(500).json({ message: error.message || "주문 실패" });
+    }
+  });
+
+  // KIS 주문 체결 내역 조회
+  app.get("/api/trading/kis-orders", requireUser, async (req, res) => {
+    try {
+      const startDate = req.query.startDate as string | undefined;
+      const endDate = req.query.endDate as string | undefined;
+      
+      const userCreds = await getUserCredentials(req);
+      if (userCreds) {
+        const history = await kisApi.getUserOrderHistory(userCreds.userId, userCreds.creds, startDate, endDate);
+        return res.json(history);
+      }
+      const history = await kisApi.getOrderHistory(startDate, endDate);
+      res.json(history);
+    } catch (error: any) {
+      console.error("Failed to get order history:", error);
+      res.status(500).json({ message: error.message || "주문내역 조회 실패" });
+    }
+  });
+
+  // DB 주문 기록 조회
+  app.get("/api/trading/orders", requireUser, async (req, res) => {
+    try {
+      const limit = req.query.limit ? Number(req.query.limit) : 50;
+      const userId = req.session?.userId || undefined;
+      const orders = await storage.getTradingOrders(limit, userId);
+      res.json(orders);
+    } catch (error: any) {
+      console.error("Failed to get trading orders:", error);
+      res.status(500).json({ message: error.message || "주문 기록 조회 실패" });
+    }
+  });
+
+  // 자동매매 규칙 목록
+  app.get("/api/trading/rules", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId || undefined;
+      const rules = await storage.getAutoTradeRules(userId);
+      res.json(rules);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "규칙 조회 실패" });
+    }
+  });
+
+  // 자동매매 규칙 추가
+  app.post("/api/trading/rules", requireUser, async (req, res) => {
+    try {
+      const { name, stockCode, stockName, ruleType, targetPrice, quantity, orderMethod } = req.body;
+      
+      if (!name || !stockCode || !stockName || !ruleType || !targetPrice || !quantity) {
+        return res.status(400).json({ message: "필수 필드가 누락되었습니다" });
+      }
+      
+      if (!["buy_below", "sell_above", "trailing_stop"].includes(ruleType)) {
+        return res.status(400).json({ message: "유효하지 않은 규칙 유형입니다" });
+      }
+
+      const userId = req.session?.userId || null;
+      const rule = await storage.createAutoTradeRule({
+        name,
+        stockCode,
+        stockName,
+        ruleType,
+        targetPrice: String(targetPrice),
+        quantity: Number(quantity),
+        orderMethod: orderMethod || "limit",
+        isActive: true,
+        status: "active",
+        userId,
+      });
+      
+      res.status(201).json(rule);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "규칙 추가 실패" });
+    }
+  });
+
+  // 자동매매 규칙 수정
+  app.put("/api/trading/rules/:id", requireUser, async (req, res) => {
+    try {
+      const rule = await storage.updateAutoTradeRule(Number(req.params.id), req.body);
+      res.json(rule);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "규칙 수정 실패" });
+    }
+  });
+
+  // 자동매매 규칙 삭제
+  app.delete("/api/trading/rules/:id", requireUser, async (req, res) => {
+    try {
+      await storage.deleteAutoTradeRule(Number(req.params.id));
+      res.status(204).send();
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "규칙 삭제 실패" });
+    }
+  });
+
+  // 자동매매 규칙 활성화/비활성화 토글
+  app.post("/api/trading/rules/:id/toggle", requireUser, async (req, res) => {
+    try {
+      const rule = await storage.getAutoTradeRule(Number(req.params.id));
+      if (!rule) {
+        return res.status(404).json({ message: "규칙을 찾을 수 없습니다" });
+      }
+      const updated = await storage.updateAutoTradeRule(rule.id, {
+        isActive: !rule.isActive,
+      });
+      res.json(updated);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "규칙 토글 실패" });
+    }
+  });
+
+  // 자동매매 규칙 실행 (수동 트리거 또는 cron)
+  app.post("/api/trading/execute-rules", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId || undefined;
+      const activeRules = await storage.getActiveAutoTradeRules(userId);
+      
+      if (activeRules.length === 0) {
+        return res.json({ message: "활성화된 규칙이 없습니다", executed: 0 });
+      }
+
+      // 사용자별 인증정보 분기
+      const userCreds = await getUserCredentials(req);
+      
+      const results: Array<{ ruleId: number; ruleName: string; action: string; result: string }> = [];
+      
+      for (const rule of activeRules) {
+        try {
+          // 현재가 조회
+          const priceData = await kisApi.getCurrentPrice(rule.stockCode);
+          if (!priceData) {
+            results.push({ ruleId: rule.id, ruleName: rule.name, action: "skip", result: "가격 조회 실패" });
+            continue;
+          }
+          
+          const currentPrice = parseInt(priceData.price);
+          const targetPrice = parseFloat(rule.targetPrice);
+          let shouldExecute = false;
+          let orderType: "buy" | "sell" = "buy";
+          
+          if (rule.ruleType === "buy_below" && currentPrice <= targetPrice) {
+            shouldExecute = true;
+            orderType = "buy";
+          } else if (rule.ruleType === "sell_above" && currentPrice >= targetPrice) {
+            shouldExecute = true;
+            orderType = "sell";
+          }
+          
+          if (shouldExecute) {
+            let orderResult;
+            if (userCreds) {
+              orderResult = await kisApi.userPlaceOrder(userCreds.userId, userCreds.creds, {
+                stockCode: rule.stockCode,
+                orderType,
+                quantity: rule.quantity,
+                price: currentPrice,
+                orderMethod: (rule.orderMethod as "market" | "limit") || "limit",
+              });
+            } else {
+              orderResult = await kisApi.placeOrder({
+                stockCode: rule.stockCode,
+                orderType,
+                quantity: rule.quantity,
+                price: currentPrice,
+                orderMethod: (rule.orderMethod as "market" | "limit") || "limit",
+              });
+            }
+            
+            // 주문 기록 저장
+            await storage.createTradingOrder({
+              stockCode: rule.stockCode,
+              stockName: rule.stockName,
+              orderType,
+              orderMethod: rule.orderMethod || "limit",
+              quantity: rule.quantity,
+              price: String(currentPrice),
+              totalAmount: String(currentPrice * rule.quantity),
+              status: orderResult.success ? "filled" : "failed",
+              kisOrderNo: orderResult.orderNo || null,
+              autoTradeRuleId: rule.id,
+              errorMessage: orderResult.success ? null : orderResult.message,
+              executedAt: orderResult.success ? new Date() : null,
+              userId: userId || null,
+            });
+            
+            // 규칙 상태 업데이트
+            if (orderResult.success) {
+              await storage.updateAutoTradeRule(rule.id, {
+                status: "executed",
+                isActive: false,
+                executedAt: new Date(),
+              });
+            }
+            
+            results.push({
+              ruleId: rule.id,
+              ruleName: rule.name,
+              action: `${orderType} ${rule.quantity}주 @ ${currentPrice}원`,
+              result: orderResult.success ? "성공" : `실패: ${orderResult.message}`,
+            });
+          } else {
+            results.push({
+              ruleId: rule.id,
+              ruleName: rule.name,
+              action: "대기",
+              result: `현재가 ${currentPrice}원 (목표: ${targetPrice}원)`,
+            });
+          }
+          
+          // API Rate Limit 방지
+          await new Promise(resolve => setTimeout(resolve, 200));
+        } catch (ruleError: any) {
+          results.push({
+            ruleId: rule.id,
+            ruleName: rule.name,
+            action: "오류",
+            result: ruleError.message || "실행 중 오류",
           });
         }
-      } catch (e) {
-        console.error("Failed background update", e);
       }
-    }, 60000); // Every minute
-  }
-
-  // Vercel에서는 초기화 시 DB 조회와 시딩을 완전히 건너뛰어 빠른 시작
-  // 실제 요청 시에만 DB 조회 수행
-  const isVercel = !!process.env.VERCEL;
-  const isProduction = process.env.NODE_ENV === "production";
-  
-  if (isVercel && isProduction) {
-    // Vercel 프로덕션 환경에서는 초기화 시 DB 조회와 시딩을 완전히 건너뛰기
-    console.log("Vercel production environment detected - skipping initial DB query and seeding");
-  } else {
-    // 로컬 개발 환경에서만 초기 DB 조회 및 시딩 수행
-    console.log("Local development environment - checking database and seeding if needed");
-    const existingEtfs = await storage.getEtfs();
-    if (existingEtfs.length < 50) {
-      console.log(`Database has only ${existingEtfs.length} ETFs, force seeding...`);
-      await seedDatabase(true);
+      
+      res.json({ executed: results.filter(r => r.action !== "대기" && r.action !== "skip").length, results });
+    } catch (error: any) {
+      console.error("Failed to execute auto-trade rules:", error);
+      res.status(500).json({ message: error.message || "자동매매 실행 실패" });
     }
-  }
+  });
+
+  // ========== 즐겨찾기 (북마크) ==========
+  app.get("/api/bookmarks", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId || undefined;
+      const items = await storage.getBookmarks(userId);
+      res.json(items);
+    } catch (error: any) {
+      console.error("Failed to get bookmarks:", error);
+      res.status(500).json({ message: error.message || "즐겨찾기 목록 불러오기 실패" });
+    }
+  });
+
+  app.post("/api/bookmarks", requireUser, async (req, res) => {
+    try {
+      const { title, url, sortOrder } = req.body;
+      if (!title || !url) {
+        return res.status(400).json({ message: "제목과 URL은 필수입니다." });
+      }
+      const userId = req.session?.userId || null;
+      const bookmark = await storage.createBookmark({ title, url, sortOrder: sortOrder || 0, userId });
+      res.json(bookmark);
+    } catch (error: any) {
+      console.error("Failed to create bookmark:", error);
+      res.status(500).json({ message: error.message || "즐겨찾기 추가 실패" });
+    }
+  });
+
+  app.put("/api/bookmarks/:id", requireUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      // 소유권 확인: 자기 북마크만 수정 가능
+      const existing = await storage.getBookmarkById(id);
+      if (!existing) {
+        return res.status(404).json({ message: "즐겨찾기를 찾을 수 없습니다" });
+      }
+      const sessionUserId = req.session?.userId || null;
+      if (existing.userId !== sessionUserId) {
+        return res.status(403).json({ message: "다른 사용자의 즐겨찾기는 수정할 수 없습니다" });
+      }
+      const { title, url, sortOrder } = req.body;
+      const updated = await storage.updateBookmark(id, { title, url, sortOrder });
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Failed to update bookmark:", error);
+      res.status(500).json({ message: error.message || "즐겨찾기 수정 실패" });
+    }
+  });
+
+  app.delete("/api/bookmarks/:id", requireUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      // 소유권 확인: 자기 북마크만 삭제 가능
+      const existing = await storage.getBookmarkById(id);
+      if (!existing) {
+        return res.status(404).json({ message: "즐겨찾기를 찾을 수 없습니다" });
+      }
+      const sessionUserId = req.session?.userId || null;
+      if (existing.userId !== sessionUserId) {
+        return res.status(403).json({ message: "다른 사용자의 즐겨찾기는 삭제할 수 없습니다" });
+      }
+      await storage.deleteBookmark(id);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Failed to delete bookmark:", error);
+      res.status(500).json({ message: error.message || "즐겨찾기 삭제 실패" });
+    }
+  });
+
+  // ========== 주요뉴스 (많이 본 뉴스 - 네이버 금융 RANK) ==========
+  app.get("/api/news/market", async (req, res) => {
+    try {
+      const newsResults: { title: string; link: string; source: string; time: string; category: string }[] = [];
+
+      // 네이버 금융 많이 본 뉴스 (RANK)
+      const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+      // 페이지 1~2를 가져옴
+      for (const page of [1, 2]) {
+        try {
+          const rankRes = await axios.get(`https://finance.naver.com/news/news_list.naver?mode=RANK&page=${page}`, {
+            headers: { "User-Agent": UA },
+            timeout: 8000,
+            responseType: "arraybuffer",
+          });
+          const html = new TextDecoder("euc-kr").decode(rankRes.data);
+          const $ = cheerio.load(html);
+
+          // 많이 본 뉴스 리스트 파싱
+          $("dl dd, .realtimeNewsList li, .newsList li, .type06_headline li, .simpleNewsList li").each((_i, el) => {
+            const $el = $(el);
+            const $a = $el.find("a").first();
+            const title = $a.text().trim();
+            let link = $a.attr("href") || "";
+            if (link && !link.startsWith("http")) {
+              link = "https://finance.naver.com" + link;
+            }
+            const source = $el.find(".press, .info_press, .writing").text().trim();
+            const time = $el.find(".wdate, .date").text().trim();
+            if (title && title.length > 5 && link) {
+              newsResults.push({ title, link, source, time, category: "주요뉴스" });
+            }
+          });
+
+          // dt 안의 a도 확인 (일부 레이아웃)
+          $("dl dt a").each((_i, el) => {
+            const $a = $(el);
+            const title = $a.text().trim();
+            let link = $a.attr("href") || "";
+            if (link && !link.startsWith("http")) {
+              link = "https://finance.naver.com" + link;
+            }
+            if (title && title.length > 5 && link) {
+              newsResults.push({ title, link, source: "", time: "", category: "주요뉴스" });
+            }
+          });
+        } catch (e: any) {
+          console.error(`네이버 RANK 뉴스 page ${page} 스크래핑 실패:`, e.message);
+        }
+      }
+
+      // 중복 제거 (제목 기준)
+      const seen = new Set<string>();
+      const uniqueNews = newsResults.filter(item => {
+        const key = item.title.replace(/\s+/g, "").substring(0, 30);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
+      // 중요도 점수 부여 (키워드 기반)
+      const importanceKeywords = [
+        { keywords: ["금리", "기준금리", "한은", "한국은행", "미연준", "Fed", "FOMC"], score: 10 },
+        { keywords: ["코스피", "코스닥", "증시", "주가", "지수"], score: 8 },
+        { keywords: ["환율", "달러", "원화", "엔화", "유로"], score: 8 },
+        { keywords: ["반도체", "삼성전자", "SK하이닉스", "AI", "인공지능", "엔비디아"], score: 7 },
+        { keywords: ["유가", "원유", "국제유가", "WTI", "브렌트"], score: 7 },
+        { keywords: ["인플레이션", "물가", "CPI", "PPI", "소비자물가"], score: 9 },
+        { keywords: ["GDP", "경제성장", "성장률"], score: 9 },
+        { keywords: ["실적", "영업이익", "순이익", "매출"], score: 6 },
+        { keywords: ["IPO", "상장", "공모"], score: 5 },
+        { keywords: ["ETF", "펀드"], score: 6 },
+        { keywords: ["외국인", "기관", "순매수", "순매도"], score: 7 },
+        { keywords: ["채권", "국채", "회사채"], score: 6 },
+        { keywords: ["부동산", "아파트", "부동산시장"], score: 5 },
+        { keywords: ["무역", "수출", "수입", "무역수지"], score: 7 },
+        { keywords: ["긴급", "속보", "충격", "급등", "급락", "폭락", "폭등"], score: 10 },
+      ];
+
+      const scoredNews = uniqueNews.map((item, idx) => {
+        let score = 0;
+        const titleLower = item.title.toLowerCase();
+        for (const group of importanceKeywords) {
+          for (const kw of group.keywords) {
+            if (titleLower.includes(kw.toLowerCase())) {
+              score += group.score;
+              break;
+            }
+          }
+        }
+        // 순서가 앞일수록 가산점 (많이 본 뉴스이므로 원래 순서도 중요)
+        score += Math.max(0, 30 - idx);
+        if (item.time) score += 1;
+        return { ...item, score };
+      });
+
+      scoredNews.sort((a, b) => b.score - a.score);
+      const top25 = scoredNews.slice(0, 25).map(({ score, ...rest }) => rest);
+
+      res.json({
+        news: top25,
+        updatedAt: new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }),
+        totalScraped: newsResults.length,
+      });
+    } catch (error: any) {
+      console.error("Failed to fetch market news:", error);
+      res.status(500).json({ message: error.message || "뉴스 가져오기 실패" });
+    }
+  });
+
+  // ========== 증권사 리서치 리포트 ==========
+  app.get("/api/news/research", async (req, res) => {
+    try {
+      const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+      const researchItems: { title: string; link: string; source: string; date: string; file: string }[] = [];
+
+      const researchRes = await axios.get("https://finance.naver.com/research/invest_list.naver", {
+        headers: { "User-Agent": UA },
+        timeout: 8000,
+        responseType: "arraybuffer",
+      });
+      const html = new TextDecoder("euc-kr").decode(researchRes.data);
+      const $ = cheerio.load(html);
+
+      // 리서치 테이블 파싱 - 셀 내용 패턴 기반 매핑
+      $("table.type_1 tr").each((_i, el) => {
+        const $row = $(el);
+        const cells = $row.find("td");
+        if (cells.length < 3) return;
+
+        // 링크가 포함된 셀을 제목 셀로 인식
+        let titleCell: ReturnType<typeof $> | null = null;
+        let titleIdx = -1;
+        cells.each((idx, cell) => {
+          if (!titleCell && $(cell).find("a[href*='invest_read']").length > 0) {
+            titleCell = $(cell);
+            titleIdx = idx;
+          }
+        });
+        // 링크 패턴이 없으면 첫 번째 a 태그가 있는 셀 사용
+        if (!titleCell) {
+          cells.each((idx, cell) => {
+            if (!titleCell && $(cell).find("a").length > 0) {
+              titleCell = $(cell);
+              titleIdx = idx;
+            }
+          });
+        }
+        if (!titleCell) return;
+
+        const $a = (titleCell as ReturnType<typeof $>).find("a").first();
+        const title = $a.text().trim();
+        let link = $a.attr("href") || "";
+        if (link && !link.startsWith("http")) {
+          link = "https://finance.naver.com/research/" + link;
+        }
+
+        // PDF 첨부파일 찾기
+        const $pdfLink = (titleCell as ReturnType<typeof $>).find("a[href*='.pdf'], a[href*='download']");
+        let file = "";
+        if ($pdfLink.length > 0) {
+          const fileLink = $pdfLink.attr("href") || "";
+          if (fileLink) {
+            file = fileLink.startsWith("http") ? fileLink : "https://finance.naver.com/research/" + fileLink;
+          }
+        }
+
+        // 나머지 셀에서 증권사, 날짜, 조회수 식별
+        let source = "";
+        let date = "";
+        const datePattern = /^\d{2}\.\d{2}\.\d{2}$/;
+        const viewPattern = /^\d{1,6}$/;
+
+        cells.each((idx, cell) => {
+          if (idx === titleIdx) return;
+          const text = $(cell).text().trim();
+          if (!text) return;
+
+          if (datePattern.test(text)) {
+            date = text;
+          } else if (viewPattern.test(text)) {
+            // 조회수 - 스킵
+          } else if (text.length > 1 && text.length <= 20) {
+            // 증권사 이름 (보통 짧은 텍스트)
+            source = text;
+          }
+        });
+
+        if (title && title.length > 2) {
+          researchItems.push({ title, link, source, date, file });
+        }
+      });
+
+      res.json({
+        research: researchItems.slice(0, 30),
+        updatedAt: new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }),
+        total: researchItems.length,
+      });
+    } catch (error: any) {
+      console.error("Failed to fetch research:", error);
+      res.status(500).json({ message: error.message || "리서치 데이터 가져오기 실패" });
+    }
+  });
+
+  // ========== ETF 구성종목 + 실시간 시세 ==========
+  app.get("/api/etf/components/:code", async (req, res) => {
+    try {
+      const etfCode = req.params.code;
+      if (!etfCode || !/^\d{6}$/.test(etfCode)) {
+        return res.status(400).json({ message: "유효한 6자리 ETF 코드를 입력해주세요." });
+      }
+
+      if (!kisApi.isConfigured()) {
+        return res.status(503).json({ message: "KIS API가 설정되지 않았습니다." });
+      }
+
+      const result = await kisApi.getEtfComponents(etfCode);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Failed to fetch ETF components:", error);
+      res.status(500).json({ message: error.message || "ETF 구성종목 조회 실패" });
+    }
+  });
+
+  // ETF 검색 (DB 제거됨 - 빈 결과 반환)
+  app.get("/api/etf/search", async (req, res) => {
+    res.json({ results: [], total: 0 });
+  });
+
+  // ========== 시장 보고서 (일일/주간/월간/연간) ==========
+  app.get("/api/report/:period", async (req, res) => {
+    try {
+      const period = req.params.period as string;
+      const validPeriods = ["daily", "weekly", "monthly", "yearly"];
+      if (!validPeriods.includes(period)) {
+        return res.status(400).json({ message: "유효하지 않은 기간입니다. (daily, weekly, monthly, yearly)" });
+      }
+
+      const periodLabels: Record<string, string> = {
+        daily: "일일",
+        weekly: "주간",
+        monthly: "월간",
+        yearly: "연간",
+      };
+
+      // 병렬로 데이터 수집
+      const [indices, volumeRanking, investorTrends, topEtfs, news] = await Promise.all([
+        kisApi.getMarketIndices().catch(() => []),
+        kisApi.getVolumeRanking().catch(() => []),
+        kisApi.getInvestorTrends().catch(() => []),
+        // ETF 추천 데이터 (Tracked ETFs 삭제로 빈 배열 반환)
+        Promise.resolve([]),
+        // 네이버 금융 뉴스 스크래핑
+        (async () => {
+          try {
+            const newsRes = await axios.get("https://finance.naver.com/news/mainnews.naver", {
+              headers: { "User-Agent": "Mozilla/5.0" },
+              timeout: 5000,
+            });
+            const $ = cheerio.load(newsRes.data);
+            const newsItems: { title: string; link: string; source: string; time: string }[] = [];
+            $(".mainNewsList li, .news_list li").each((i, el) => {
+              if (i >= 10) return false;
+              const $el = $(el);
+              const $a = $el.find("a").first();
+              const title = $a.text().trim();
+              let link = $a.attr("href") || "";
+              if (link && !link.startsWith("http")) {
+                link = "https://finance.naver.com" + link;
+              }
+              const source = $el.find(".press, .info_press").text().trim();
+              const time = $el.find(".wdate, .date").text().trim();
+              if (title) {
+                newsItems.push({ title, link, source, time });
+              }
+            });
+            return newsItems;
+          } catch {
+            return [];
+          }
+        })(),
+      ]);
+
+      // 보고서 생성 시간
+      const now = new Date();
+      const reportTime = now.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
+
+      // 기간별 날짜 범위 계산
+      let periodRange = "";
+      if (period === "daily") {
+        periodRange = now.toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul", year: "numeric", month: "long", day: "numeric", weekday: "long" });
+      } else if (period === "weekly") {
+        const weekStart = new Date(now);
+        weekStart.setDate(now.getDate() - now.getDay() + 1); // 월요일
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekStart.getDate() + 4); // 금요일
+        periodRange = `${weekStart.toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul", month: "long", day: "numeric" })} ~ ${weekEnd.toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul", month: "long", day: "numeric" })}`;
+      } else if (period === "monthly") {
+        periodRange = now.toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul", year: "numeric", month: "long" });
+      } else if (period === "yearly") {
+        periodRange = `${now.getFullYear()}년`;
+      }
+
+      // 시장 요약 텍스트 생성
+      const kospi = indices.find((i: any) => i.code === "0001");
+      const kosdaq = indices.find((i: any) => i.code === "1001");
+
+      let marketSummary = "";
+      if (kospi) {
+        const sign = ["1", "2"].includes(kospi.changeSign) ? "▲" : kospi.changeSign === "3" ? "-" : "▼";
+        marketSummary += `코스피 ${parseFloat(kospi.price).toFixed(2)} (${sign}${Math.abs(parseFloat(kospi.change)).toFixed(2)}, ${kospi.changePercent}%)`;
+      }
+      if (kosdaq) {
+        const sign = ["1", "2"].includes(kosdaq.changeSign) ? "▲" : kosdaq.changeSign === "3" ? "-" : "▼";
+        marketSummary += ` / 코스닥 ${parseFloat(kosdaq.price).toFixed(2)} (${sign}${Math.abs(parseFloat(kosdaq.change)).toFixed(2)}, ${kosdaq.changePercent}%)`;
+      }
+
+      res.json({
+        period,
+        periodLabel: periodLabels[period],
+        periodRange,
+        reportTime,
+        marketSummary,
+        indices,
+        volumeRanking,
+        investorTrends,
+        topEtfs: (topEtfs as any[]).slice(0, 10).map((e: any) => ({
+          id: e.id,
+          name: e.name,
+          code: e.code,
+          mainCategory: e.mainCategory,
+          trendScore: e.trendScore,
+          yield: e.yield,
+          fee: e.fee,
+        })),
+        news,
+      });
+    } catch (error: any) {
+      console.error("Failed to generate report:", error);
+      res.status(500).json({ message: error.message || "보고서 생성 실패" });
+    }
+  });
 
   // 404 핸들러는 registerRoutes 함수에서 제거
   // Vite/serveStatic 미들웨어가 먼저 처리한 후에 등록되어야 함
   // server/index.ts에서 별도로 처리됨
 
   return httpServer;
-}
-
-async function seedDatabase(force: boolean = false) {
-  // Vercel 프로덕션 환경에서는 시딩을 수행하지 않음
-  if (process.env.VERCEL && process.env.NODE_ENV === "production") {
-    console.log("Skipping seedDatabase in Vercel production environment");
-    return;
-  }
-  
-  const existing = await storage.getEtfs();
-  if (existing.length === 0 || (force && existing.length < 50)) {
-    if (force) {
-      for (const etf of existing) {
-        await storage.deleteEtf(etf.id);
-      }
-    }
-    const seeds = [
-      // 해외.커버드콜 - 미국국채
-      { mainCategory: "해외.커버드콜", subCategory: "미국국채", generation: "2세대", country: "미국", name: "TIGER 미국30년국채커버드콜액티브(H)", code: "476550", fee: "0.39%", yield: "12%(타겟)", marketCap: "1.1조/>100억", dividendCycle: "월지급(말일)", optionType: "위클리(30%)", underlyingAsset: "KEDI US Treasury 30Y Weekly Covered Call 30 Index", callOption: "TLT", listingDate: "24.02", notes: "환헷지", linkProduct: "https://www.tigeretf.com/ko/product/search/detail/index.do?ksdFund=KR7476550009" },
-      { mainCategory: "해외.커버드콜", subCategory: "미국국채", generation: "2세대", country: "미국", name: "KODEX 미국30년국채타겟커버드콜(합성 H)", code: "481060", fee: "0.25%", yield: "12%(타겟)", marketCap: "4142억/50~150억", dividendCycle: "월지급(15일)", optionType: "위클리(30%)", underlyingAsset: "Bloomberg U.S.Treasury 20+ Year(TLT)+ 12% Premium Covered Call index(Total Return)", callOption: "TLT", listingDate: "24.04", notes: "환헷지/옵션매도비중조절", linkProduct: "https://www.samsungfund.com/etf/product/view.do?id=2ETFM9" },
-      { mainCategory: "해외.커버드콜", subCategory: "미국국채", country: "미국", name: "RISE 미국30년국채커버드콜(합성)", code: "472830", fee: "0.25%", yield: "12%(타겟)", marketCap: "1800억/30~100억", dividendCycle: "월지급(말일)", optionType: "위클리", underlyingAsset: "KEDI US Treasury 30Y Weekly Covered Call 30 Index", callOption: "TLT", listingDate: "23.12", notes: "환노출/실제 배당액은 11%미만임('24.11월 현재)", linkProduct: "https://www.riseetf.co.kr/prod/finderDetail/44F8" },
-      { mainCategory: "해외.커버드콜", subCategory: "미국국채", country: "미국", name: "SOL 미국30년국채커버드콜(합성)", code: "473330", fee: "0.25%", yield: "12%(타겟)", marketCap: "3600억/100~200억", dividendCycle: "월지급(말일)", optionType: "위클리", underlyingAsset: "KEDI US Treasury 30Y Weekly Covered Call 30 Index", callOption: "TLT", listingDate: "23.12", notes: "환노출/실제 배당액은 12%정도('24.11월 현재)", linkProduct: "https://www.soletf.com/ko/fund/etf/211044" },
-      // 해외.커버드콜 - 나스닥100
-      { mainCategory: "해외.커버드콜", subCategory: "나스닥100", generation: "1세대", country: "미국", name: "TIGER 미국나스닥100커버드콜(합성)", code: "441680", fee: "0.37%", yield: "12%(타겟)", marketCap: "3557억/10~50억", dividendCycle: "월지급(말일)", optionType: "Monthly타겟(~100%)", underlyingAsset: "CBOE Nasdaq-100 BuyWrite V2 지수(Total Return)(원화환산)", callOption: "ATM Nasdaq-100 콜옵션", listingDate: "22.09", linkProduct: "https://www.tigeretf.com/ko/product/search/detail/index.do?ksdFund=KR7441680006" },
-      { mainCategory: "해외.커버드콜", subCategory: "나스닥100", generation: "3세대", country: "미국", name: "TIGER 미국나스닥100타겟데일리커버드콜", code: "486290", fee: "0.25%", yield: "15%(타겟)", marketCap: "5092억/50~150억", dividendCycle: "월지급(말일)", optionType: "데일리타겟(15%+-)", underlyingAsset: "NASDAQ-100 Daily Covered Call Target Premium 15% 지수(Total Return)(원화환산)", callOption: "NASDAQ100 콜옵션", listingDate: "24.06", linkProduct: "https://www.tigeretf.com/ko/product/search/detail/index.do?ksdFund=KR7486290000" },
-      { mainCategory: "해외.커버드콜", subCategory: "나스닥100", country: "미국", name: "KODEX 미국나스닥100데일리커버드콜OTM", code: "494300", fee: "0.25%", yield: "Max.20%", dividendCycle: "월지급(말일)", optionType: "데일리", underlyingAsset: "Nasdaq-100 Index", listingDate: "24.10", notes: "나스닥100 상승 1% 추종/실물옵션 매매/추가 프리미엄은 재투자", linkProduct: "https://www.samsungfund.com/etf/insight/newsroom/view.do?seq=63073" },
-      // 해외.커버드콜 - S&P500
-      { mainCategory: "해외.커버드콜", subCategory: "S&P500", country: "미국", name: "TIGER 미국S&P500타겟데일리커버드콜", code: "482730", fee: "0.25%", yield: "10%(타겟)", dividendCycle: "월지급(말일)", optionType: "데일리타겟", underlyingAsset: "S&P 500 Daily Covered Call Target Premium 10% Index", listingDate: "24.05", notes: "10%프리미엄타겟 매도비중 조절", linkProduct: "https://www.tigeretf.com/ko/product/search/detail/index.do?ksdFund=KR7482730009" },
-      { mainCategory: "해외.커버드콜", subCategory: "S&P500", country: "미국", name: "SOL 미국500타겟커버드콜액티브", code: "494210", fee: "0.35%", yield: "12%(타겟)", dividendCycle: "월지급(말일)", optionType: "위클리타겟", underlyingAsset: "S&P 500 Index", listingDate: "24.10", notes: "Active운용/옵션매도비중조절", linkProduct: "https://www.soletf.com/ko/fund/etf/211064" },
-      { mainCategory: "해외.커버드콜", subCategory: "S&P500", country: "미국", name: "ACE 미국500데일리타겟커버드콜(합성)", code: "480030", fee: "0.45%", yield: "15%(타겟)", dividendCycle: "월지급(말일)", optionType: "데일리타겟", underlyingAsset: "S&P 500 Index", listingDate: "24.04", notes: "S&P500의 일일 0.7%만 지수추종", linkProduct: "https://www.aceetf.co.kr/fund/K55101E97755" },
-      { mainCategory: "해외.커버드콜", subCategory: "S&P500", country: "미국", name: "KODEX 미국S&P500 데일리 커버드콜 OTM", code: "0005A0", fee: "0.25%", yield: "15%(타겟)", dividendCycle: "월지급(말일)", optionType: "데일리OTM", underlyingAsset: "S&P 500 Index", listingDate: "25.01", notes: "S&P500의 일일 1%까지 지수추종", linkProduct: "https://www.samsungfund.com/etf/insight/newsroom/view.do?seq=64514" },
-      // 해외.커버드콜 - AI테크
-      { mainCategory: "해외.커버드콜", subCategory: "AI테크", country: "미국", name: "KODEX 미국AI테크TOP10타겟커버드콜", code: "483280", fee: "0.39%", yield: "15%(타겟)", dividendCycle: "월지급(말일)", optionType: "위클리타겟", listingDate: "24.05", notes: "AI 투자방식(시가총액 + LLM모델)로 AI 관련주 선별, 직접운용", linkProduct: "https://www.samsungfund.com/etf/product/view.do?id=2ETFN2" },
-      { mainCategory: "해외.커버드콜", subCategory: "AI테크", country: "미국", name: "TIGER 미국AI빅테크10타겟데일리커버드콜", code: "493810", fee: "0.25%", yield: "15%(타겟)", dividendCycle: "월지급(말일)", optionType: "데일리타겟", listingDate: "24.10", notes: "수익성과 성장성을 고려한 AI 투자 + 월배당", linkProduct: "https://www.tigeretf.com/ko/product/search/detail/index.do?ksdFund=KR7493810006" },
-      { mainCategory: "해외.커버드콜", subCategory: "AI테크", country: "미국", name: "RISE 미국AI밸류체인데일리고정커버드콜", code: "490590", fee: "0.25%", yield: "~20%(추정)", dividendCycle: "월지급(말일)", optionType: "데일리고정(10%)", listingDate: "24.10", notes: "목표분배율 없음(10% 콜옵션매도로 분배금 지급)", linkProduct: "https://www.riseetf.co.kr/prod/finderDetail/44H1" },
-      // 해외.커버드콜 - 중국빅테크
-      { mainCategory: "해외.커버드콜", subCategory: "중국빅테크", country: "CN", name: "RISE 차이나테크TOP10위클리타겟커버드콜", code: "0094L0", fee: "0.30%", yield: "12%(타겟)", dividendCycle: "월지급(말일)", notes: "텐센트/샤오미/알리바바/BYD/메이투안/네티즈/트립닷컴/징동닷컴/바이두", linkProduct: "https://blog.naver.com/riseetf/223985313558" },
-      { mainCategory: "해외.커버드콜", subCategory: "중국빅테크", country: "CN", name: "PLUS 차이나항셍테크위클리타겟커버드콜", code: "0128D0", fee: "0.39%", yield: "15%(타겟)", dividendCycle: "월지급(말일)", notes: "알리바바/SMIC/텐센트/메이투안/네티즈/비야디/샤오미/징동닷컴/콰이쇼우/트립닷컴", linkProduct: "https://www.plusetf.co.kr/insight/report/detail?n=1103" },
-      // 해외.커버드콜 - 미국빅테크
-      { mainCategory: "해외.커버드콜", subCategory: "미국빅테크", country: "미국", name: "TIGER 미국테크TOP10타겟커버드콜", code: "474220", fee: "0.50%", yield: "10%(타겟)", dividendCycle: "월지급(말일)", optionType: "위클리타겟", listingDate: "24.01", notes: "SDAQ100 ATM 콜옵션 매도", linkProduct: "https://www.tigeretf.com/ko/product/search/detail/index.do?ksdFund=KR7474220001" },
-      { mainCategory: "해외.커버드콜", subCategory: "미국빅테크", country: "미국", name: "ACE 미국빅테크7+데일리타겟커버드콜(합성)", code: "480020", fee: "0.45%", yield: "15%(타겟)", dividendCycle: "월지급(말일)", optionType: "데일리타겟", listingDate: "24.04", notes: "매일 1% 지수수익률 추종", linkProduct: "https://www.aceetf.co.kr/fund/K55101E97763" },
-      { mainCategory: "해외.커버드콜", subCategory: "미국빅테크", country: "미국", name: "RISE 미국테크100데일리고정커버드콜", code: "491620", fee: "0.25%", yield: "~20%(추정)", dividendCycle: "월지급(말일)", optionType: "데일리고정(10%)", listingDate: "24.10", notes: "미국테크100 지수 90% 추종", linkProduct: "https://riseetf.co.kr/prod/finderDetail/44H5" },
-      // 해외.커버드콜 - 미국반도체
-      { mainCategory: "해외.커버드콜", subCategory: "미국반도체", country: "미국", name: "ACE 미국반도체데일리타겟커버드콜(합성)", code: "480040", fee: "0.45%", yield: "15%(타겟)", dividendCycle: "월지급(말일)", optionType: "데일리타겟", listingDate: "24.04", notes: "매일 1% 지수수익률 추종", linkProduct: "https://www.aceetf.co.kr/fund/K55101E96450" },
-      // 해외.커버드콜 - SCHD
-      { mainCategory: "해외.커버드콜", subCategory: "SCHD", country: "미국", name: "TIGER 미국배당다우존스타겟커버드콜2호", code: "458760", fee: "0.39%", yield: "10~11%(추정)", dividendCycle: "월지급(말일)", optionType: "위클리타겟(40%)", listingDate: "23.06", notes: "SCHD(60%) 3~4%+S&P500옵션(40%) 7% 분배", linkProduct: "https://www.tigeretf.com/ko/product/search/detail/index.do?ksdFund=KR7458760006" },
-      { mainCategory: "해외.커버드콜", subCategory: "SCHD", country: "미국", name: "TIGER 미국배당다우존스타겟커버드콜1호", code: "458750", fee: "0.39%", yield: "6~7%(추정)", dividendCycle: "월지급(말일)", optionType: "위클리타겟(15%)", listingDate: "23.06", notes: "SCHD(85%) 3~4%+S&P500옵션(15%) 3% 분배", linkProduct: "https://www.tigeretf.com/ko/product/search/detail/index.do?ksdFund=KR7458750007" },
-      { mainCategory: "해외.커버드콜", subCategory: "SCHD", country: "미국", name: "KODEX 미국배당다우존스타겟커버드콜", code: "483290", fee: "0.39%", yield: "13.5%(타겟)", dividendCycle: "월지급(말일)", optionType: "타겟", listingDate: "24.05", notes: "SCHD 3~4%+S&P500타겟프리미엄 10% 분배", linkProduct: "https://www.samsungfund.com/etf/product/view.do?id=2ETFN1" },
-      { mainCategory: "해외.커버드콜", subCategory: "SCHD", country: "미국", name: "TIGER 미국배당다우존스타겟데일리커버드콜", code: "0008S0", fee: "0.25%", yield: "12%(타겟)", dividendCycle: "월지급(말일)", optionType: "데일리타겟", listingDate: "25.01", linkProduct: "https://blog.naver.com/PostView.naver?blogId=m_invest&logNo=223725695732" },
-      // 해외.커버드콜 - 미국배당
-      { mainCategory: "해외.커버드콜", subCategory: "미국배당", country: "미국", name: "PLUS 미국배당증가성장주데일리커버드콜", code: "494420", fee: "0.39%", yield: "12~15%(추정)", marketCap: "77억/1~10억", dividendCycle: "월지급(말일)", optionType: "데일리고정(15%)", underlyingAsset: "Bloomberg 1000 Dividend Growth(85%)", callOption: "SPY(S&P500) 콜옵션 매도(15%)", listingDate: "24.10", notes: "미국배당증가성장주(85%) 2% + S&P500옵션 10~13%(추정) 분배", linkProduct: "https://www.plusetf.co.kr/insight/report/detail?n=342" },
-      { mainCategory: "해외.커버드콜", subCategory: "미국배당", country: "미국", name: "RISE 미국배당100데일리고정커버드콜", code: "490600", fee: "0.25%", yield: "12%(추정)", marketCap: "217억/10~50억", dividendCycle: "월지급(말일)", optionType: "데일리고정(10%)", underlyingAsset: "KEDI 미국 배당100 (90%)", callOption: "SPY(S&P500) 콜옵션 매도(10%)", listingDate: "24.09", notes: "미국배당100(90%) 2%(추정) + S&P500옵션 10%(추정) 분배", linkProduct: "https://www.riseetf.co.kr/prod/finderDetail/44H2" },
-      { mainCategory: "해외.커버드콜", subCategory: "미국배당", country: "미국", name: "KODEX 미국배당커버드콜액티브", code: "441640", fee: "0.19%", yield: "8%+(추정)", dividendCycle: "월지급(말일)", listingDate: "22.09", notes: "콜옵션매도비율 조절 / 8%~9% 분배", linkProduct: "https://www.samsungfund.com/etf/product/view.do?id=2ETFH4" },
-      // 해외.커버드콜 - 혼합형
-      { mainCategory: "해외.커버드콜", subCategory: "혼합형", country: "미국", name: "KODEX 테슬라커버드콜채권혼합액티브", code: "475080", fee: "0.39%", yield: "15%", marketCap: "2096억/10~30억", dividendCycle: "월지급(말일)", optionType: "Monthly", underlyingAsset: "KAP 한국종합채권 2-3Y 지수(AA-이상, 총수익) (70%)", callOption: "TSLY (~30%)", listingDate: "24.01", notes: "한국채권(70%)+미국테슬라본주/TSLY(30%)", linkProduct: "https://www.samsungfund.com/etf/product/view.do?id=2ETFM1" },
-      { mainCategory: "해외.커버드콜", subCategory: "혼합형", country: "미국", name: "RISE 테슬라미국채타겟커버드콜혼합(합성)", code: "0013R0", fee: "0.25%", yield: "~15%(추정)", dividendCycle: "월지급(말일)", optionType: "Monthly", listingDate: "25.02", notes: "미국30년국채(70%)+테슬라(30%)", linkProduct: "https://www.riseetf.co.kr/prod/finderDetail/44I1" },
-      { mainCategory: "해외.커버드콜", subCategory: "혼합형", country: "미국", name: "TIGER 엔비디아미국채커버드콜밸런스(합성)", code: "0000D0", fee: "0.39%", yield: "12~15%(추정)", dividendCycle: "월지급(말일)", listingDate: "24.12", notes: "엔비디아(30%)+미국채30년커버드콜(30%)", linkProduct: "https://www.tigeretf.com/ko/insight/hot-etf-introduce/view.do?listCnt=6&pageIndex=1&detailsKey=516" },
-      { mainCategory: "해외.커버드콜", subCategory: "혼합형", country: "CN", name: "FOCUS 알리바바미국채커버드콜혼합", code: "0073X0", fee: "0.36%", listingDate: "25.07" },
-      { mainCategory: "해외.커버드콜", subCategory: "혼합형", country: "미국", name: "SOL 팔란티어커버드콜OTM채권혼합", code: "0040Y0", fee: "0.35%", yield: "24%", dividendCycle: "월지급(말일)", notes: "팔란티어 주식+팔란티어 103% OTM 위클리 콜옵션 매도 30%, 단기국고채 70%", linkProduct: "https://www.soletf.com/ko/fund/etf/211088?tabIndex=3" },
-      // 해외.커버드콜 - 혼합형(IRP100)
-      { mainCategory: "해외.커버드콜", subCategory: "혼합형(IRP100)", country: "미국", name: "SOL 팔란티어미국채커버드콜혼합", code: "0040X0", fee: "0.35%", yield: "25%", dividendCycle: "월지급(말일)", linkProduct: "https://www.soletf.com/ko/fund/etf/211089" },
-      { mainCategory: "해외.커버드콜", subCategory: "혼합형(IRP100)", country: "미국", name: "PLUS 테슬라위클리커버드콜채권혼합", code: "0132K0", fee: "0.39%", yield: "24%(타겟)", dividendCycle: "월지급(말일)", linkProduct: "https://www.plusetf.co.kr/insight/report/detail?n=1164" },
-      // 해외.커버드콜 - ACTIVE.CC
-      { mainCategory: "해외.커버드콜", subCategory: "ACTIVE.CC", country: "미국", name: "KODEX 미국성장커버드콜액티브", code: "0144L0", fee: "0.49%", yield: "10%(추정)", dividendCycle: "월지급(말일)", listingDate: "25.12", notes: "수익성 기대되는 테크 성장주에 투자하며 탄력적 옵션 매도로 월배당을 동시에 추구", linkProduct: "https://www.samsungfund.com/etf/product/view.do?id=2ETFT4" },
-
-      // 해외.액티브
-      { mainCategory: "해외.액티브", subCategory: "Index", generation: "Active", country: "W", name: "TIGER 토탈월드스탁액티브", code: "0060H0", fee: "0.25%", yield: "-" },
-      { mainCategory: "해외.액티브", subCategory: "에너지/인프라", generation: "Active", country: "미국", name: "TIGER 글로벌AI전력인프라 액티브", code: "491010", fee: "0.49%", yield: "-" },
-      { mainCategory: "해외.액티브", subCategory: "NASDAQ", generation: "Active", country: "미국", name: "TIMEFOLIO 미국나스닥100액티브", code: "TIMEFOLIO_NDX", fee: "1.24%", yield: "-", listingDate: "22.05", notes: "테슬라/엔비디아/마이크로스트래티지/알파벳/메타", isFavorite: true },
-      { mainCategory: "해외.액티브", subCategory: "S&P500", generation: "Active", country: "미국", name: "TIMEFOLIO 미국S&P500액티브", code: "426020", fee: "0.69%", yield: "-", isFavorite: true },
-      { mainCategory: "해외.액티브", subCategory: "DOW", generation: "Active", country: "미국", name: "TIMEFOLIO 미국배당다우존스액티브", code: "0036D0", fee: "0.80%", yield: "-", linkProduct: "https://www.timefolio.co.kr/etf/funds_view.php?PID=21" },
-      { mainCategory: "해외.액티브", subCategory: "EMP", generation: "Active", country: "미국", name: "TIMEFOLIO 글로벌탑픽액티브", code: "0113D0", fee: "0.06%", yield: "-", listingDate: "25.10", isRecommended: true },
-      { mainCategory: "해외.액티브", subCategory: "AI", generation: "Active", country: "CN", name: "TIMEFOLIO 차이나AI테크액티브", code: "0043Y0", fee: "0.80%", yield: "-", listingDate: "25.05", notes: "Tencent/Alibaba/Xiaomi/Zhejiang/BYD/SMIC/XPeng/TSMC", isRecommended: true, isFavorite: true },
-      { mainCategory: "해외.액티브", subCategory: "NASDAQ", generation: "Active", country: "US", name: "KoAct 미국나스닥성장기업액티브", code: "0015B0", fee: "0.50%", yield: "-", listingDate: "25.02", notes: "팔란티어/브로드컴/알파벳", linkProduct: "https://www.samsungactive.co.kr/etf/view.do?id=2ETFQ1" },
-      { mainCategory: "해외.액티브", subCategory: "S&P500", generation: "Active", country: "미국", name: "KODEX 미국S&P500액티브", code: "0041E0", fee: "0.45%", yield: "-", listingDate: "25.04", notes: "S&P500 지수의 상위 100여개 종목에 '압축' 투자", linkProduct: "https://www.samsungfund.com/etf/product/view.do?id=2ETFQ9" },
-      { mainCategory: "해외.액티브", subCategory: "금융", generation: "Active", country: "미국", name: "KODEX 미국금융테크액티브", code: "0028X0", fee: "0.45%", yield: "-", listingDate: "25.05", notes: "쇼피파이/누홀딩스/뱅크오브뉴욕멜론/CME.G/VISA/BlackRock/Paypal", linkProduct: "https://www.samsungfund.com/etf/product/view.do?id=2ETFQ6" },
-      { mainCategory: "해외.액티브", subCategory: "AI", generation: "Active", country: "CN", name: "KODEX 차이나AI테크액티브", code: "428510", fee: "0.50%", yield: "-", listingDate: "22.05" },
-      { mainCategory: "해외.액티브", subCategory: "A/M", generation: "Active", country: "미국", name: "ACE 글로벌자율주행액티브", code: "ACE_AV", fee: "0.62%", yield: "-", listingDate: "22.02", notes: "테슬라/팔란티어/TSLL/알파벳/모빌아이" },
-      { mainCategory: "해외.액티브", subCategory: "AI", generation: "Active", country: "미국", name: "ACE 미국AI테크핵심산업액티브", code: "0118Z0", fee: "0.45%", yield: "-", listingDate: "25.10" },
-      { mainCategory: "해외.액티브", subCategory: "AI", generation: "Active", country: "미국", name: "HANARO 글로벌생성형AI액티브", code: "HANARO_AI", fee: "1.25%", yield: "-", listingDate: "23.07", notes: "팔란티어/엔비디아/앱러빈/브로드컴/TSMC" },
-
-      // 해외패시브&기타 - 혼합형
-      { mainCategory: "해외패시브&기타", subCategory: "혼합형", generation: "Passive", country: "미국", name: "TIGER 미국나스닥100채권혼합Fn", code: "435420", fee: "0.25%", yield: "1.30%", listingDate: "22.07", notes: "NASDAQ100(30%) vs 국내단기채권(70%)" },
-      { mainCategory: "해외패시브&기타", subCategory: "혼합형", generation: "Passive", country: "미국", name: "TIGER 미국테크TOP10채권혼합", code: "472170", fee: "0.25%", yield: "1.90%", listingDate: "23.12", isRecommended: true },
-      { mainCategory: "해외패시브&기타", subCategory: "혼합형", generation: "Passive", country: "미국", name: "ACE글로벌인컴TOP10", code: "460960", fee: "0.24%", yield: "8%(추정)", listingDate: "23.07", notes: "커버드콜+고배당+하이일드채권 (주식형*5EA+채권형*5EA)" },
-      { mainCategory: "해외패시브&기타", subCategory: "혼합형", generation: "Passive", country: "미국", name: "SOL 미국배당미국채혼합50", code: "490490", fee: "0.15%", yield: "3.50%", listingDate: "24.09", notes: "커버드콜 아님" },
-      // 해외패시브&기타 - 채권형
-      { mainCategory: "해외패시브&기타", subCategory: "채권형", generation: "Passive", country: "미국", name: "KODEX iShares미국하이일드액티브", code: "468380", fee: "0.15%", yield: "6.30%", listingDate: "23.10", notes: "평균 Duration: 3.23년" },
-      { mainCategory: "해외패시브&기타", subCategory: "채권형", generation: "Passive", country: "미국", name: "ACE 미국30년국채엔화노출액티브(H)", code: "476750", fee: "0.15%", yield: "2.60%", listingDate: "24.03" },
-      { mainCategory: "해외패시브&기타", subCategory: "채권형", generation: "Passive", country: "미국", name: "RISE 미국30년국채엔화노출(합성 H)", code: "472870", fee: "0.15%", yield: "2.80%", listingDate: "24.02" },
-      // 해외패시브&기타 - Tech
-      { mainCategory: "해외패시브&기타", subCategory: "Tech", generation: "Passive", country: "US", name: "TIGER 글로벌클라우드컴퓨팅INDXX", code: "TIGER_CLOUD", fee: "0.64%", yield: "-", listingDate: "20.12", notes: "트윌리오/스노우플레이크/쇼피파이", isRecommended: true },
-      // 해외패시브&기타 - AI
-      { mainCategory: "해외패시브&기타", subCategory: "AI", generation: "Passive", country: "US", name: "KODEX 미국AI소프트웨어TOP10", code: "0041D0", fee: "0.45%", yield: "-", listingDate: "25.04", notes: "팔란티어,MS,세일즈포스 등" },
-      // 해외패시브&기타 - M7
-      { mainCategory: "해외패시브&기타", subCategory: "M7", generation: "Passive", country: "US", name: "ACE미국빅테크TOP7PLUS", code: "ACE_M7", fee: "0.30%", yield: "-", listingDate: "23.09", notes: "아마존/구글/엔비디아/MS/애플/브로드컴/메타/테슬라" },
-      // 해외패시브&기타 - 파킹형
-      { mainCategory: "해외패시브&기타", subCategory: "파킹형", generation: "Passive", country: "US", name: "Kodex 미국달러SOFR금리 액티브(합성)", code: "455030", fee: "0.15%", yield: "-", listingDate: "23.04" },
-      { mainCategory: "해외패시브&기타", subCategory: "파킹형", generation: "Passive", country: "US", name: "TIGER 미국달러SOFR금리액티브(합성)", code: "456610", fee: "0.05%", yield: "-", listingDate: "23.05" },
-
-      // 국내자산 - 국내배당
-      { mainCategory: "국내자산", subCategory: "국내배당", generation: "Domestic", country: "한국", name: "PLUS 고배당주위클리커버드콜", code: "489030", fee: "0.30%", yield: "14.40%", listingDate: "24.08", notes: "비과세 옵션프리미엄 절세혜택" },
-      { mainCategory: "국내자산", subCategory: "국내배당", generation: "Domestic", country: "한국", name: "TIGER 은행고배당플러스TOP10", code: "466940", fee: "0.30%", yield: "6~7%", listingDate: "23.10" },
-      { mainCategory: "국내자산", subCategory: "국내배당", generation: "Domestic", country: "한국", name: "TIGER 배당커버드콜액티브", code: "472150", fee: "0.50%", yield: "15~23%", listingDate: "23.12" },
-      { mainCategory: "국내자산", subCategory: "국내배당", generation: "Domestic", country: "한국", name: "KODEX 금융고배당TOP10타겟위클리커버드콜", code: "498410", fee: "0.39%", yield: "15%", listingDate: "24.12", notes: "주식배당(7%), 옵션프리미엄(10%)" },
-      { mainCategory: "국내자산", subCategory: "국내배당", generation: "Domestic", country: "한국", name: "TIMEFOLIO Korea플러스배당액티브", code: "441800", fee: "0.80%", yield: "10%+", listingDate: "22.09", isFavorite: true },
-      // 국내자산 - KOSPI200
-      { mainCategory: "국내자산", subCategory: "KOSPI200", generation: "Domestic", country: "한국", name: "RISE200위클리커버드콜", code: "475720", fee: "0.30%", yield: "18%(추정)", listingDate: "24.03", notes: "시가총액 높으나 수익률 좋지 않음" },
-      { mainCategory: "국내자산", subCategory: "KOSPI200", generation: "Domestic", country: "한국", name: "KODEX 200타겟위클리커버드콜", code: "498400", fee: "0.39%", yield: "15%", listingDate: "24.12" },
-      // 국내자산 - 국내채권
-      { mainCategory: "국내자산", subCategory: "국내채권", generation: "Domestic", country: "한국", name: "TIGER CD금리플러스액티브(합성)", code: "499660", fee: "0.0098%", yield: "CD금리+알파", listingDate: "24.12" },
-      { mainCategory: "국내자산", subCategory: "국내채권", generation: "Domestic", country: "한국", name: "KODEX KOFR 금리액티브(합성)", code: "423160", fee: "0.05%", yield: "-", listingDate: "22.04" },
-      // 국내자산 - 리츠
-      { mainCategory: "국내자산", subCategory: "리츠", generation: "Domestic", country: "한국", name: "TIGER 리츠부동산인프라", code: "329200", fee: "0.08%", yield: ">9%", listingDate: "19.07" },
-      { mainCategory: "국내자산", subCategory: "리츠", generation: "Domestic", country: "한국", name: "KODEX 한국부동산리츠인프라", code: "476800", fee: "0.09%", yield: ">9%", listingDate: "24.03" },
-      // 국내자산 - 국내섹터
-      { mainCategory: "국내자산", subCategory: "국내섹터", generation: "Domestic", country: "한국", name: "KODEX 로봇액티브", code: "445290", fee: "0.50%", yield: "<1%", listingDate: "22.11" },
-      { mainCategory: "국내자산", subCategory: "국내섹터", generation: "Domestic", country: "한국", name: "SOL 코리아메가테크액티브", code: "444200", fee: "0.55%", yield: "-", listingDate: "22.10", notes: "25년 수익률 115.9%" },
-    ];
-
-    for (const seed of seeds) {
-      await storage.createEtf(seed);
-    }
-    console.log(`Seeded ${seeds.length} ETFs to database`);
-  }
 }
