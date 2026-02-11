@@ -102,6 +102,7 @@ export default function EtfComponents() {
   const [sortField, setSortField] = useState<SortField>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [chartPeriod, setChartPeriod] = useState<"day" | "week" | "month" | "year">("day");
+  const [chartType, setChartType] = useState<"candle" | "area">("candle");
 
   // ETF 실시간 상승 상위 15개
   const { data: topGainersData, isFetching: isLoadingGainers, refetch: refetchGainers } = useQuery<{
@@ -689,25 +690,45 @@ export default function EtfComponents() {
                   <TrendingUp className="w-5 h-5 text-primary" />
                   {componentData.etfName} 차트
                 </CardTitle>
-                <div className="flex gap-1">
-                  {(["day", "week", "month", "year"] as const).map((period) => (
+                <div className="flex items-center gap-2">
+                  <div className="flex gap-1 border rounded-md p-0.5">
                     <Button
-                      key={period}
-                      variant={chartPeriod === period ? "default" : "outline"}
+                      variant={chartType === "candle" ? "default" : "ghost"}
                       size="sm"
-                      className="h-7 text-xs"
-                      onClick={() => setChartPeriod(period)}
+                      className="h-6 text-xs px-2"
+                      onClick={() => setChartType("candle")}
                     >
-                      {{ day: "일봉", week: "주봉", month: "월봉", year: "연봉" }[period]}
+                      봉차트
                     </Button>
-                  ))}
+                    <Button
+                      variant={chartType === "area" ? "default" : "ghost"}
+                      size="sm"
+                      className="h-6 text-xs px-2"
+                      onClick={() => setChartType("area")}
+                    >
+                      영역차트
+                    </Button>
+                  </div>
+                  <div className="flex gap-1">
+                    {(["day", "week", "month", "year"] as const).map((period) => (
+                      <Button
+                        key={period}
+                        variant={chartPeriod === period ? "default" : "outline"}
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => setChartPeriod(period)}
+                      >
+                        {{ day: "일봉", week: "주봉", month: "월봉", year: "연봉" }[period]}
+                      </Button>
+                    ))}
+                  </div>
                 </div>
               </div>
             </CardHeader>
             <CardContent className="flex justify-center">
               <img
-                key={`${selectedEtfCode}-${chartPeriod}`}
-                src={`https://ssl.pstatic.net/imgfinance/chart/item/area/${chartPeriod}/${selectedEtfCode}.png`}
+                key={`${selectedEtfCode}-${chartType}-${chartPeriod}`}
+                src={`https://ssl.pstatic.net/imgfinance/chart/item/${chartType}/${chartPeriod}/${selectedEtfCode}.png`}
                 alt={`${componentData.etfName} ${chartPeriod} 차트`}
                 className="max-w-full h-auto rounded-lg"
                 onError={(e) => {
