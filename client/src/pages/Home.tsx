@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Plus, ExternalLink, TrendingUp, Globe, Loader2, Star, Newspaper, Youtube, FileText, Link as LinkIcon, Trash2, Pencil, Scale, Zap, ChevronDown, Calendar, Home as HomeIcon } from "lucide-react";
+import { Plus, ExternalLink, TrendingUp, Globe, Loader2, Star, Newspaper, Youtube, FileText, Link as LinkIcon, Trash2, Pencil, Scale, Zap, ChevronDown, Calendar, Home as HomeIcon, Bot } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
 import { LoginDialog } from "@/components/LoginDialog";
@@ -68,11 +68,47 @@ export default function Home() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-8">
-          <TabsList className="grid w-full grid-cols-6 max-w-4xl mx-auto">
+          <TabsList className="grid w-full grid-cols-7 max-w-5xl mx-auto">
             <TabsTrigger value="home" className="gap-2">
               <HomeIcon className="h-4 w-4" />
               홈
             </TabsTrigger>
+            {/* AI 드롭다운 메뉴 */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  className={`inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 gap-1 ${
+                    activeTab.startsWith("ai-")
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <Bot className="h-3.5 w-3.5" />
+                  AI
+                  <ChevronDown className="h-3 w-3 opacity-60" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="center" className="min-w-[140px]">
+                <DropdownMenuItem
+                  onClick={() => setActiveTab("ai-gemini")}
+                  className="gap-2 cursor-pointer"
+                >
+                  ✨ Gemini
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setActiveTab("ai-grok")}
+                  className="gap-2 cursor-pointer"
+                >
+                  🤖 Grok
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setActiveTab("ai-openai")}
+                  className="gap-2 cursor-pointer"
+                >
+                  🧠 Open AI
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             {/* ETF정보 드롭다운 메뉴 */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -177,6 +213,30 @@ export default function Home() {
 
           <TabsContent value="home">
             <HomeEmbed />
+          </TabsContent>
+
+          <TabsContent value="ai-gemini">
+            <ExternalEmbed
+              url="https://gemini.google.com/"
+              title="Gemini"
+              icon="✨"
+            />
+          </TabsContent>
+
+          <TabsContent value="ai-grok">
+            <ExternalEmbed
+              url="https://grok.com/"
+              title="Grok"
+              icon="🤖"
+            />
+          </TabsContent>
+
+          <TabsContent value="ai-openai">
+            <ExternalEmbed
+              url="https://openai.com/ko-KR/"
+              title="Open AI"
+              icon="🧠"
+            />
           </TabsContent>
 
           <TabsContent value="etf-components">
@@ -304,6 +364,77 @@ function HomeEmbed() {
           ref={iframeRef}
           src={CAFE_URL}
           title="Life Fitness 네이버 카페"
+          className="w-full border-0"
+          style={{ height: "calc(100vh - 200px)", minHeight: "600px" }}
+          sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"
+          referrerPolicy="no-referrer"
+          onLoad={handleIframeLoad}
+          onError={handleIframeError}
+        />
+      </CardContent>
+    </Card>
+  );
+}
+
+// ===== 범용 외부 사이트 임베드 컴포넌트 =====
+function ExternalEmbed({ url, title, icon }: { url: string; title: string; icon: string }) {
+  const [iframeError, setIframeError] = useState(false);
+  const [iframeLoaded, setIframeLoaded] = useState(false);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  const handleIframeLoad = useCallback(() => {
+    setIframeLoaded(true);
+    try {
+      const doc = iframeRef.current?.contentDocument;
+      if (doc && doc.body && doc.body.innerHTML.length < 100) {
+        setIframeError(true);
+      }
+    } catch {
+      // cross-origin → 정상 로드
+    }
+  }, []);
+
+  const handleIframeError = useCallback(() => {
+    setIframeError(true);
+    setIframeLoaded(true);
+  }, []);
+
+  if (iframeError) {
+    return (
+      <Card className="overflow-hidden">
+        <CardContent className="py-16 text-center">
+          <span className="text-5xl block mb-4">{icon}</span>
+          <h3 className="text-lg font-semibold mb-2">{title}</h3>
+          <p className="text-sm text-muted-foreground mb-6">
+            보안 정책으로 페이지 내 표시가 제한됩니다. 아래 버튼을 클릭하여 방문하세요.
+          </p>
+          <Button
+            onClick={() => window.open(url, "_blank", "noopener,noreferrer")}
+            className="gap-2"
+          >
+            <ExternalLink className="w-4 h-4" />
+            {title} 열기
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="overflow-hidden">
+      <CardContent className="p-0 relative">
+        {!iframeLoaded && (
+          <div className="absolute inset-0 flex items-center justify-center bg-background z-10">
+            <div className="text-center">
+              <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-2" />
+              <p className="text-sm text-muted-foreground">{title} 로딩 중...</p>
+            </div>
+          </div>
+        )}
+        <iframe
+          ref={iframeRef}
+          src={url}
+          title={title}
           className="w-full border-0"
           style={{ height: "calc(100vh - 200px)", minHeight: "600px" }}
           sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"
