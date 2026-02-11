@@ -366,44 +366,45 @@ export default function EtfComponents() {
     setCafePostDialogOpen(true);
   };
 
-  // 카페 전송용 HTML 컨텐츠 생성
+  // 카페 전송용 HTML 컨텐츠 생성 (네이버 카페 API는 inline style 거부 → 순수 HTML만 사용)
   const buildCafeContent = () => {
     const now = new Date().toLocaleString("ko-KR");
     let sections: string[] = [];
 
     if (cafeComment.trim()) {
-      sections.push(`<div style="background:#fffbe6;border-left:4px solid #f5a623;padding:12px 16px;margin-bottom:16px;">
-<p style="font-weight:bold;color:#b8860b;margin:0 0 6px 0;">[ Comment ]</p>
-<p style="margin:0;line-height:1.7;">${cafeComment.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br/>')}</p>
-</div>`);
+      sections.push(`<h3>[ Comment ]</h3>
+<p>${cafeComment.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br/>')}</p>
+<br/>`);
     }
 
     if (topGainers.length > 0) {
       let etfRows = topGainers.map((etf, i) =>
         `<tr>
-<td style="padding:4px 8px;text-align:center;font-weight:bold;">${i + 1}</td>
-<td style="padding:4px 8px;"><b>${etf.name}</b> (${etf.code})</td>
-<td style="padding:4px 8px;text-align:right;">${etf.nowVal.toLocaleString()}</td>
-<td style="padding:4px 8px;text-align:right;color:red;font-weight:bold;">+${etf.changeRate.toFixed(2)}%</td>
-<td style="padding:4px 8px;text-align:right;">${etf.quant.toLocaleString()}</td>
+<td><b>${i + 1}</b></td>
+<td><b>${etf.name}</b> (${etf.code})</td>
+<td>${etf.nowVal.toLocaleString()}</td>
+<td><b>+${etf.changeRate.toFixed(2)}%</b></td>
+<td>${etf.quant.toLocaleString()}</td>
 </tr>`
       ).join("");
 
       sections.push(`<h3>[실시간 상승 ETF TOP ${topGainers.length}] (레버리지/인버스 제외)</h3>
 <p>기준시간: ${topGainersData?.updatedAt || now}</p>
-<table border="1" cellpadding="4" cellspacing="0" style="width:100%;border-collapse:collapse;">
-<tr style="background:#f5f5f5;font-weight:bold;">
+<table border="1" cellpadding="4" cellspacing="0">
+<tr>
 <th>#</th><th>ETF명</th><th>현재가</th><th>등락률</th><th>거래량</th>
 </tr>
 ${etfRows}
-</table><br/>`);
+</table>
+<br/>`);
     }
 
     if (selectedEtfCode) {
       const chartUrl = `https://ssl.pstatic.net/imgfinance/chart/item/${chartType}/${chartPeriod}/${selectedEtfCode}.png`;
       const etfName = componentData?.etfName || selectedEtfCode;
       sections.push(`<h3>[${etfName} 차트]</h3>
-<p><img src="${chartUrl}" alt="${etfName}" /></p><br/>`);
+<p><img src="${chartUrl}" alt="${etfName}" /></p>
+<br/>`);
     }
 
     if (analysisResult) {
@@ -412,15 +413,15 @@ ${etfRows}
         .replace(/\n/g, '<br/>');
       sections.push(`<h3>[AI 트렌드 분석 보고서]</h3>
 <p>분석 시간: ${analysisResult.analyzedAt} | 상승 ${analysisResult.dataPoints?.risingCount || 0}개 | 하락 ${analysisResult.dataPoints?.fallingCount || 0}개 | 뉴스 ${analysisResult.dataPoints?.newsCount || 0}건 | ${analysisResult.dataPoints?.market || ""}</p>
-<div style="line-height:1.8;">
-${htmlAnalysis}
-</div><br/>`);
+<p>${htmlAnalysis}</p>
+<br/>`);
     }
 
-    sections.push(`<hr/>
-<p style="color:#aaa;font-size:11px;">* 본 보고서는 AI(Gemini)가 실시간 데이터를 기반으로 자동 생성한 내용을 포함하고 있습니다.<br/>데이터 출처: 네이버 금융, FnGuide, 한국투자증권 API</p>`);
+    sections.push(`<br/>
+<p>* 본 보고서는 AI(Gemini)가 실시간 데이터를 기반으로 자동 생성한 내용을 포함하고 있습니다.</p>
+<p>데이터 출처: 네이버 금융, FnGuide, 한국투자증권 API</p>`);
 
-    return `<div style="font-size:19px;line-height:1.8;">${sections.join("\n")}</div>`;
+    return sections.join("\n");
   };
 
   const handlePreview = () => {

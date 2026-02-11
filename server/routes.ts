@@ -2061,39 +2061,34 @@ ${newsSummary}`;
       }
 
       // 네이버 카페 API용 컨텐츠 정제
-      // 1) 이모지 및 특수 유니코드 제거 (네이버 API에서 거부할 수 있음)
-      let cleanContent = content.replace(/[^\u0000-\uFFFF]/g, '');
+      let cleanContent = content
+        .replace(/[^\u0000-\uFFFF]/g, '')           // 이모지 제거
+        .replace(/\s*style="[^"]*"/g, '')            // 모든 inline style 제거
+        .replace(/\s*class="[^"]*"/g, '');           // 모든 class 제거
 
-      // 2) 컨텐츠 길이 제한 (네이버 API 최대 약 65000 바이트)
+      // 컨텐츠 길이 제한 (네이버 API 최대 약 65000 바이트)
       const contentBytes = Buffer.byteLength(cleanContent, 'utf8');
       if (contentBytes > 60000) {
-        // HTML 태그를 보존하면서 텍스트 부분만 자르기
         cleanContent = cleanContent.substring(0, Math.floor(cleanContent.length * (60000 / contentBytes)));
-        // 잘린 태그 복구를 위해 닫는 div 추가
-        cleanContent += '</div>';
       }
 
-      console.log(`[Cafe Write] Posting "${subject}" to cafe=${CAFE_ID} menu=${menuId}, content length: ${contentBytes} bytes`);
+      const apiUrl = `https://openapi.naver.com/v1/cafe/${CAFE_ID}/menu/${menuId}/articles`;
+      console.log(`[Cafe Write] Posting "${subject}" to menu ${menuId}, content: ${contentBytes} bytes`);
 
-      // multipart/form-data 형식으로 전송
-      const FormData = (await import("form-data")).default;
-      const formData = new FormData();
-      formData.append("subject", subject);
-      formData.append("content", cleanContent);
+      // x-www-form-urlencoded 방식 사용 (네이버 카페 API에서 검증됨)
+      const params = new URLSearchParams();
+      params.append("subject", subject);
+      params.append("content", cleanContent);
 
-      const response = await axios.post(
-        `https://openapi.naver.com/v1/cafe/${CAFE_ID}/menu/${menuId}/articles`,
-        formData,
-        {
-          headers: {
-            Authorization: `Bearer ${naverToken}`,
-            ...formData.getHeaders(),
-          },
-          timeout: 30000,
-        }
-      );
+      const response = await axios.post(apiUrl, params.toString(), {
+        headers: {
+          Authorization: `Bearer ${naverToken}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        timeout: 30000,
+      });
 
-      console.log(`[Cafe Write] Article posted successfully: "${subject}" to menu ${menuId}`, response.data);
+      console.log(`[Cafe Write] Article posted successfully: "${subject}" to menu ${menuId}`);
       return res.json({
         message: "카페에 글이 등록되었습니다.",
         result: response.data,
@@ -2115,7 +2110,7 @@ ${newsSummary}`;
 
       if (statusCode === 403) {
         return res.status(403).json({
-          message: `카페 글쓰기 권한이 없습니다. 네이버 개발자센터에서 카페 글쓰기(cafe_article_write) 권한을 확인해주세요. (${errorMsg})`,
+          message: `카페 글쓰기 실패. 네이버 개발자센터에서 카페 글쓰기(cafe_article_write) 권한을 확인하세요. (${errorMsg})`,
         });
       }
 
