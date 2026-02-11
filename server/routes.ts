@@ -19,25 +19,37 @@ async function callAI(prompt: string): Promise<string> {
   const openaiKey = process.env.OPENAI_API_KEY;
 
   if (geminiKey) {
-    // Gemini 네이티브 REST API 사용
-    const model = "gemini-2.0-flash";
+    // Gemini 네이티브 REST API 사용 (자동 재시도 포함)
+    const model = "gemini-2.5-flash";
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
-    try {
-      const res = await axios.post(url, {
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.7, maxOutputTokens: 2000 },
-      }, { timeout: 30000 });
-      
-      const content = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!content) throw new Error("AI 응답이 비어있습니다.");
-      return content;
-    } catch (err: any) {
-      if (err.response?.status === 429) {
-        const retryDelay = err.response?.data?.error?.details?.find((d: any) => d.retryDelay)?.retryDelay || "";
-        throw new Error(`Gemini API 할당량 초과 (429). ${retryDelay ? `${retryDelay} 후 재시도 가능합니다.` : "잠시 후 다시 시도하세요."} Google AI Studio(https://aistudio.google.com)에서 할당량을 확인하세요.`);
+    const maxRetries = 3;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const res = await axios.post(url, {
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.7, maxOutputTokens: 2000 },
+        }, { timeout: 60000 });
+        
+        const content = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!content) throw new Error("AI 응답이 비어있습니다.");
+        return content;
+      } catch (err: any) {
+        if (err.response?.status === 429 && attempt < maxRetries) {
+          // retryDelay 파싱 (예: "8s" → 8000ms)
+          const retryInfo = err.response?.data?.error?.details?.find((d: any) => d.retryDelay);
+          const delaySec = parseInt(retryInfo?.retryDelay) || 10;
+          console.log(`[AI] Rate limited, retrying in ${delaySec}s (attempt ${attempt}/${maxRetries})...`);
+          await new Promise(r => setTimeout(r, delaySec * 1000));
+          continue;
+        }
+        if (err.response?.status === 429) {
+          throw new Error("Gemini API 할당량 초과. 잠시 후 다시 시도하세요.");
+        }
+        throw err;
       }
-      throw err;
     }
+    throw new Error("AI API 최대 재시도 횟수 초과");
   }
   
   if (openaiKey) {
