@@ -326,6 +326,20 @@ function HomeEmbed() {
 
   return (
     <Card className="overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-2 bg-muted/50 border-b">
+        <p className="text-xs text-muted-foreground">
+          ⚠️ 로그인 등 일부 기능은 임베드 화면에서 제한됩니다.
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => window.open(CAFE_URL, "_blank", "noopener,noreferrer")}
+          className="gap-1.5 text-xs h-7"
+        >
+          <ExternalLink className="w-3 h-3" />
+          새 탭에서 열기
+        </Button>
+      </div>
       <CardContent className="p-0 relative">
         {!iframeLoaded && (
           <div className="absolute inset-0 flex items-center justify-center bg-background z-10">
@@ -340,7 +354,7 @@ function HomeEmbed() {
           src={CAFE_URL}
           title="Life Fitness 네이버 카페"
           className="w-full border-0"
-          style={{ height: "calc(100vh - 200px)", minHeight: "600px" }}
+          style={{ height: "calc(100vh - 220px)", minHeight: "600px" }}
           sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"
           referrerPolicy="no-referrer"
           onLoad={handleIframeLoad}
