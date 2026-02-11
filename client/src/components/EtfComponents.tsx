@@ -336,10 +336,10 @@ export default function EtfComponents() {
                         {etf.quant.toLocaleString()}
                       </TableCell>
                       <TableCell className="text-right tabular-nums text-sm text-muted-foreground hidden md:table-cell">
-                        {etf.marketCap.toLocaleString()}
+                        {(etf.marketCap ?? 0).toLocaleString()}
                       </TableCell>
                       <TableCell className="text-right tabular-nums text-sm text-muted-foreground hidden md:table-cell">
-                        {etf.nav.toLocaleString()}
+                        {(etf.nav ?? 0).toLocaleString()}
                       </TableCell>
                     </TableRow>
                   ))}
