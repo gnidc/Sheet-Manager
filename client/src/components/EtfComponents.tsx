@@ -1,9 +1,13 @@
 import { useState, useMemo, useRef, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { useAuth } from "@/hooks/use-auth";
+import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   Loader2,
@@ -27,6 +31,7 @@ import {
   Play,
   X,
   Send,
+  Upload,
 } from "lucide-react";
 
 type SortField = "weight" | "changePercent" | null;
@@ -102,7 +107,15 @@ function getChangePrefix(sign?: string): string {
   return "";
 }
 
+interface CafeMenu {
+  menuId: number;
+  menuName: string;
+  menuType: string;
+}
+
 export default function EtfComponents() {
+  const { isAdmin } = useAuth();
+  const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedEtfCode, setSelectedEtfCode] = useState("");
   const [searchMode, setSearchMode] = useState<"search" | "direct">("search");
@@ -119,7 +132,82 @@ export default function EtfComponents() {
     analyzedAt: string;
     dataPoints?: { risingCount: number; fallingCount: number; newsCount: number; market: string };
   } | null>(null);
+  const [cafePostDialogOpen, setCafePostDialogOpen] = useState(false);
+  const [cafeMenuId, setCafeMenuId] = useState("");
+  const [cafePostTitle, setCafePostTitle] = useState("");
   const analysisSectionRef = useRef<HTMLDivElement>(null);
+
+  // 카페 게시판 목록 (admin만)
+  const { data: cafeMenusData } = useQuery<{ menus: CafeMenu[] }>({
+    queryKey: ["/api/cafe/menus"],
+    queryFn: async () => {
+      const res = await fetch("/api/cafe/menus", { credentials: "include" });
+      if (!res.ok) return { menus: [] };
+      return res.json();
+    },
+    enabled: isAdmin,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  // 카페 글쓰기 mutation
+  const cafeWriteMutation = useMutation({
+    mutationFn: async (data: { subject: string; content: string; menuId: string }) => {
+      const res = await fetch("/api/cafe/write", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(data),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        if (json.requireNaverLogin) {
+          throw new Error("NAVER_LOGIN_REQUIRED");
+        }
+        throw new Error(json.message || "글 등록에 실패했습니다.");
+      }
+      return json;
+    },
+    onSuccess: (data) => {
+      toast({ title: "카페 전송 완료", description: `글이 네이버 카페에 등록되었습니다. (게시글 번호: ${data.articleId || ""})` });
+      setCafePostDialogOpen(false);
+    },
+    onError: (error: Error) => {
+      if (error.message === "NAVER_LOGIN_REQUIRED") {
+        toast({ title: "네이버 로그인 필요", description: "카페에 글을 올리려면 네이버 로그인이 필요합니다. 홈 탭에서 네이버 로그인을 먼저 해주세요.", variant: "destructive" });
+      } else {
+        toast({ title: "전송 실패", description: error.message, variant: "destructive" });
+      }
+    },
+  });
+
+  // 카페 전송 핸들러
+  const handleCafePost = () => {
+    if (!analysisResult) return;
+    // 기본 제목 설정
+    const today = new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric" });
+    setCafePostTitle(`[AI 분석] ${today} ETF 시장 트렌드 보고서`);
+    setCafePostDialogOpen(true);
+  };
+
+  const submitCafePost = () => {
+    if (!cafePostTitle.trim() || !cafeMenuId || !analysisResult) {
+      toast({ title: "입력 오류", description: "제목과 게시판을 선택해주세요.", variant: "destructive" });
+      return;
+    }
+    // 분석 결과를 HTML로 변환
+    const htmlContent = analysisResult.analysis
+      .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
+      .replace(/\n/g, '<br/>');
+    const fullContent = `<div style="font-size:14px;line-height:1.8;">
+<p style="color:#888;font-size:12px;">📅 분석 시간: ${analysisResult.analyzedAt} | 📈 상승 ETF ${analysisResult.dataPoints?.risingCount || 0}개 | 📉 하락 ETF ${analysisResult.dataPoints?.fallingCount || 0}개 | 📰 뉴스 ${analysisResult.dataPoints?.newsCount || 0}건 | 📊 ${analysisResult.dataPoints?.market || ""}</p>
+<hr/>
+${htmlContent}
+<hr/>
+<p style="color:#aaa;font-size:11px;">※ AI(Gemini)가 실시간 데이터를 기반으로 자동 생성한 보고서입니다.</p>
+</div>`;
+
+    cafeWriteMutation.mutate({ subject: cafePostTitle, content: fullContent, menuId: cafeMenuId });
+  };
 
   // AI 분석 섹션으로 스크롤
   const scrollToAnalysis = useCallback(() => {
@@ -299,16 +387,18 @@ export default function EtfComponents() {
                   {topGainersData.updatedAt}
                 </span>
               )}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={scrollToAnalysis}
-                disabled={topGainers.length === 0}
-                className="h-7 text-xs gap-1"
-              >
-                <BrainCircuit className="w-3.5 h-3.5" />
-                AI 분석
-              </Button>
+              {isAdmin && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={scrollToAnalysis}
+                  disabled={topGainers.length === 0}
+                  className="h-7 text-xs gap-1"
+                >
+                  <BrainCircuit className="w-3.5 h-3.5" />
+                  AI 분석
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="sm"
@@ -799,8 +889,8 @@ export default function EtfComponents() {
         </>
       )}
 
-      {/* ===== AI 분석 섹션 ===== */}
-      {showAnalysisPanel && (
+      {/* ===== AI 분석 섹션 (Admin 전용) ===== */}
+      {isAdmin && showAnalysisPanel && (
         <div ref={analysisSectionRef} className="space-y-4">
           {/* 프롬프트 입력 영역 */}
           <Card className="border-primary/30">
@@ -925,6 +1015,20 @@ export default function EtfComponents() {
                       {analysisResult.analyzedAt}
                     </span>
                     <Button
+                      variant="default"
+                      size="sm"
+                      onClick={handleCafePost}
+                      disabled={cafeWriteMutation.isPending}
+                      className="h-7 text-xs gap-1 bg-green-600 hover:bg-green-700"
+                    >
+                      {cafeWriteMutation.isPending ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <Upload className="w-3 h-3" />
+                      )}
+                      카페 전송
+                    </Button>
+                    <Button
                       variant="ghost"
                       size="sm"
                       onClick={() => setAnalysisResult(null)}
@@ -959,6 +1063,73 @@ export default function EtfComponents() {
           )}
         </div>
       )}
+
+      {/* ===== 카페 전송 다이얼로그 ===== */}
+      <Dialog open={cafePostDialogOpen} onOpenChange={setCafePostDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Upload className="w-5 h-5 text-green-600" />
+              네이버 카페에 분석 보고서 전송
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">제목</label>
+              <Input
+                value={cafePostTitle}
+                onChange={(e) => setCafePostTitle(e.target.value)}
+                placeholder="글 제목을 입력하세요"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">게시판 선택</label>
+              <Select value={cafeMenuId} onValueChange={setCafeMenuId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="게시판을 선택하세요" />
+                </SelectTrigger>
+                <SelectContent>
+                  {cafeMenusData?.menus?.map((menu) => (
+                    <SelectItem key={menu.menuId} value={String(menu.menuId)}>
+                      {menu.menuName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-muted-foreground">전송 내용 미리보기</label>
+              <div className="text-xs text-muted-foreground bg-muted/50 rounded-md p-3 max-h-[200px] overflow-y-auto">
+                {analysisResult?.analysis
+                  ? analysisResult.analysis.substring(0, 500) + (analysisResult.analysis.length > 500 ? "..." : "")
+                  : "분석 결과 없음"}
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setCafePostDialogOpen(false)}>
+                취소
+              </Button>
+              <Button
+                onClick={submitCafePost}
+                disabled={cafeWriteMutation.isPending || !cafePostTitle.trim() || !cafeMenuId}
+                className="gap-1.5 bg-green-600 hover:bg-green-700"
+              >
+                {cafeWriteMutation.isPending ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    전송 중...
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-4 h-4" />
+                    카페에 올리기
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {componentData && (
         <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
