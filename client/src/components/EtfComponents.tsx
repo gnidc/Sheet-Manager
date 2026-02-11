@@ -32,6 +32,7 @@ import {
   X,
   Send,
   Upload,
+  Eye,
 } from "lucide-react";
 
 type SortField = "weight" | "changePercent" | null;
@@ -141,6 +142,8 @@ export default function EtfComponents() {
     dataPoints?: { risingCount: number; fallingCount: number; newsCount: number; market: string };
   } | null>(savedAnalysis);
   const [cafePostDialogOpen, setCafePostDialogOpen] = useState(false);
+  const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
+  const [previewHtml, setPreviewHtml] = useState("");
   const [cafeMenuId, setCafeMenuId] = useState("");
   const [cafePostTitle, setCafePostTitle] = useState("");
   const [cafeComment, setCafeComment] = useState("");
@@ -202,12 +205,8 @@ export default function EtfComponents() {
     setCafePostDialogOpen(true);
   };
 
-  const submitCafePost = () => {
-    if (!cafePostTitle.trim() || !cafeMenuId) {
-      toast({ title: "입력 오류", description: "제목과 게시판을 선택해주세요.", variant: "destructive" });
-      return;
-    }
-
+  // 카페 전송용 HTML 컨텐츠 생성
+  const buildCafeContent = useCallback(() => {
     const now = new Date().toLocaleString("ko-KR");
     let sections: string[] = [];
 
@@ -265,8 +264,22 @@ ${htmlAnalysis}
     sections.push(`<hr/>
 <p style="color:#aaa;font-size:11px;">* 본 보고서는 AI(Gemini)가 실시간 데이터를 기반으로 자동 생성한 내용을 포함하고 있습니다.<br/>데이터 출처: 네이버 금융, FnGuide, 한국투자증권 API</p>`);
 
-    const fullContent = `<div style="font-size:19px;line-height:1.8;">${sections.join("\n")}</div>`;
+    return `<div style="font-size:19px;line-height:1.8;">${sections.join("\n")}</div>`;
+  }, [cafeComment, topGainers, topGainersData, selectedEtfCode, chartType, chartPeriod, componentData, analysisResult]);
 
+  // 미리보기 열기
+  const handlePreview = () => {
+    setPreviewHtml(buildCafeContent());
+    setPreviewDialogOpen(true);
+  };
+
+  // 카페 전송
+  const submitCafePost = () => {
+    if (!cafePostTitle.trim() || !cafeMenuId) {
+      toast({ title: "입력 오류", description: "제목과 게시판을 선택해주세요.", variant: "destructive" });
+      return;
+    }
+    const fullContent = buildCafeContent();
     cafeWriteMutation.mutate({ subject: cafePostTitle, content: fullContent, menuId: cafeMenuId });
   };
 
@@ -1231,6 +1244,14 @@ ${htmlAnalysis}
                 취소
               </Button>
               <Button
+                variant="outline"
+                onClick={handlePreview}
+                className="gap-1.5"
+              >
+                <Eye className="w-4 h-4" />
+                미리보기
+              </Button>
+              <Button
                 onClick={submitCafePost}
                 disabled={cafeWriteMutation.isPending || !cafePostTitle.trim() || !cafeMenuId}
                 className="gap-1.5 bg-green-600 hover:bg-green-700"
@@ -1248,6 +1269,50 @@ ${htmlAnalysis}
                 )}
               </Button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ===== 미리보기 다이얼로그 ===== */}
+      <Dialog open={previewDialogOpen} onOpenChange={setPreviewDialogOpen}>
+        <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Eye className="w-5 h-5 text-blue-600" />
+              카페 전송 미리보기
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto border rounded-md p-4 bg-white dark:bg-slate-950">
+            <h2 className="text-lg font-bold mb-3 pb-2 border-b">{cafePostTitle || "(제목 없음)"}</h2>
+            <div
+              dangerouslySetInnerHTML={{ __html: previewHtml }}
+              className="prose prose-sm dark:prose-invert max-w-none"
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-3 border-t">
+            <Button variant="outline" onClick={() => setPreviewDialogOpen(false)}>
+              닫기
+            </Button>
+            <Button
+              onClick={() => {
+                setPreviewDialogOpen(false);
+                submitCafePost();
+              }}
+              disabled={cafeWriteMutation.isPending || !cafePostTitle.trim() || !cafeMenuId}
+              className="gap-1.5 bg-green-600 hover:bg-green-700"
+            >
+              {cafeWriteMutation.isPending ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  전송 중...
+                </>
+              ) : (
+                <>
+                  <Send className="w-4 h-4" />
+                  카페에 올리기
+                </>
+              )}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
