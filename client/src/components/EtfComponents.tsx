@@ -192,99 +192,6 @@ export default function EtfComponents() {
     },
   });
 
-  // 카페 전송 핸들러
-  const handleCafePost = () => {
-    const today = new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric" });
-    setCafePostTitle(`[ETF 리포트] ${today} 실시간 상승 ETF & AI 분석`);
-    setCafeComment("");
-    // 기본 게시판: "시황" 또는 "매크로" 포함된 게시판 자동 선택
-    if (!cafeMenuId && cafeMenusData?.menus) {
-      const defaultMenu = cafeMenusData.menus.find(m => m.menuName.includes("시황") || m.menuName.includes("매크로"));
-      if (defaultMenu) setCafeMenuId(String(defaultMenu.menuId));
-    }
-    setCafePostDialogOpen(true);
-  };
-
-  const topGainers = topGainersData?.items || [];
-
-  // 카페 전송용 HTML 컨텐츠 생성
-  const buildCafeContent = useCallback(() => {
-    const now = new Date().toLocaleString("ko-KR");
-    let sections: string[] = [];
-
-    // 0) Comment (개인 의견) — 제일 상단
-    if (cafeComment.trim()) {
-      sections.push(`<div style="background:#fffbe6;border-left:4px solid #f5a623;padding:12px 16px;margin-bottom:16px;">
-<p style="font-weight:bold;color:#b8860b;margin:0 0 6px 0;">[ Comment ]</p>
-<p style="margin:0;line-height:1.7;">${cafeComment.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br/>')}</p>
-</div>`);
-    }
-
-    // 1) 실시간 상승 ETF 리스트
-    if (topGainers.length > 0) {
-      let etfRows = topGainers.map((etf, i) =>
-        `<tr>
-<td style="padding:4px 8px;text-align:center;font-weight:bold;">${i + 1}</td>
-<td style="padding:4px 8px;"><b>${etf.name}</b> (${etf.code})</td>
-<td style="padding:4px 8px;text-align:right;">${etf.nowVal.toLocaleString()}</td>
-<td style="padding:4px 8px;text-align:right;color:red;font-weight:bold;">+${etf.changeRate.toFixed(2)}%</td>
-<td style="padding:4px 8px;text-align:right;">${etf.quant.toLocaleString()}</td>
-</tr>`
-      ).join("");
-
-      sections.push(`<h3>[실시간 상승 ETF TOP ${topGainers.length}] (레버리지/인버스 제외)</h3>
-<p>기준시간: ${topGainersData?.updatedAt || now}</p>
-<table border="1" cellpadding="4" cellspacing="0" style="width:100%;border-collapse:collapse;">
-<tr style="background:#f5f5f5;font-weight:bold;">
-<th>#</th><th>ETF명</th><th>현재가</th><th>등락률</th><th>거래량</th>
-</tr>
-${etfRows}
-</table><br/>`);
-    }
-
-    // 2) 선택된 ETF 차트
-    if (selectedEtfCode) {
-      const chartUrl = `https://ssl.pstatic.net/imgfinance/chart/item/${chartType}/${chartPeriod}/${selectedEtfCode}.png`;
-      const etfName = componentData?.etfName || selectedEtfCode;
-      sections.push(`<h3>[${etfName} 차트]</h3>
-<p><img src="${chartUrl}" alt="${etfName}" /></p><br/>`);
-    }
-
-    // 3) AI 분석 결과
-    if (analysisResult) {
-      const htmlAnalysis = analysisResult.analysis
-        .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
-        .replace(/\n/g, '<br/>');
-      sections.push(`<h3>[AI 트렌드 분석 보고서]</h3>
-<p>분석 시간: ${analysisResult.analyzedAt} | 상승 ${analysisResult.dataPoints?.risingCount || 0}개 | 하락 ${analysisResult.dataPoints?.fallingCount || 0}개 | 뉴스 ${analysisResult.dataPoints?.newsCount || 0}건 | ${analysisResult.dataPoints?.market || ""}</p>
-<div style="line-height:1.8;">
-${htmlAnalysis}
-</div><br/>`);
-    }
-
-    // Footer
-    sections.push(`<hr/>
-<p style="color:#aaa;font-size:11px;">* 본 보고서는 AI(Gemini)가 실시간 데이터를 기반으로 자동 생성한 내용을 포함하고 있습니다.<br/>데이터 출처: 네이버 금융, FnGuide, 한국투자증권 API</p>`);
-
-    return `<div style="font-size:19px;line-height:1.8;">${sections.join("\n")}</div>`;
-  }, [cafeComment, topGainers, topGainersData, selectedEtfCode, chartType, chartPeriod, componentData, analysisResult]);
-
-  // 미리보기 열기
-  const handlePreview = () => {
-    setPreviewHtml(buildCafeContent());
-    setPreviewDialogOpen(true);
-  };
-
-  // 카페 전송
-  const submitCafePost = () => {
-    if (!cafePostTitle.trim() || !cafeMenuId) {
-      toast({ title: "입력 오류", description: "제목과 게시판을 선택해주세요.", variant: "destructive" });
-      return;
-    }
-    const fullContent = buildCafeContent();
-    cafeWriteMutation.mutate({ subject: cafePostTitle, content: fullContent, menuId: cafeMenuId });
-  };
-
   // AI 분석 섹션으로 스크롤
   const scrollToAnalysis = useCallback(() => {
     setShowAnalysisPanel(true);
@@ -444,6 +351,91 @@ ${htmlAnalysis}
   const upCount = componentData?.components.filter(c => c.changeSign === "1" || c.changeSign === "2").length || 0;
   const downCount = componentData?.components.filter(c => c.changeSign === "4" || c.changeSign === "5").length || 0;
   const flatCount = (componentData?.totalComponentCount || 0) - upCount - downCount;
+
+  const topGainers = topGainersData?.items || [];
+
+  // 카페 전송 핸들러
+  const handleCafePost = () => {
+    const today = new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric" });
+    setCafePostTitle(`[ETF 리포트] ${today} 실시간 상승 ETF & AI 분석`);
+    setCafeComment("");
+    if (!cafeMenuId && cafeMenusData?.menus) {
+      const defaultMenu = cafeMenusData.menus.find(m => m.menuName.includes("시황") || m.menuName.includes("매크로"));
+      if (defaultMenu) setCafeMenuId(String(defaultMenu.menuId));
+    }
+    setCafePostDialogOpen(true);
+  };
+
+  // 카페 전송용 HTML 컨텐츠 생성
+  const buildCafeContent = () => {
+    const now = new Date().toLocaleString("ko-KR");
+    let sections: string[] = [];
+
+    if (cafeComment.trim()) {
+      sections.push(`<div style="background:#fffbe6;border-left:4px solid #f5a623;padding:12px 16px;margin-bottom:16px;">
+<p style="font-weight:bold;color:#b8860b;margin:0 0 6px 0;">[ Comment ]</p>
+<p style="margin:0;line-height:1.7;">${cafeComment.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br/>')}</p>
+</div>`);
+    }
+
+    if (topGainers.length > 0) {
+      let etfRows = topGainers.map((etf, i) =>
+        `<tr>
+<td style="padding:4px 8px;text-align:center;font-weight:bold;">${i + 1}</td>
+<td style="padding:4px 8px;"><b>${etf.name}</b> (${etf.code})</td>
+<td style="padding:4px 8px;text-align:right;">${etf.nowVal.toLocaleString()}</td>
+<td style="padding:4px 8px;text-align:right;color:red;font-weight:bold;">+${etf.changeRate.toFixed(2)}%</td>
+<td style="padding:4px 8px;text-align:right;">${etf.quant.toLocaleString()}</td>
+</tr>`
+      ).join("");
+
+      sections.push(`<h3>[실시간 상승 ETF TOP ${topGainers.length}] (레버리지/인버스 제외)</h3>
+<p>기준시간: ${topGainersData?.updatedAt || now}</p>
+<table border="1" cellpadding="4" cellspacing="0" style="width:100%;border-collapse:collapse;">
+<tr style="background:#f5f5f5;font-weight:bold;">
+<th>#</th><th>ETF명</th><th>현재가</th><th>등락률</th><th>거래량</th>
+</tr>
+${etfRows}
+</table><br/>`);
+    }
+
+    if (selectedEtfCode) {
+      const chartUrl = `https://ssl.pstatic.net/imgfinance/chart/item/${chartType}/${chartPeriod}/${selectedEtfCode}.png`;
+      const etfName = componentData?.etfName || selectedEtfCode;
+      sections.push(`<h3>[${etfName} 차트]</h3>
+<p><img src="${chartUrl}" alt="${etfName}" /></p><br/>`);
+    }
+
+    if (analysisResult) {
+      const htmlAnalysis = analysisResult.analysis
+        .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
+        .replace(/\n/g, '<br/>');
+      sections.push(`<h3>[AI 트렌드 분석 보고서]</h3>
+<p>분석 시간: ${analysisResult.analyzedAt} | 상승 ${analysisResult.dataPoints?.risingCount || 0}개 | 하락 ${analysisResult.dataPoints?.fallingCount || 0}개 | 뉴스 ${analysisResult.dataPoints?.newsCount || 0}건 | ${analysisResult.dataPoints?.market || ""}</p>
+<div style="line-height:1.8;">
+${htmlAnalysis}
+</div><br/>`);
+    }
+
+    sections.push(`<hr/>
+<p style="color:#aaa;font-size:11px;">* 본 보고서는 AI(Gemini)가 실시간 데이터를 기반으로 자동 생성한 내용을 포함하고 있습니다.<br/>데이터 출처: 네이버 금융, FnGuide, 한국투자증권 API</p>`);
+
+    return `<div style="font-size:19px;line-height:1.8;">${sections.join("\n")}</div>`;
+  };
+
+  const handlePreview = () => {
+    setPreviewHtml(buildCafeContent());
+    setPreviewDialogOpen(true);
+  };
+
+  const submitCafePost = () => {
+    if (!cafePostTitle.trim() || !cafeMenuId) {
+      toast({ title: "입력 오류", description: "제목과 게시판을 선택해주세요.", variant: "destructive" });
+      return;
+    }
+    const fullContent = buildCafeContent();
+    cafeWriteMutation.mutate({ subject: cafePostTitle, content: fullContent, menuId: cafeMenuId });
+  };
 
   return (
     <div className="space-y-6">
