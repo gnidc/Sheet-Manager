@@ -1351,65 +1351,32 @@ export async function registerRoutes(
 
   const ARTICLE_INDEX_TTL = 10 * 60 * 1000; // 10분
 
-  // 전체 글 인덱스 구축 (병렬 스캔)
+  // 전체 글 인덱스 구축 (순차 + hasNext 기반)
   async function buildArticleIndex() {
     if (cafeArticleIndex.isBuilding) return;
     cafeArticleIndex.isBuilding = true;
 
     try {
-      // 먼저 첫 페이지에서 총 글 수 확인
-      const firstPageRes = await axios.get(
-        "https://apis.naver.com/cafe-web/cafe2/ArticleListV2.json",
-        {
-          params: {
-            "search.clubid": CAFE_ID,
-            "search.boardtype": "L",
-            "search.page": 1,
-            "search.perPage": 50,
-          },
-          headers: CAFE_HEADERS,
-          timeout: 10000,
-        }
-      );
-
-      const firstResult = firstPageRes.data?.message?.result;
-      const totalCount = firstResult?.totalArticleCount || 0;
-      const firstArticles = firstResult?.articleList || [];
       const allArticles: any[] = [];
+      let currentPage = 1;
+      let hasNext = true;
+      const PER_PAGE = 50;
+      const MAX_PAGES = 200; // 최대 10,000글
 
-      // 첫 페이지 결과 추가
-      for (const a of firstArticles) {
-        allArticles.push({
-          articleId: a.articleId,
-          subject: a.subject,
-          writerNickname: a.writerNickname,
-          menuId: a.menuId,
-          menuName: a.menuName || "",
-          readCount: a.readCount || 0,
-          commentCount: a.commentCount || 0,
-          likeItCount: a.likeItCount || 0,
-          representImage: a.representImage || null,
-          writeDateTimestamp: a.writeDateTimestamp,
-          newArticle: a.newArticle || false,
-          openArticle: a.openArticle ?? true,
-        });
-      }
+      console.log(`[Cafe Index] Building article index...`);
 
-      // 나머지 페이지 병렬 스캔 (최대 200페이지 = 10,000글)
-      const maxPages = Math.min(Math.ceil(totalCount / 50), 200);
-      const BATCH_SIZE = 10; // 10페이지씩 병렬
-
-      for (let batch = 1; batch < maxPages; batch += BATCH_SIZE) {
+      while (hasNext && currentPage <= MAX_PAGES) {
+        // 5페이지씩 병렬 요청
+        const batchSize = Math.min(5, MAX_PAGES - currentPage + 1);
         const promises = [];
-        for (let i = 0; i < BATCH_SIZE && batch + i < maxPages; i++) {
-          const scanPage = batch + i + 1; // 2페이지부터
+        for (let i = 0; i < batchSize; i++) {
           promises.push(
             axios.get("https://apis.naver.com/cafe-web/cafe2/ArticleListV2.json", {
               params: {
                 "search.clubid": CAFE_ID,
                 "search.boardtype": "L",
-                "search.page": scanPage,
-                "search.perPage": 50,
+                "search.page": currentPage + i,
+                "search.perPage": PER_PAGE,
               },
               headers: CAFE_HEADERS,
               timeout: 15000,
@@ -1418,12 +1385,19 @@ export async function registerRoutes(
         }
 
         const results = await Promise.all(promises);
-        let noMoreData = true;
+        let gotData = false;
 
         for (const response of results) {
           if (!response) continue;
-          const articleList = response.data?.message?.result?.articleList || [];
-          if (articleList.length > 0) noMoreData = false;
+          const result = response.data?.message?.result;
+          const articleList = result?.articleList || [];
+
+          if (articleList.length > 0) gotData = true;
+
+          // hasNext가 false면 더이상 페이지 없음
+          if (result?.hasNext === false) {
+            hasNext = false;
+          }
 
           for (const a of articleList) {
             allArticles.push({
@@ -1443,7 +1417,9 @@ export async function registerRoutes(
           }
         }
 
-        if (noMoreData) break;
+        if (!gotData) break; // 데이터가 전혀 없으면 중단
+
+        currentPage += batchSize;
       }
 
       // 중복 제거 (articleId 기준)
@@ -1452,14 +1428,16 @@ export async function registerRoutes(
         uniqueMap.set(a.articleId, a);
       }
 
+      const uniqueArticles = Array.from(uniqueMap.values());
+
       cafeArticleIndex = {
-        articles: Array.from(uniqueMap.values()),
-        totalArticleCount: totalCount,
+        articles: uniqueArticles,
+        totalArticleCount: uniqueArticles.length,
         lastUpdated: Date.now(),
         isBuilding: false,
       };
 
-      console.log(`[Cafe Index] Built index: ${cafeArticleIndex.articles.length} articles (total in cafe: ${totalCount})`);
+      console.log(`[Cafe Index] Built index: ${uniqueArticles.length} articles (${currentPage - 1} pages scanned)`);
     } catch (error: any) {
       console.error("[Cafe Index] Failed to build:", error.message);
       cafeArticleIndex.isBuilding = false;
