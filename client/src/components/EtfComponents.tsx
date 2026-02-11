@@ -268,7 +268,7 @@ export default function EtfComponents() {
             </div>
           </div>
           <p className="text-xs text-muted-foreground">
-            레버리지·인버스 제외 | 클릭하면 해당 ETF 구성종목 실시간 시세를 조회합니다
+            레버리지·인버스 제외 | ETF명 클릭시 아래 구성종목 실시간 시세 Update됩니다.
           </p>
         </CardHeader>
         <CardContent className="p-0">
