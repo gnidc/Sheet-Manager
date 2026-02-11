@@ -7,35 +7,52 @@ import axios from "axios";
 import bcrypt from "bcryptjs";
 import * as kisApi from "./kisApi.js";
 import * as cheerio from "cheerio";
-import OpenAI from "openai";
-
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
 const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH;
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const NAVER_CLIENT_ID = process.env.NAVER_CLIENT_ID;
 const NAVER_CLIENT_SECRET = process.env.NAVER_CLIENT_SECRET;
 
-// AI API 설정 (Gemini 또는 OpenAI)
-function getAIClient(): OpenAI | null {
+// AI API: Gemini 네이티브 REST API 또는 OpenAI
+async function callAI(prompt: string): Promise<string> {
   const geminiKey = process.env.GEMINI_API_KEY;
   const openaiKey = process.env.OPENAI_API_KEY;
-  
-  if (geminiKey) {
-    return new OpenAI({
-      apiKey: geminiKey,
-      baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
-    });
-  }
-  if (openaiKey) {
-    return new OpenAI({ apiKey: openaiKey });
-  }
-  return null;
-}
 
-function getAIModel(): string {
-  if (process.env.GEMINI_API_KEY) return "gemini-2.0-flash";
-  if (process.env.OPENAI_API_KEY) return "gpt-4o-mini";
-  return "";
+  if (geminiKey) {
+    // Gemini 네이티브 REST API 사용
+    const model = "gemini-2.0-flash";
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+    try {
+      const res = await axios.post(url, {
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.7, maxOutputTokens: 2000 },
+      }, { timeout: 30000 });
+      
+      const content = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!content) throw new Error("AI 응답이 비어있습니다.");
+      return content;
+    } catch (err: any) {
+      if (err.response?.status === 429) {
+        const retryDelay = err.response?.data?.error?.details?.find((d: any) => d.retryDelay)?.retryDelay || "";
+        throw new Error(`Gemini API 할당량 초과 (429). ${retryDelay ? `${retryDelay} 후 재시도 가능합니다.` : "잠시 후 다시 시도하세요."} Google AI Studio(https://aistudio.google.com)에서 할당량을 확인하세요.`);
+      }
+      throw err;
+    }
+  }
+  
+  if (openaiKey) {
+    const OpenAI = (await import("openai")).default;
+    const client = new OpenAI({ apiKey: openaiKey });
+    const completion = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: prompt }],
+      max_tokens: 2000,
+      temperature: 0.7,
+    });
+    return completion.choices[0]?.message?.content || "분석 생성에 실패했습니다.";
+  }
+
+  throw new Error("AI API 키가 설정되지 않았습니다. GEMINI_API_KEY 또는 OPENAI_API_KEY를 .env에 추가하세요.");
 }
 
 // 환경 변수 확인 (디버깅)
@@ -1241,12 +1258,6 @@ export async function registerRoutes(
   // ===== ETF 상승 트렌드 AI 분석 =====
   app.post("/api/etf/analyze-trend", async (req, res) => {
     try {
-      const aiClient = getAIClient();
-      if (!aiClient) {
-        return res.status(400).json({ 
-          message: "AI API 키가 설정되지 않았습니다. GEMINI_API_KEY 또는 OPENAI_API_KEY를 .env에 추가하세요." 
-        });
-      }
 
       // 1) ETF 상승 데이터 수집
       const allEtfs = await getEtfFullList();
@@ -1338,14 +1349,7 @@ ${newsSummary}
 
       // 5) AI API 호출
       console.log("[Analyze] Calling AI API...");
-      const completion = await aiClient.chat.completions.create({
-        model: getAIModel(),
-        messages: [{ role: "user", content: prompt }],
-        max_tokens: 2000,
-        temperature: 0.7,
-      });
-
-      const analysis = completion.choices[0]?.message?.content || "분석 생성에 실패했습니다.";
+      const analysis = await callAI(prompt);
       console.log("[Analyze] Analysis generated successfully");
 
       res.json({ 
