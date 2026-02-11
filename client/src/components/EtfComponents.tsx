@@ -146,14 +146,14 @@ export default function EtfComponents() {
       }
       return res.json();
     },
-    enabled: !!selectedEtfCode && /^\d{6}$/.test(selectedEtfCode),
+    enabled: !!selectedEtfCode && /^[0-9A-Za-z]{6}$/.test(selectedEtfCode),
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
   });
 
   const handleSearch = () => {
     const trimmed = searchTerm.trim();
-    if (/^\d{6}$/.test(trimmed)) {
+    if (/^[0-9A-Za-z]{6}$/.test(trimmed)) {
       setSelectedEtfCode(trimmed);
     } else if (combinedResults.length === 1) {
       handleSelectEtf(combinedResults[0].code);

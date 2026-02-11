@@ -1095,7 +1095,7 @@ export async function registerRoutes(
   app.get("/api/etf/components/:code", async (req, res) => {
     try {
       const etfCode = req.params.code;
-      if (!etfCode || !/^\d{6}$/.test(etfCode)) {
+      if (!etfCode || !/^[0-9A-Za-z]{6}$/.test(etfCode)) {
         return res.status(400).json({ message: "유효한 6자리 ETF 코드를 입력해주세요." });
       }
 
