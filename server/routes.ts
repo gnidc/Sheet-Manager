@@ -1325,54 +1325,79 @@ export async function registerRoutes(
     }
   });
 
-  // 카페 내 검색
+  // 카페 내 검색 (여러 페이지를 스캔하여 키워드 매칭)
   app.get("/api/cafe/search", requireAdmin, async (req, res) => {
     try {
-      const query = (req.query.q as string || "").trim();
+      const query = (req.query.q as string || "").trim().toLowerCase();
       const page = parseInt(req.query.page as string) || 1;
       const perPage = Math.min(parseInt(req.query.perPage as string) || 20, 50);
 
       if (!query) {
-        return res.json({ articles: [], page, perPage, totalArticles: 0, query: "" });
+        return res.json({ articles: [], page: 1, perPage, totalArticles: 0, query: "" });
       }
 
-      const response = await axios.get(
-        "https://apis.naver.com/cafe-web/cafe2/ArticleSearchListV2.json",
-        {
-          params: {
-            "search.clubid": CAFE_ID,
-            "search.query": query,
-            "search.page": page,
-            "search.perPage": perPage,
-            "search.sortBy": "sim", // sim: 관련도순, date: 최신순
-          },
-          headers: CAFE_HEADERS,
-          timeout: 10000,
-        }
-      );
+      // 최대 10페이지(500건)를 스캔하여 키워드 매칭
+      const allMatched: any[] = [];
+      const maxScanPages = 10;
+      const scanPerPage = 50;
 
-      const result = response.data?.message?.result;
-      const articles = (result?.articleList || []).map((a: any) => ({
-        articleId: a.articleId,
-        subject: a.subject,
-        writerNickname: a.writerNickname,
-        menuId: a.menuId,
-        menuName: a.menuName,
-        readCount: a.readCount,
-        commentCount: a.commentCount,
-        likeItCount: a.likeItCount,
-        representImage: a.representImage || null,
-        writeDateTimestamp: a.writeDateTimestamp,
-        newArticle: a.newArticle,
-        openArticle: a.openArticle,
-      }));
+      for (let scanPage = 1; scanPage <= maxScanPages; scanPage++) {
+        const response = await axios.get(
+          "https://apis.naver.com/cafe-web/cafe2/ArticleListV2.json",
+          {
+            params: {
+              "search.clubid": CAFE_ID,
+              "search.boardtype": "L",
+              "search.page": scanPage,
+              "search.perPage": scanPerPage,
+            },
+            headers: CAFE_HEADERS,
+            timeout: 10000,
+          }
+        );
+
+        const result = response.data?.message?.result;
+        const articleList = result?.articleList || [];
+
+        if (articleList.length === 0) break;
+
+        for (const a of articleList) {
+          const subject = (a.subject || "").toLowerCase();
+          const writerNickname = (a.writerNickname || "").toLowerCase();
+          const menuName = (a.menuName || "").toLowerCase();
+          if (subject.includes(query) || writerNickname.includes(query) || menuName.includes(query)) {
+            allMatched.push({
+              articleId: a.articleId,
+              subject: a.subject,
+              writerNickname: a.writerNickname,
+              menuId: a.menuId,
+              menuName: a.menuName,
+              readCount: a.readCount,
+              commentCount: a.commentCount,
+              likeItCount: a.likeItCount,
+              representImage: a.representImage || null,
+              writeDateTimestamp: a.writeDateTimestamp,
+              newArticle: a.newArticle,
+              openArticle: a.openArticle,
+            });
+          }
+        }
+
+        // 다음 페이지가 없으면 중단
+        const totalArticleCount = result?.totalArticleCount || 0;
+        if (scanPage * scanPerPage >= totalArticleCount) break;
+      }
+
+      // 페이지네이션 적용
+      const startIdx = (page - 1) * perPage;
+      const pagedArticles = allMatched.slice(startIdx, startIdx + perPage);
 
       return res.json({
-        articles,
+        articles: pagedArticles,
         page,
         perPage,
-        totalArticles: result?.totalArticleCount || articles.length,
-        query,
+        totalArticles: allMatched.length,
+        query: req.query.q,
       });
     } catch (error: any) {
       console.error("[Cafe] Failed to search articles:", error.message);
