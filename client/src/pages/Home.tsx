@@ -1,4 +1,4 @@
-import { useState, Suspense, lazy } from "react";
+import { useState, useRef, useCallback, Suspense, lazy } from "react";
 import { Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { Input } from "@/components/ui/input";
@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Plus, ExternalLink, TrendingUp, Globe, Loader2, Star, Newspaper, Youtube, FileText, Link as LinkIcon, Trash2, Pencil, Scale, Zap, ChevronDown, Calendar } from "lucide-react";
+import { Plus, ExternalLink, TrendingUp, Globe, Loader2, Star, Newspaper, Youtube, FileText, Link as LinkIcon, Trash2, Pencil, Scale, Zap, ChevronDown, Calendar, Home as HomeIcon } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
 import { LoginDialog } from "@/components/LoginDialog";
@@ -29,7 +29,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState("etf-components");
+  const [activeTab, setActiveTab] = useState("home");
   
   const { toast } = useToast();
   const { isAdmin, isLoggedIn } = useAuth();
@@ -68,7 +68,11 @@ export default function Home() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-8">
-          <TabsList className="grid w-full grid-cols-5 max-w-3xl mx-auto">
+          <TabsList className="grid w-full grid-cols-6 max-w-4xl mx-auto">
+            <TabsTrigger value="home" className="gap-2">
+              <HomeIcon className="h-4 w-4" />
+              홈
+            </TabsTrigger>
             {/* ETF정보 드롭다운 메뉴 */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -171,6 +175,10 @@ export default function Home() {
             </TabsTrigger>
           </TabsList>
 
+          <TabsContent value="home">
+            <HomeEmbed />
+          </TabsContent>
+
           <TabsContent value="etf-components">
             <Suspense fallback={
               <div className="flex items-center justify-center py-20">
@@ -230,6 +238,81 @@ export default function Home() {
         </Tabs>
       </main>
     </div>
+  );
+}
+
+// ===== 홈 탭: 네이버 카페 임베드 =====
+const CAFE_URL = "https://cafe.naver.com/lifefit";
+
+function HomeEmbed() {
+  const [iframeError, setIframeError] = useState(false);
+  const [iframeLoaded, setIframeLoaded] = useState(false);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  const handleIframeLoad = useCallback(() => {
+    setIframeLoaded(true);
+    // iframe이 로드됐지만 cross-origin 정책으로 접근 불가한 경우 체크
+    try {
+      const doc = iframeRef.current?.contentDocument;
+      // contentDocument 접근이 가능하면 same-origin → 정상 로드가 아닐 수 있음 (에러페이지)
+      if (doc && doc.body && doc.body.innerHTML.length < 100) {
+        setIframeError(true);
+      }
+    } catch {
+      // cross-origin이면 접근 불가 → 정상적으로 외부 페이지가 로드된 것
+    }
+  }, []);
+
+  const handleIframeError = useCallback(() => {
+    setIframeError(true);
+    setIframeLoaded(true);
+  }, []);
+
+  if (iframeError) {
+    return (
+      <Card className="overflow-hidden">
+        <CardContent className="py-16 text-center">
+          <Globe className="w-16 h-16 mx-auto text-primary/20 mb-4" />
+          <h3 className="text-lg font-semibold mb-2">Life Fitness 네이버 카페</h3>
+          <p className="text-sm text-muted-foreground mb-6">
+            보안 정책으로 페이지 내 표시가 제한됩니다. 아래 버튼을 클릭하여 방문하세요.
+          </p>
+          <Button
+            onClick={() => window.open(CAFE_URL, "_blank", "noopener,noreferrer")}
+            className="gap-2"
+          >
+            <ExternalLink className="w-4 h-4" />
+            네이버 카페 열기
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="overflow-hidden">
+      <CardContent className="p-0 relative">
+        {!iframeLoaded && (
+          <div className="absolute inset-0 flex items-center justify-center bg-background z-10">
+            <div className="text-center">
+              <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-2" />
+              <p className="text-sm text-muted-foreground">카페 페이지 로딩 중...</p>
+            </div>
+          </div>
+        )}
+        <iframe
+          ref={iframeRef}
+          src={CAFE_URL}
+          title="Life Fitness 네이버 카페"
+          className="w-full border-0"
+          style={{ height: "calc(100vh - 200px)", minHeight: "600px" }}
+          sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"
+          referrerPolicy="no-referrer"
+          onLoad={handleIframeLoad}
+          onError={handleIframeError}
+        />
+      </CardContent>
+    </Card>
   );
 }
 
