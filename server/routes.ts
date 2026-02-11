@@ -11,6 +11,8 @@ import * as cheerio from "cheerio";
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
 const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH;
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const NAVER_CLIENT_ID = process.env.NAVER_CLIENT_ID;
+const NAVER_CLIENT_SECRET = process.env.NAVER_CLIENT_SECRET;
 
 // 환경 변수 확인 (디버깅)
 if (process.env.VERCEL) {
@@ -1402,6 +1404,217 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("[Cafe] Failed to search articles:", error.message);
       return res.status(500).json({ message: "카페 검색에 실패했습니다." });
+    }
+  });
+
+  // ===== 네이버 OAuth + 카페 글쓰기 (관리자 전용) =====
+  const NAVER_REDIRECT_URI = `${process.env.VERCEL ? "https://" + process.env.VERCEL_URL : "http://localhost:" + (process.env.PORT || 3000)}/api/auth/naver/callback`;
+
+  // 네이버 OAuth 로그인 시작
+  app.get("/api/auth/naver", requireAdmin, (req, res) => {
+    if (!NAVER_CLIENT_ID) {
+      return res.status(500).json({ message: "네이버 OAuth가 설정되지 않았습니다." });
+    }
+    const state = Math.random().toString(36).substring(2, 15);
+    (req.session as any).naverOAuthState = state;
+    const authUrl = `https://nid.naver.com/oauth2.0/authorize?response_type=code&client_id=${NAVER_CLIENT_ID}&redirect_uri=${encodeURIComponent(NAVER_REDIRECT_URI)}&state=${state}`;
+    return res.json({ authUrl });
+  });
+
+  // 네이버 OAuth 콜백
+  app.get("/api/auth/naver/callback", async (req, res) => {
+    try {
+      const { code, state } = req.query;
+
+      if (!code || !state) {
+        return res.redirect("/?naverAuth=error&message=missing_params");
+      }
+
+      // Access Token 발급
+      const tokenResponse = await axios.get("https://nid.naver.com/oauth2.0/token", {
+        params: {
+          grant_type: "authorization_code",
+          client_id: NAVER_CLIENT_ID,
+          client_secret: NAVER_CLIENT_SECRET,
+          code,
+          state,
+        },
+        timeout: 10000,
+      });
+
+      const { access_token, refresh_token, expires_in } = tokenResponse.data;
+
+      if (!access_token) {
+        console.error("[Naver OAuth] Token error:", tokenResponse.data);
+        return res.redirect("/?naverAuth=error&message=token_failed");
+      }
+
+      // 사용자 프로필 조회 (닉네임 등)
+      const profileResponse = await axios.get("https://openapi.naver.com/v1/nid/me", {
+        headers: { Authorization: `Bearer ${access_token}` },
+        timeout: 10000,
+      });
+
+      const profile = profileResponse.data?.response || {};
+
+      // 세션에 네이버 토큰 저장
+      (req.session as any).naverAccessToken = access_token;
+      (req.session as any).naverRefreshToken = refresh_token;
+      (req.session as any).naverTokenExpiry = Date.now() + (expires_in * 1000);
+      (req.session as any).naverNickname = profile.nickname || profile.name || "네이버 사용자";
+      (req.session as any).naverProfileImage = profile.profile_image || null;
+
+      console.log(`[Naver OAuth] Login success: ${profile.nickname || profile.name}`);
+
+      // 프론트엔드로 리다이렉트
+      return res.redirect("/?naverAuth=success");
+    } catch (error: any) {
+      console.error("[Naver OAuth] Callback error:", error.message);
+      return res.redirect("/?naverAuth=error&message=callback_failed");
+    }
+  });
+
+  // 네이버 Access Token 갱신 헬퍼
+  async function refreshNaverToken(req: Request): Promise<string | null> {
+    const refreshToken = (req.session as any).naverRefreshToken;
+    if (!refreshToken) return null;
+
+    try {
+      const response = await axios.get("https://nid.naver.com/oauth2.0/token", {
+        params: {
+          grant_type: "refresh_token",
+          client_id: NAVER_CLIENT_ID,
+          client_secret: NAVER_CLIENT_SECRET,
+          refresh_token: refreshToken,
+        },
+        timeout: 10000,
+      });
+
+      const { access_token, expires_in } = response.data;
+      if (access_token) {
+        (req.session as any).naverAccessToken = access_token;
+        (req.session as any).naverTokenExpiry = Date.now() + (expires_in * 1000);
+        return access_token;
+      }
+    } catch (err: any) {
+      console.error("[Naver OAuth] Token refresh failed:", err.message);
+    }
+    return null;
+  }
+
+  // 유효한 네이버 토큰 가져오기
+  async function getValidNaverToken(req: Request): Promise<string | null> {
+    const token = (req.session as any).naverAccessToken;
+    const expiry = (req.session as any).naverTokenExpiry;
+
+    if (!token) return null;
+
+    // 토큰 만료 5분 전이면 갱신
+    if (expiry && Date.now() > expiry - 5 * 60 * 1000) {
+      return await refreshNaverToken(req);
+    }
+
+    return token;
+  }
+
+  // 네이버 로그인 상태 확인
+  app.get("/api/auth/naver/status", requireAdmin, (req, res) => {
+    const token = (req.session as any).naverAccessToken;
+    const nickname = (req.session as any).naverNickname;
+    const profileImage = (req.session as any).naverProfileImage;
+
+    return res.json({
+      isNaverLoggedIn: !!token,
+      naverNickname: nickname || null,
+      naverProfileImage: profileImage || null,
+    });
+  });
+
+  // 네이버 로그아웃
+  app.post("/api/auth/naver/logout", requireAdmin, async (req, res) => {
+    const token = (req.session as any).naverAccessToken;
+
+    if (token) {
+      // 네이버 토큰 삭제 요청
+      try {
+        await axios.get("https://nid.naver.com/oauth2.0/token", {
+          params: {
+            grant_type: "delete",
+            client_id: NAVER_CLIENT_ID,
+            client_secret: NAVER_CLIENT_SECRET,
+            access_token: token,
+            service_provider: "NAVER",
+          },
+          timeout: 10000,
+        });
+      } catch (err) {
+        // 토큰 삭제 실패해도 로컬 세션은 정리
+      }
+    }
+
+    delete (req.session as any).naverAccessToken;
+    delete (req.session as any).naverRefreshToken;
+    delete (req.session as any).naverTokenExpiry;
+    delete (req.session as any).naverNickname;
+    delete (req.session as any).naverProfileImage;
+
+    return res.json({ message: "네이버 로그아웃 완료" });
+  });
+
+  // 카페 글쓰기 API
+  app.post("/api/cafe/write", requireAdmin, async (req, res) => {
+    try {
+      const { subject, content, menuId } = req.body;
+
+      if (!subject || !content || !menuId) {
+        return res.status(400).json({ message: "제목, 내용, 게시판을 모두 입력해주세요." });
+      }
+
+      const naverToken = await getValidNaverToken(req);
+      if (!naverToken) {
+        return res.status(401).json({ message: "네이버 로그인이 필요합니다.", requireNaverLogin: true });
+      }
+
+      // multipart/form-data 형식으로 전송
+      const FormData = (await import("form-data")).default;
+      const formData = new FormData();
+      formData.append("subject", subject);
+      formData.append("content", content);
+
+      const response = await axios.post(
+        `https://openapi.naver.com/v1/cafe/${CAFE_ID}/menu/${menuId}/articles`,
+        formData,
+        {
+          headers: {
+            Authorization: `Bearer ${naverToken}`,
+            ...formData.getHeaders(),
+          },
+          timeout: 15000,
+        }
+      );
+
+      console.log(`[Cafe Write] Article posted: "${subject}" to menu ${menuId}`);
+      return res.json({
+        message: "카페에 글이 등록되었습니다.",
+        result: response.data,
+        articleUrl: response.data?.message?.result?.articleUrl || null,
+      });
+    } catch (error: any) {
+      const errorData = error.response?.data;
+      console.error("[Cafe Write] Failed:", error.message, errorData);
+
+      if (error.response?.status === 401) {
+        // 토큰 만료 → 갱신 시도
+        const newToken = await refreshNaverToken(req);
+        if (!newToken) {
+          return res.status(401).json({ message: "네이버 토큰이 만료되었습니다. 다시 로그인해주세요.", requireNaverLogin: true });
+        }
+        return res.status(500).json({ message: "토큰을 갱신했습니다. 다시 시도해주세요." });
+      }
+
+      return res.status(500).json({
+        message: errorData?.message || error.message || "글 등록에 실패했습니다.",
+      });
     }
   });
 

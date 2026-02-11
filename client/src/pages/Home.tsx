@@ -1,4 +1,4 @@
-import { useState, Suspense, lazy } from "react";
+import { useState, useEffect, Suspense, lazy } from "react";
 import { Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { Input } from "@/components/ui/input";
@@ -6,7 +6,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Plus, ExternalLink, TrendingUp, Globe, Loader2, Star, Newspaper, Youtube, FileText, Link as LinkIcon, Trash2, Pencil, Scale, Zap, ChevronDown, Calendar, Home as HomeIcon, Bot, Search, X, Eye, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plus, ExternalLink, TrendingUp, Globe, Loader2, Star, Newspaper, Youtube, FileText, Link as LinkIcon, Trash2, Pencil, Scale, Zap, ChevronDown, Calendar, Home as HomeIcon, Bot, Search, X, Eye, ChevronLeft, ChevronRight, PenSquare, Send, LogIn, LogOut } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
 import { LoginDialog } from "@/components/LoginDialog";
@@ -314,12 +315,19 @@ interface ArticleDetail {
 
 function HomeEmbed() {
   const { isAdmin } = useAuth();
+  const { toast } = useToast();
   const [page, setPage] = useState(1);
   const [selectedMenuId, setSelectedMenuId] = useState("0"); // "0" = 전체
   const [searchQuery, setSearchQuery] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [isSearchMode, setIsSearchMode] = useState(false);
   const [previewArticleId, setPreviewArticleId] = useState<number | null>(null);
+
+  // 글쓰기 상태
+  const [showWriteDialog, setShowWriteDialog] = useState(false);
+  const [writeSubject, setWriteSubject] = useState("");
+  const [writeContent, setWriteContent] = useState("");
+  const [writeMenuId, setWriteMenuId] = useState("");
 
   // 게시판 목록 조회
   const { data: menusData } = useQuery<{ menus: CafeMenu[] }>({
@@ -331,6 +339,22 @@ function HomeEmbed() {
     },
     enabled: isAdmin,
     staleTime: 10 * 60 * 1000, // 10분
+  });
+
+  // 네이버 로그인 상태
+  const { data: naverStatus, refetch: refetchNaverStatus } = useQuery<{
+    isNaverLoggedIn: boolean;
+    naverNickname: string | null;
+    naverProfileImage: string | null;
+  }>({
+    queryKey: ["/api/auth/naver/status"],
+    queryFn: async () => {
+      const res = await fetch("/api/auth/naver/status", { credentials: "include" });
+      if (!res.ok) return { isNaverLoggedIn: false, naverNickname: null, naverProfileImage: null };
+      return res.json();
+    },
+    enabled: isAdmin,
+    staleTime: 5 * 60 * 1000,
   });
 
   // 글 목록 조회 (게시판 필터 지원)
@@ -379,6 +403,98 @@ function HomeEmbed() {
     enabled: !!previewArticleId && isAdmin,
     staleTime: 5 * 60 * 1000,
   });
+
+  // 카페 글쓰기 mutation
+  const writeMutation = useMutation({
+    mutationFn: async (data: { subject: string; content: string; menuId: string }) => {
+      const res = await fetch("/api/cafe/write", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(data),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        if (json.requireNaverLogin) {
+          throw new Error("NAVER_LOGIN_REQUIRED");
+        }
+        throw new Error(json.message || "글 등록에 실패했습니다.");
+      }
+      return json;
+    },
+    onSuccess: () => {
+      toast({ title: "카페 글 등록 완료", description: "네이버 카페에 글이 등록되었습니다." });
+      setShowWriteDialog(false);
+      setWriteSubject("");
+      setWriteContent("");
+      setWriteMenuId("");
+      // 글 목록 새로고침
+      queryClient.invalidateQueries({ queryKey: ["/api/cafe/articles"] });
+    },
+    onError: (error: Error) => {
+      if (error.message === "NAVER_LOGIN_REQUIRED") {
+        toast({ title: "네이버 로그인 필요", description: "글을 올리려면 네이버 로그인이 필요합니다.", variant: "destructive" });
+        handleNaverLogin();
+      } else {
+        toast({ title: "글 등록 실패", description: error.message, variant: "destructive" });
+      }
+    },
+  });
+
+  // 네이버 로그아웃 mutation
+  const naverLogoutMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/auth/naver/logout", { method: "POST", credentials: "include" });
+      if (!res.ok) throw new Error("로그아웃 실패");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.setQueryData(["/api/auth/naver/status"], {
+        isNaverLoggedIn: false, naverNickname: null, naverProfileImage: null,
+      });
+      toast({ title: "네이버 로그아웃 완료" });
+    },
+  });
+
+  // 네이버 로그인 핸들러
+  const handleNaverLogin = async () => {
+    try {
+      const res = await fetch("/api/auth/naver", { credentials: "include" });
+      const data = await res.json();
+      if (data.authUrl) {
+        window.location.href = data.authUrl;
+      } else {
+        toast({ title: "오류", description: data.message || "네이버 로그인을 시작할 수 없습니다.", variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "오류", description: "네이버 로그인 요청 실패", variant: "destructive" });
+    }
+  };
+
+  // URL에서 네이버 OAuth 콜백 결과 처리
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const naverAuth = params.get("naverAuth");
+    if (naverAuth === "success") {
+      toast({ title: "네이버 로그인 성공", description: "이제 카페에 글을 올릴 수 있습니다." });
+      refetchNaverStatus();
+      // URL 파라미터 제거
+      window.history.replaceState({}, "", window.location.pathname);
+    } else if (naverAuth === "error") {
+      const message = params.get("message");
+      toast({ title: "네이버 로그인 실패", description: message || "다시 시도해주세요.", variant: "destructive" });
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
+
+  // 글쓰기 제출
+  const handleWriteSubmit = () => {
+    if (!writeSubject.trim() || !writeContent.trim() || !writeMenuId) {
+      toast({ title: "입력 오류", description: "제목, 내용, 게시판을 모두 입력해주세요.", variant: "destructive" });
+      return;
+    }
+    writeMutation.mutate({ subject: writeSubject, content: writeContent, menuId: writeMenuId });
+  };
 
   // admin 체크
   if (!isAdmin) {
@@ -473,15 +589,63 @@ function HomeEmbed() {
             )}
             {(isFetching || isSearching) && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => window.open(CAFE_URL, "_blank", "noopener,noreferrer")}
-            className="gap-1.5 text-xs h-7"
-          >
-            <ExternalLink className="w-3 h-3" />
-            카페 열기
-          </Button>
+          <div className="flex items-center gap-2">
+            {/* 네이버 로그인 상태 */}
+            {naverStatus?.isNaverLoggedIn ? (
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-green-600 font-medium">
+                  ✅ {naverStatus.naverNickname}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-1.5 text-xs text-muted-foreground"
+                  onClick={() => naverLogoutMutation.mutate()}
+                  disabled={naverLogoutMutation.isPending}
+                >
+                  <LogOut className="w-3 h-3" />
+                </Button>
+              </div>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1 text-xs h-7 text-green-700 border-green-300 hover:bg-green-50"
+                onClick={handleNaverLogin}
+              >
+                <LogIn className="w-3 h-3" />
+                네이버 로그인
+              </Button>
+            )}
+
+            {/* 글쓰기 버튼 */}
+            <Button
+              variant="default"
+              size="sm"
+              className="gap-1 text-xs h-7"
+              onClick={() => {
+                if (!naverStatus?.isNaverLoggedIn) {
+                  toast({ title: "네이버 로그인 필요", description: "글을 작성하려면 네이버 로그인이 필요합니다.", variant: "destructive" });
+                  handleNaverLogin();
+                  return;
+                }
+                setShowWriteDialog(true);
+              }}
+            >
+              <PenSquare className="w-3 h-3" />
+              글쓰기
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => window.open(CAFE_URL, "_blank", "noopener,noreferrer")}
+              className="gap-1.5 text-xs h-7"
+            >
+              <ExternalLink className="w-3 h-3" />
+              카페 열기
+            </Button>
+          </div>
         </div>
 
         {/* 검색바 */}
@@ -772,6 +936,98 @@ function HomeEmbed() {
               </Button>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* 글쓰기 다이얼로그 */}
+      <Dialog open={showWriteDialog} onOpenChange={setShowWriteDialog}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <PenSquare className="w-5 h-5" />
+              카페 글쓰기
+            </DialogTitle>
+            <DialogDescription>
+              네이버 카페 "Life Fitness"에 새 글을 작성합니다.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* 게시판 선택 */}
+            <div>
+              <label className="text-sm font-medium mb-1.5 block">게시판 선택</label>
+              <Select value={writeMenuId} onValueChange={setWriteMenuId}>
+                <SelectTrigger className="h-9">
+                  <SelectValue placeholder="게시판을 선택하세요" />
+                </SelectTrigger>
+                <SelectContent>
+                  {menus
+                    .filter((m) => m.menuType === "B" || m.menuType === "L") // 게시판 유형만
+                    .map((m) => (
+                      <SelectItem key={m.menuId} value={String(m.menuId)}>
+                        {m.menuName}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* 제목 */}
+            <div>
+              <label className="text-sm font-medium mb-1.5 block">제목</label>
+              <Input
+                value={writeSubject}
+                onChange={(e) => setWriteSubject(e.target.value)}
+                placeholder="글 제목을 입력하세요"
+                className="h-9"
+                maxLength={100}
+              />
+            </div>
+
+            {/* 본문 */}
+            <div>
+              <label className="text-sm font-medium mb-1.5 block">내용</label>
+              <Textarea
+                value={writeContent}
+                onChange={(e) => setWriteContent(e.target.value)}
+                placeholder="글 내용을 작성하세요..."
+                className="min-h-[200px] resize-y"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                HTML 태그를 사용할 수 있습니다. (예: &lt;b&gt;굵게&lt;/b&gt;, &lt;br&gt;줄바꿈)
+              </p>
+            </div>
+          </div>
+
+          {/* 하단 버튼 */}
+          <div className="flex justify-between items-center pt-2 border-t">
+            <div className="text-xs text-muted-foreground flex items-center gap-1">
+              {naverStatus?.isNaverLoggedIn && (
+                <>✅ {naverStatus.naverNickname} 계정으로 작성</>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setShowWriteDialog(false)}
+                disabled={writeMutation.isPending}
+              >
+                취소
+              </Button>
+              <Button
+                onClick={handleWriteSubmit}
+                disabled={writeMutation.isPending || !writeSubject.trim() || !writeContent.trim() || !writeMenuId}
+                className="gap-1.5"
+              >
+                {writeMutation.isPending ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Send className="w-4 h-4" />
+                )}
+                카페에 올리기
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </>
