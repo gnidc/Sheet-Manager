@@ -1112,10 +1112,23 @@ export async function registerRoutes(
   });
 
   // ========== ETF 전체 목록 캐시 (네이버 금융 API) ==========
-  let etfListCache: { items: Array<{ code: string; name: string; marketCap: number; changeRate: number }>; expiry: number } | null = null;
-  const ETF_LIST_CACHE_TTL = 30 * 60 * 1000; // 30분 캐시
+  interface EtfListItem {
+    code: string;
+    name: string;
+    nowVal: number;
+    changeVal: number;
+    changeRate: number;
+    risefall: string;
+    nav: number;
+    quant: number;
+    amount: number;
+    marketCap: number;
+    threeMonthEarnRate: number;
+  }
+  let etfListCache: { items: EtfListItem[]; expiry: number } | null = null;
+  const ETF_LIST_CACHE_TTL = 5 * 60 * 1000; // 5분 캐시 (실시간성 강화)
 
-  async function getEtfFullList() {
+  async function getEtfFullList(): Promise<EtfListItem[]> {
     // 캐시 유효하면 반환
     if (etfListCache && Date.now() < etfListCache.expiry) {
       return etfListCache.items;
@@ -1125,7 +1138,7 @@ export async function registerRoutes(
       const response = await axios.get(
         "https://finance.naver.com/api/sise/etfItemList.nhn",
         {
-          params: { etfType: 0, targetColumn: "market_sum", sortOrder: "desc" },
+          params: { etfType: 0, targetColumn: "change_rate", sortOrder: "desc" },
           headers: { "User-Agent": "Mozilla/5.0" },
           timeout: 15000,
           responseType: "arraybuffer",
@@ -1138,23 +1151,67 @@ export async function registerRoutes(
       const data = JSON.parse(decoded);
       const rawItems = data?.result?.etfItemList || [];
 
-      const items = rawItems.map((item: any) => ({
+      const items: EtfListItem[] = rawItems.map((item: any) => ({
         code: item.itemcode || "",
         name: item.itemname || "",
-        marketCap: item.marketSum || 0,
-        changeRate: item.changeRate || 0,
+        nowVal: parseFloat(item.nowVal) || 0,
+        changeVal: parseFloat(item.changeVal) || 0,
+        changeRate: parseFloat(item.changeRate) || 0,
+        risefall: item.risefall || "",
+        nav: parseFloat(item.nav) || 0,
+        quant: parseFloat(item.quant) || 0,
+        amount: parseFloat(item.amonut) || 0, // 네이버 API 오타 (amonut)
+        marketCap: parseFloat(item.marketSum) || 0,
+        threeMonthEarnRate: parseFloat(item.threeMonthEarnRate) || 0,
       }));
 
       etfListCache = { items, expiry: Date.now() + ETF_LIST_CACHE_TTL };
-      console.log(`[ETF Search] Loaded ${items.length} ETFs from Naver Finance`);
+      console.log(`[ETF] Loaded ${items.length} ETFs from Naver Finance`);
       return items;
     } catch (err: any) {
-      console.error("[ETF Search] Failed to load ETF list:", err.message);
+      console.error("[ETF] Failed to load ETF list:", err.message);
       // 캐시가 만료되었어도 있으면 반환 (fallback)
       if (etfListCache) return etfListCache.items;
       return [];
     }
   }
+
+  // ETF 실시간 상승 상위 (레버리지/인버스 제외)
+  app.get("/api/etf/top-gainers", async (req, res) => {
+    try {
+      const limit = Math.min(parseInt(req.query.limit as string) || 15, 50);
+      const allEtfs = await getEtfFullList();
+
+      // 레버리지/인버스 제외 필터
+      const EXCLUDE_KEYWORDS = ["레버리지", "인버스", "2X", "bear", "BEAR", "곱버스", "숏", "SHORT", "울트라"];
+      const filtered = allEtfs.filter((etf) => {
+        const name = etf.name;
+        return !EXCLUDE_KEYWORDS.some((kw) => name.includes(kw));
+      });
+
+      // 상승률 순 정렬 (이미 change_rate desc로 정렬되어 있지만, 필터 후 재확인)
+      const rising = filtered
+        .filter((etf) => etf.changeRate > 0)
+        .sort((a, b) => b.changeRate - a.changeRate)
+        .slice(0, limit)
+        .map((etf) => ({
+          code: etf.code,
+          name: etf.name,
+          nowVal: etf.nowVal,
+          changeVal: etf.changeVal,
+          changeRate: etf.changeRate,
+          risefall: etf.risefall,
+          quant: etf.quant,
+          amount: etf.amount,
+          marketCap: etf.marketCap,
+        }));
+
+      res.json({ items: rising, updatedAt: new Date().toLocaleString("ko-KR") });
+    } catch (error: any) {
+      console.error("[ETF] Failed to get top gainers:", error.message);
+      res.status(500).json({ message: "ETF 상승 데이터 조회 실패" });
+    }
+  });
 
   // ===== 네이버 카페 API (관리자 전용) =====
   const CAFE_ID = "31316681";

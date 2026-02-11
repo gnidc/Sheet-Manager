@@ -129,7 +129,7 @@ export default function Home() {
                   onClick={() => setActiveTab("etf-components")}
                   className="gap-2 cursor-pointer"
                 >
-                  📊 구성종목 시세
+                  📊 ETF실시간
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => window.open("https://www.funetf.co.kr/product/etf/filter", "_blank", "noopener,noreferrer")}

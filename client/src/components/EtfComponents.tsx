@@ -4,7 +4,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { StatusBadge } from "@/components/StatusBadge";
 import {
   Loader2,
   Search,
@@ -21,6 +20,7 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
+  Flame,
 } from "lucide-react";
 
 type SortField = "weight" | "changePercent" | null;
@@ -62,21 +62,17 @@ interface EtfSearchResult {
   yield: string;
 }
 
-// 인기 ETF 목록 (빠른 선택용)
-const POPULAR_ETFS = [
-  { code: "069500", name: "KODEX 200" },
-  { code: "229200", name: "KODEX 코스닥150" },
-  { code: "102110", name: "TIGER 200" },
-  { code: "371460", name: "TIGER S&P500" },
-  { code: "381170", name: "TIGER 미국나스닥100" },
-  { code: "379810", name: "KODEX 미국S&P500TR" },
-  { code: "133690", name: "TIGER 미국나스닥100" },
-  { code: "305720", name: "KODEX 2차전지산업" },
-  { code: "091160", name: "KODEX 반도체" },
-  { code: "091180", name: "TIGER 반도체" },
-  { code: "364690", name: "KODEX Fn반도체" },
-  { code: "466920", name: "TIGER 미국테크TOP10" },
-];
+interface TopGainerEtf {
+  code: string;
+  name: string;
+  nowVal: number;
+  changeVal: number;
+  changeRate: number;
+  risefall: string;
+  quant: number;
+  amount: number;
+  marketCap: number;
+}
 
 function getChangeColor(sign?: string): string {
   if (!sign) return "text-muted-foreground";
@@ -105,6 +101,21 @@ export default function EtfComponents() {
   const [searchMode, setSearchMode] = useState<"search" | "direct">("search");
   const [sortField, setSortField] = useState<SortField>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+
+  // ETF 실시간 상승 상위 15개
+  const { data: topGainersData, isFetching: isLoadingGainers, refetch: refetchGainers } = useQuery<{
+    items: TopGainerEtf[];
+    updatedAt: string;
+  }>({
+    queryKey: ["/api/etf/top-gainers"],
+    queryFn: async () => {
+      const res = await fetch("/api/etf/top-gainers?limit=15", { credentials: "include" });
+      if (!res.ok) throw new Error("ETF 상승 데이터 조회 실패");
+      return res.json();
+    },
+    staleTime: 60 * 1000, // 1분
+    refetchInterval: 60 * 1000, // 1분마다 자동 갱신
+  });
 
   // ETF 검색 (네이버 금융 전체 ETF 목록에서 실시간 검색)
   const { data: searchResults, isFetching: isSearching } = useQuery<{ results: EtfSearchResult[] }>({
@@ -145,7 +156,6 @@ export default function EtfComponents() {
     if (/^\d{6}$/.test(trimmed)) {
       setSelectedEtfCode(trimmed);
     } else if (combinedResults.length === 1) {
-      // 검색 결과가 1개이면 자동 선택
       handleSelectEtf(combinedResults[0].code);
     }
   };
@@ -161,44 +171,30 @@ export default function EtfComponents() {
     setSearchTerm(code);
   };
 
-  // 검색 결과와 인기 ETF 결합
+  // 검색 결과 결합
   const combinedResults = useMemo(() => {
     if (searchTerm.trim().length < 2) return [];
-    const term = searchTerm.trim().toLowerCase();
-
-    // API 검색 결과 (전체 거래소 ETF에서 검색)
     const apiResults = (searchResults?.results || []).map((r: any) => ({
       code: r.code,
       name: r.name,
     }));
-
-    // 인기 ETF 중 매칭되는 항목 (API 결과에 없는 것만)
-    const popularMatches = POPULAR_ETFS.filter(
-      e =>
-        (e.code.includes(term) || e.name.toLowerCase().includes(term)) &&
-        !apiResults.some((r: any) => r.code === e.code)
-    );
-
-    // 인기 ETF 매칭 결과를 먼저, 그 뒤에 API 결과
-    return [...popularMatches, ...apiResults].slice(0, 20);
+    return apiResults.slice(0, 20);
   }, [searchTerm, searchResults]);
 
-  // 정렬 토글 핸들러: 클릭할 때마다 내림차순 ↔ 오름차순 토글
+  // 정렬 토글
   const handleSort = (field: SortField) => {
     if (sortField === field) {
-      // 같은 필드 클릭: 방향 토글
       setSortDirection(prev => prev === "desc" ? "asc" : "desc");
     } else {
-      // 새 필드: 내림차순(높은 값 먼저)부터 시작
       setSortField(field);
       setSortDirection("desc");
     }
   };
 
-  // 정렬된 구성종목 리스트
+  // 정렬된 구성종목
   const sortedComponents = useMemo(() => {
     if (!componentData?.components) return [];
-    if (!sortField) return componentData.components; // 기본 순서 (비중 내림차순)
+    if (!sortField) return componentData.components;
 
     return [...componentData.components].sort((a, b) => {
       let valA = 0;
@@ -208,10 +204,8 @@ export default function EtfComponents() {
         valA = a.weight;
         valB = b.weight;
       } else if (sortField === "changePercent") {
-        // 등락률을 부호 포함 숫자로 변환
-        // changeSign: 1,2 = 상승(+), 4,5 = 하락(-), 3 = 보합(0)
         const getSignedPercent = (c: EtfComponentStock) => {
-          if (!c.changePercent) return -Infinity; // 데이터 없는 항목은 항상 맨 뒤
+          if (!c.changePercent) return -Infinity;
           const pct = parseFloat(c.changePercent);
           if (c.changeSign === "4" || c.changeSign === "5") return -pct;
           return pct;
@@ -220,7 +214,6 @@ export default function EtfComponents() {
         valB = getSignedPercent(b);
       }
 
-      // -Infinity 항목은 항상 맨 뒤로 (정렬 방향 무관)
       if (valA === -Infinity && valB === -Infinity) return 0;
       if (valA === -Infinity) return 1;
       if (valB === -Infinity) return -1;
@@ -229,23 +222,128 @@ export default function EtfComponents() {
     });
   }, [componentData?.components, sortField, sortDirection]);
 
-  // 정렬 아이콘 렌더링
   const getSortIcon = (field: SortField) => {
     if (sortField !== field) return <ArrowUpDown className="w-3 h-3 text-muted-foreground/50" />;
     if (sortDirection === "desc") return <ArrowDown className="w-3 h-3 text-primary" />;
     return <ArrowUp className="w-3 h-3 text-primary" />;
   };
 
-  // 비중 상위 종목의 비중 합계
   const totalWeight = componentData?.components.reduce((sum, c) => sum + c.weight, 0) || 0;
-  // 상승/하락 종목 수
   const upCount = componentData?.components.filter(c => c.changeSign === "1" || c.changeSign === "2").length || 0;
   const downCount = componentData?.components.filter(c => c.changeSign === "4" || c.changeSign === "5").length || 0;
   const flatCount = (componentData?.totalComponentCount || 0) - upCount - downCount;
 
+  const topGainers = topGainersData?.items || [];
+
   return (
     <div className="space-y-6">
-      {/* 검색 영역 */}
+      {/* ===== 실시간 상승 ETF TOP 15 ===== */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Flame className="w-5 h-5 text-orange-500" />
+              실시간 상승 ETF TOP 15
+            </CardTitle>
+            <div className="flex items-center gap-2">
+              {topGainersData?.updatedAt && (
+                <span className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Clock className="w-3 h-3" />
+                  {topGainersData.updatedAt}
+                </span>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => refetchGainers()}
+                disabled={isLoadingGainers}
+                className="h-7 w-7 p-0"
+              >
+                {isLoadingGainers ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-3.5 h-3.5" />
+                )}
+              </Button>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            레버리지·인버스 제외 | 클릭하면 해당 ETF 구성종목 실시간 시세를 조회합니다
+          </p>
+        </CardHeader>
+        <CardContent className="p-0">
+          {isLoadingGainers && topGainers.length === 0 ? (
+            <div className="flex items-center justify-center py-10">
+              <Loader2 className="w-6 h-6 animate-spin text-primary" />
+            </div>
+          ) : topGainers.length === 0 ? (
+            <div className="text-center py-10 text-sm text-muted-foreground">
+              현재 상승 중인 ETF가 없습니다 (장 마감 또는 데이터 로딩 중)
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/50">
+                    <TableHead className="w-[36px] text-center">#</TableHead>
+                    <TableHead>ETF명</TableHead>
+                    <TableHead className="text-right w-[90px]">현재가</TableHead>
+                    <TableHead className="text-right w-[80px]">등락률</TableHead>
+                    <TableHead className="text-right w-[80px]">전일대비</TableHead>
+                    <TableHead className="text-right w-[100px] hidden sm:table-cell">거래량</TableHead>
+                    <TableHead className="text-right w-[100px] hidden md:table-cell">거래대금(억)</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {topGainers.map((etf, index) => (
+                    <TableRow
+                      key={etf.code}
+                      className={`cursor-pointer transition-colors hover:bg-primary/5 ${
+                        selectedEtfCode === etf.code ? "bg-primary/10 border-l-2 border-l-primary" : ""
+                      }`}
+                      onClick={() => handleSelectEtf(etf.code)}
+                    >
+                      <TableCell className="text-center font-bold text-sm">
+                        <span className={index < 3 ? "text-orange-500" : "text-muted-foreground"}>
+                          {index + 1}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2 min-w-[140px]">
+                          <div>
+                            <div className="font-medium text-sm leading-tight">{etf.name}</div>
+                            <div className="text-xs text-muted-foreground font-mono">{etf.code}</div>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums font-semibold text-sm">
+                        {etf.nowVal.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums font-medium text-sm text-red-500">
+                        <span className="flex items-center justify-end gap-0.5">
+                          <TrendingUp className="w-3 h-3" />
+                          +{etf.changeRate.toFixed(2)}%
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-sm text-red-500">
+                        +{Math.abs(etf.changeVal).toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-sm text-muted-foreground hidden sm:table-cell">
+                        {etf.quant.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-sm text-muted-foreground hidden md:table-cell">
+                        {(etf.amount / 100000000).toFixed(0)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ===== 구성종목 실시간 시세 조회 ===== */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-lg flex items-center gap-2">
@@ -253,7 +351,7 @@ export default function EtfComponents() {
             ETF 구성종목 실시간 시세
           </CardTitle>
           <p className="text-xs text-muted-foreground mt-1">
-            ETF 코드 또는 이름을 검색하여 구성종목의 실시간 시세를 확인하세요
+            위 리스트에서 ETF를 클릭하거나, 직접 코드/이름을 검색하여 구성종목의 실시간 시세를 확인하세요
           </p>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -266,7 +364,6 @@ export default function EtfComponents() {
                 onChange={(e) => {
                   setSearchTerm(e.target.value);
                   setSearchMode("search");
-                  // 검색어 변경 시 선택 해제 (새로운 검색 가능)
                   if (selectedEtfCode) setSelectedEtfCode("");
                 }}
                 onKeyDown={handleKeyDown}
@@ -333,27 +430,6 @@ export default function EtfComponents() {
               ) : null}
             </div>
           )}
-
-          {/* 인기 ETF 빠른 선택 */}
-          {!selectedEtfCode && searchTerm.length < 2 && (
-            <div>
-              <p className="text-xs font-medium text-muted-foreground mb-2">인기 ETF 빠른 검색</p>
-              <div className="flex flex-wrap gap-2">
-                {POPULAR_ETFS.map((etf) => (
-                  <Button
-                    key={etf.code}
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleSelectEtf(etf.code)}
-                    className="text-xs gap-1.5 h-8"
-                  >
-                    <span className="font-mono text-muted-foreground">{etf.code}</span>
-                    <span>{etf.name}</span>
-                  </Button>
-                ))}
-              </div>
-            </div>
-          )}
         </CardContent>
       </Card>
 
@@ -362,7 +438,7 @@ export default function EtfComponents() {
         <div className="flex flex-col items-center justify-center py-20 gap-4">
           <Loader2 className="w-10 h-10 animate-spin text-primary" />
           <p className="text-muted-foreground">구성종목 및 실시간 시세를 조회하고 있습니다...</p>
-          <p className="text-xs text-muted-foreground">KIS API에서 각 종목의 현재가를 가져옵니다 (약 10~20초)</p>
+          <p className="text-xs text-muted-foreground">네이버 금융에서 각 종목의 현재가를 가져옵니다</p>
         </div>
       )}
 
@@ -404,7 +480,6 @@ export default function EtfComponents() {
                   </div>
                 </div>
                 <div className="flex gap-3">
-                  {/* 상승/하락 요약 */}
                   <div className="flex items-center gap-2 text-sm">
                     <span className="flex items-center gap-1 text-red-500 font-medium">
                       <TrendingUp className="w-4 h-4" />
@@ -634,4 +709,3 @@ export default function EtfComponents() {
     </div>
   );
 }
-
