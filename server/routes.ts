@@ -1407,6 +1407,190 @@ export async function registerRoutes(
     }
   });
 
+  // ===== 카페 이벤트 알림 (관리자 전용) =====
+  interface CafeNotification {
+    id: string;
+    type: "new_article" | "new_comment" | "new_like" | "member_change";
+    message: string;
+    detail?: string;
+    articleId?: number;
+    timestamp: number;
+  }
+
+  // 이전 상태를 캐싱 (서버 메모리)
+  let prevArticleSnapshot: Map<number, { commentCount: number; likeItCount: number; subject: string }> = new Map();
+  let prevMemberCount: number | null = null;
+  let cafeNotifications: CafeNotification[] = [];
+  let lastNotificationCheck = 0;
+  const NOTIFICATION_COOLDOWN = 60 * 1000; // 최소 1분 간격
+
+  app.get("/api/cafe/notifications", requireAdmin, async (req, res) => {
+    try {
+      const now = Date.now();
+      const forceRefresh = req.query.refresh === "true";
+
+      // 쿨다운 내이면 캐시 반환
+      if (!forceRefresh && now - lastNotificationCheck < NOTIFICATION_COOLDOWN && cafeNotifications.length > 0) {
+        return res.json({
+          notifications: cafeNotifications.slice(0, 50),
+          lastChecked: lastNotificationCheck,
+          memberCount: prevMemberCount,
+        });
+      }
+
+      const newNotifications: CafeNotification[] = [];
+
+      // 1) 카페 기본정보 (멤버 수) 조회
+      let currentMemberCount: number | null = null;
+      try {
+        const cafeInfoRes = await axios.get(
+          "https://apis.naver.com/cafe-web/cafe2/CafeGateInfo.json",
+          {
+            params: { cluburl: "lifefit" },
+            headers: CAFE_HEADERS,
+            timeout: 8000,
+          }
+        );
+        currentMemberCount = cafeInfoRes.data?.message?.result?.cafeInfoView?.memberCount || null;
+      } catch (e) {
+        // 멤버 수 조회 실패시 무시
+      }
+
+      // 멤버 수 변화 감지
+      if (currentMemberCount !== null && prevMemberCount !== null && currentMemberCount !== prevMemberCount) {
+        const diff = currentMemberCount - prevMemberCount;
+        if (diff > 0) {
+          newNotifications.push({
+            id: `member_${now}`,
+            type: "member_change",
+            message: `새 멤버 ${diff}명 가입!`,
+            detail: `총 멤버: ${currentMemberCount.toLocaleString()}명`,
+            timestamp: now,
+          });
+        } else if (diff < 0) {
+          newNotifications.push({
+            id: `member_${now}`,
+            type: "member_change",
+            message: `멤버 ${Math.abs(diff)}명 탈퇴`,
+            detail: `총 멤버: ${currentMemberCount.toLocaleString()}명`,
+            timestamp: now,
+          });
+        }
+      }
+      if (currentMemberCount !== null) prevMemberCount = currentMemberCount;
+
+      // 2) 최신 글 목록 조회 (최근 50개)
+      const articlesRes = await axios.get(
+        "https://apis.naver.com/cafe-web/cafe2/ArticleListV2.json",
+        {
+          params: {
+            "search.clubid": CAFE_ID,
+            "search.boardtype": "L",
+            "search.page": 1,
+            "search.perPage": 50,
+          },
+          headers: CAFE_HEADERS,
+          timeout: 10000,
+        }
+      );
+
+      const currentArticles = (articlesRes.data?.message?.result?.articleList || []).map((a: any) => ({
+        articleId: a.articleId as number,
+        subject: a.subject as string,
+        writerNickname: a.writerNickname as string,
+        menuName: a.menuName as string,
+        commentCount: (a.commentCount || 0) as number,
+        likeItCount: (a.likeItCount || 0) as number,
+        writeDateTimestamp: a.writeDateTimestamp as number,
+        newArticle: a.newArticle as boolean,
+      }));
+
+      if (prevArticleSnapshot.size > 0) {
+        for (const article of currentArticles) {
+          const prev = prevArticleSnapshot.get(article.articleId);
+
+          if (!prev) {
+            // 새 글 감지
+            newNotifications.push({
+              id: `new_${article.articleId}`,
+              type: "new_article",
+              message: `새 글: ${article.subject}`,
+              detail: `${article.writerNickname} · ${article.menuName}`,
+              articleId: article.articleId,
+              timestamp: article.writeDateTimestamp || now,
+            });
+          } else {
+            // 댓글 수 변화
+            const commentDiff = article.commentCount - prev.commentCount;
+            if (commentDiff > 0) {
+              newNotifications.push({
+                id: `comment_${article.articleId}_${now}`,
+                type: "new_comment",
+                message: `"${article.subject}" 에 댓글 ${commentDiff}개`,
+                detail: `총 ${article.commentCount}개`,
+                articleId: article.articleId,
+                timestamp: now,
+              });
+            }
+
+            // 좋아요 수 변화
+            const likeDiff = article.likeItCount - prev.likeItCount;
+            if (likeDiff > 0) {
+              newNotifications.push({
+                id: `like_${article.articleId}_${now}`,
+                type: "new_like",
+                message: `"${article.subject}" 에 좋아요 ${likeDiff}개`,
+                detail: `총 ${article.likeItCount}개`,
+                articleId: article.articleId,
+                timestamp: now,
+              });
+            }
+          }
+        }
+      }
+
+      // 현재 상태를 스냅샷으로 저장
+      prevArticleSnapshot = new Map();
+      for (const article of currentArticles) {
+        prevArticleSnapshot.set(article.articleId, {
+          commentCount: article.commentCount,
+          likeItCount: article.likeItCount,
+          subject: article.subject,
+        });
+      }
+
+      // 새 알림을 기존 알림 앞에 추가 (최대 100개 유지)
+      if (newNotifications.length > 0) {
+        cafeNotifications = [...newNotifications, ...cafeNotifications].slice(0, 100);
+      }
+
+      lastNotificationCheck = now;
+
+      return res.json({
+        notifications: cafeNotifications.slice(0, 50),
+        lastChecked: lastNotificationCheck,
+        memberCount: prevMemberCount,
+        newCount: newNotifications.length,
+      });
+    } catch (error: any) {
+      console.error("[Cafe Notifications] Error:", error.message);
+      return res.status(500).json({ message: "알림 조회에 실패했습니다." });
+    }
+  });
+
+  // 알림 개별 삭제
+  app.delete("/api/cafe/notifications/:id", requireAdmin, (req, res) => {
+    const id = req.params.id;
+    cafeNotifications = cafeNotifications.filter(n => n.id !== id);
+    return res.json({ message: "알림이 삭제되었습니다." });
+  });
+
+  // 알림 전체 삭제
+  app.delete("/api/cafe/notifications", requireAdmin, (req, res) => {
+    cafeNotifications = [];
+    return res.json({ message: "모든 알림이 삭제되었습니다." });
+  });
+
   // ===== 네이버 OAuth + 카페 글쓰기 (관리자 전용) =====
   const NAVER_REDIRECT_URI = `${process.env.VERCEL ? "https://" + process.env.VERCEL_URL : "http://localhost:" + (process.env.PORT || 3000)}/api/auth/naver/callback`;
 

@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Plus, ExternalLink, TrendingUp, Globe, Loader2, Star, Newspaper, Youtube, FileText, Link as LinkIcon, Trash2, Pencil, Scale, Zap, ChevronDown, Calendar, Home as HomeIcon, Bot, Search, X, Eye, ChevronLeft, ChevronRight, PenSquare, Send, LogIn, LogOut } from "lucide-react";
+import { Plus, ExternalLink, TrendingUp, Globe, Loader2, Star, Newspaper, Youtube, FileText, Link as LinkIcon, Trash2, Pencil, Scale, Zap, ChevronDown, Calendar, Home as HomeIcon, Bot, Search, X, Eye, ChevronLeft, ChevronRight, PenSquare, Send, LogIn, LogOut, Bell, BellRing, MessageCircle, Heart, UserPlus, FileEdit } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
@@ -57,7 +57,7 @@ export default function Home() {
                   <Button variant="outline" className="gap-2 border-amber-300 text-amber-600 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-400 dark:hover:bg-amber-950">
                     <Zap className="w-4 h-4" />
                     <span className="hidden sm:inline">자동매매</span>
-                  </Button>
+                    </Button>
                 </Link>
               )}
               <LoginDialog />
@@ -219,7 +219,7 @@ export default function Home() {
             <Suspense fallback={
               <div className="flex items-center justify-center py-20">
                 <Loader2 className="w-8 h-8 animate-spin text-primary" />
-              </div>
+                  </div>
             }>
               <EtfComponents />
             </Suspense>
@@ -229,7 +229,7 @@ export default function Home() {
             <Suspense fallback={
               <div className="flex items-center justify-center py-20">
                 <Loader2 className="w-8 h-8 animate-spin text-primary" />
-              </div>
+                  </div>
             }>
               <MarketNews />
             </Suspense>
@@ -251,11 +251,11 @@ export default function Home() {
               <Suspense fallback={
                 <div className="flex items-center justify-center py-20">
                   <Loader2 className="w-8 h-8 animate-spin text-primary" />
-                </div>
+              </div>
               }>
                 <DailyStrategy period={period} />
               </Suspense>
-            </TabsContent>
+          </TabsContent>
           ))}
 
           <TabsContent value="etf-trends">
@@ -313,6 +313,15 @@ interface ArticleDetail {
   fallbackUrl: string;
 }
 
+interface CafeNotification {
+  id: string;
+  type: "new_article" | "new_comment" | "new_like" | "member_change";
+  message: string;
+  detail?: string;
+  articleId?: number;
+  timestamp: number;
+}
+
 function HomeEmbed() {
   const { isAdmin } = useAuth();
   const { toast } = useToast();
@@ -322,6 +331,7 @@ function HomeEmbed() {
   const [searchInput, setSearchInput] = useState("");
   const [isSearchMode, setIsSearchMode] = useState(false);
   const [previewArticleId, setPreviewArticleId] = useState<number | null>(null);
+  const [showNotifications, setShowNotifications] = useState(false);
 
   // 글쓰기 상태
   const [showWriteDialog, setShowWriteDialog] = useState(false);
@@ -332,11 +342,11 @@ function HomeEmbed() {
   // 게시판 목록 조회
   const { data: menusData } = useQuery<{ menus: CafeMenu[] }>({
     queryKey: ["/api/cafe/menus"],
-    queryFn: async () => {
+      queryFn: async () => {
       const res = await fetch("/api/cafe/menus", { credentials: "include" });
       if (!res.ok) return { menus: [] };
-      return res.json();
-    },
+        return res.json();
+      },
     enabled: isAdmin,
     staleTime: 10 * 60 * 1000, // 10분
   });
@@ -348,13 +358,56 @@ function HomeEmbed() {
     naverProfileImage: string | null;
   }>({
     queryKey: ["/api/auth/naver/status"],
-    queryFn: async () => {
+        queryFn: async () => {
       const res = await fetch("/api/auth/naver/status", { credentials: "include" });
       if (!res.ok) return { isNaverLoggedIn: false, naverNickname: null, naverProfileImage: null };
       return res.json();
     },
     enabled: isAdmin,
     staleTime: 5 * 60 * 1000,
+  });
+
+  // 카페 알림 조회 (2분마다 자동 폴링)
+  const { data: notifData, refetch: refetchNotifications } = useQuery<{
+    notifications: CafeNotification[];
+    lastChecked: number;
+    memberCount: number | null;
+    newCount?: number;
+  }>({
+    queryKey: ["/api/cafe/notifications"],
+    queryFn: async () => {
+      const res = await fetch("/api/cafe/notifications", { credentials: "include" });
+      if (!res.ok) return { notifications: [], lastChecked: 0, memberCount: null };
+      return res.json();
+    },
+    enabled: isAdmin,
+    staleTime: 60 * 1000, // 1분
+    refetchInterval: 2 * 60 * 1000, // 2분마다 자동 갱신
+  });
+
+  const notifications = notifData?.notifications || [];
+  const unreadCount = notifications.length;
+
+  // 알림 삭제 mutation
+  const deleteNotifMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await fetch(`/api/cafe/notifications/${id}`, { method: "DELETE", credentials: "include" });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/cafe/notifications"] });
+    },
+  });
+
+  const clearAllNotifMutation = useMutation({
+    mutationFn: async () => {
+      await fetch("/api/cafe/notifications", { method: "DELETE", credentials: "include" });
+    },
+    onSuccess: () => {
+      queryClient.setQueryData(["/api/cafe/notifications"], {
+        notifications: [], lastChecked: Date.now(), memberCount: notifData?.memberCount,
+      });
+      setShowNotifications(false);
+    },
   });
 
   // 글 목록 조회 (게시판 필터 지원)
@@ -559,7 +612,7 @@ function HomeEmbed() {
   };
 
   if (isLoading && !isSearchMode) {
-    return (
+  return (
       <Card>
         <CardContent className="py-20 text-center">
           <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-2" />
@@ -596,8 +649,8 @@ function HomeEmbed() {
                 <span className="text-xs text-green-600 font-medium">
                   ✅ {naverStatus.naverNickname}
                 </span>
-                <Button
-                  variant="ghost"
+                <Button 
+                  variant="ghost" 
                   size="sm"
                   className="h-6 px-1.5 text-xs text-muted-foreground"
                   onClick={() => naverLogoutMutation.mutate()}
@@ -617,6 +670,30 @@ function HomeEmbed() {
                 네이버 로그인
               </Button>
             )}
+
+            {/* 알림 벨 */}
+            <div className="relative">
+              <Button
+                variant={showNotifications ? "default" : "outline"}
+                size="sm"
+                className="gap-1 text-xs h-7 relative"
+                onClick={() => {
+                  setShowNotifications(!showNotifications);
+                  if (!showNotifications) refetchNotifications();
+                }}
+              >
+                {unreadCount > 0 ? (
+                  <BellRing className="w-3.5 h-3.5" />
+                ) : (
+                  <Bell className="w-3.5 h-3.5" />
+                )}
+                {unreadCount > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center font-bold">
+                    {unreadCount > 9 ? "9+" : unreadCount}
+                  </span>
+                )}
+              </Button>
+            </div>
 
             {/* 글쓰기 버튼 */}
             <Button
@@ -646,7 +723,112 @@ function HomeEmbed() {
               카페 열기
             </Button>
           </div>
-        </div>
+          </div>
+
+        {/* 알림 패널 */}
+        {showNotifications && (
+          <div className="border-b bg-amber-50/50 dark:bg-amber-950/20">
+            <div className="px-4 py-2 flex items-center justify-between">
+              <h4 className="text-sm font-semibold flex items-center gap-1.5">
+                <BellRing className="w-4 h-4 text-amber-600" />
+                카페 알림
+                {notifData?.memberCount && (
+                  <span className="text-xs font-normal text-muted-foreground ml-2">
+                    멤버 {notifData.memberCount.toLocaleString()}명
+                  </span>
+                )}
+              </h4>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 text-xs text-muted-foreground"
+                  onClick={() => refetchNotifications()}
+                >
+                  새로고침
+                </Button>
+                {notifications.length > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 text-xs text-red-500 hover:text-red-700"
+                    onClick={() => clearAllNotifMutation.mutate()}
+                    disabled={clearAllNotifMutation.isPending}
+                  >
+                    <Trash2 className="w-3 h-3 mr-1" />
+                    전체 삭제
+                  </Button>
+                )}
+              </div>
+            </div>
+            <div className="max-h-[250px] overflow-y-auto">
+              {notifications.length === 0 ? (
+                <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+                  <Bell className="w-8 h-8 mx-auto mb-2 opacity-20" />
+                  <p>새로운 알림이 없습니다</p>
+                  <p className="text-xs mt-1">2분마다 자동으로 확인합니다</p>
+                </div>
+              ) : (
+                <div className="divide-y">
+                  {notifications.map((notif) => {
+                    const icon = notif.type === "new_article" ? <FileEdit className="w-4 h-4 text-blue-500 flex-shrink-0" />
+                      : notif.type === "new_comment" ? <MessageCircle className="w-4 h-4 text-green-500 flex-shrink-0" />
+                      : notif.type === "new_like" ? <Heart className="w-4 h-4 text-pink-500 flex-shrink-0" />
+                      : <UserPlus className="w-4 h-4 text-purple-500 flex-shrink-0" />;
+
+                    const timeAgo = (() => {
+                      const diff = Date.now() - notif.timestamp;
+                      const mins = Math.floor(diff / 60000);
+                      if (mins < 1) return "방금";
+                      if (mins < 60) return `${mins}분 전`;
+                      const hours = Math.floor(mins / 60);
+                      if (hours < 24) return `${hours}시간 전`;
+                      return `${Math.floor(hours / 24)}일 전`;
+                    })();
+
+                    return (
+                      <div
+                        key={notif.id}
+                        className="flex items-start gap-2.5 px-4 py-2.5 hover:bg-amber-100/50 dark:hover:bg-amber-900/20 cursor-pointer group"
+                        onClick={() => {
+                          if (notif.articleId) {
+                            setPreviewArticleId(notif.articleId);
+                            setShowNotifications(false);
+                          }
+                        }}
+                      >
+                        {icon}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate">{notif.message}</p>
+                          {notif.detail && (
+                            <p className="text-xs text-muted-foreground mt-0.5">{notif.detail}</p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          <span className="text-[11px] text-muted-foreground">{timeAgo}</span>
+                          <button
+                            className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-red-500"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deleteNotifMutation.mutate(notif.id);
+                            }}
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            {notifData?.lastChecked && (
+              <div className="px-4 py-1.5 border-t bg-muted/30 text-[11px] text-muted-foreground">
+                마지막 확인: {new Date(notifData.lastChecked).toLocaleTimeString("ko-KR")}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* 검색바 */}
         <div className="px-4 py-2 border-b bg-muted/10">
@@ -668,26 +850,26 @@ function HomeEmbed() {
                   <X className="w-3.5 h-3.5" />
                 </button>
               )}
-            </div>
+                      </div>
             <Button size="sm" onClick={handleSearch} disabled={!searchInput.trim()} className="h-8 text-xs gap-1">
               <Search className="w-3 h-3" />
               검색
             </Button>
-          </div>
-        </div>
+                    </div>
+                </div>
 
         {/* 게시판 필터 탭 */}
         {!isSearchMode && menus.length > 0 && (
           <div className="px-4 py-2 border-b overflow-x-auto">
             <div className="flex gap-1 min-w-max">
-              <Button
+            <Button 
                 variant={selectedMenuId === "0" ? "default" : "ghost"}
-                size="sm"
+              size="sm" 
                 onClick={() => handleMenuChange("0")}
                 className="h-7 text-xs px-3 whitespace-nowrap"
-              >
+            >
                 전체
-              </Button>
+            </Button>
               {menus.map((menu) => (
                 <Button
                   key={menu.menuId}
@@ -713,9 +895,9 @@ function HomeEmbed() {
               <Button variant="ghost" size="sm" onClick={clearSearch} className="h-6 text-xs gap-1">
                 <X className="w-3 h-3" />
                 검색 해제
-              </Button>
+                  </Button>
+              </div>
             </div>
-          </div>
         )}
 
         {/* 글 목록 */}
@@ -724,12 +906,12 @@ function HomeEmbed() {
             <div className="py-12 text-center">
               <Loader2 className="w-6 h-6 animate-spin text-primary mx-auto mb-2" />
               <p className="text-xs text-muted-foreground">{isSearchMode ? "검색 중..." : "로딩 중..."}</p>
-            </div>
+              </div>
           ) : articles.length === 0 ? (
             <div className="py-16 text-center text-muted-foreground">
               {isSearchMode ? "검색 결과가 없습니다." : "게시글이 없습니다."}
-            </div>
-          ) : (
+              </div>
+            ) : (
             articles.map((article) => (
               <div
                 key={article.articleId}
@@ -746,8 +928,8 @@ function HomeEmbed() {
                       className="w-full h-full object-cover"
                       loading="lazy"
                     />
-                  </div>
-                )}
+              </div>
+            )}
                 {/* 본문 */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 mb-1">
@@ -757,7 +939,7 @@ function HomeEmbed() {
                     {article.newArticle && (
                       <span className="text-[10px] px-1 py-0.5 rounded bg-red-500 text-white font-bold">N</span>
                     )}
-                  </div>
+              </div>
                   <h4
                     className="text-sm font-medium line-clamp-1 mb-1 cursor-pointer hover:text-primary transition-colors"
                     onClick={() => setPreviewArticleId(article.articleId)}
@@ -804,7 +986,7 @@ function HomeEmbed() {
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
                   </Button>
-                </div>
+                            </div>
               </div>
             ))
           )}
@@ -835,7 +1017,7 @@ function HomeEmbed() {
               const startPage = Math.max(1, Math.min(page - 2, totalPages - 4));
               const p = startPage + i;
               if (p > totalPages) return null;
-              return (
+                            return (
                 <Button
                   key={p}
                   variant={p === page ? "default" : "ghost"}
@@ -846,8 +1028,8 @@ function HomeEmbed() {
                 >
                   {p}
                 </Button>
-              );
-            })}
+                            );
+                          })}
             <Button
               variant="ghost"
               size="sm"
@@ -866,9 +1048,9 @@ function HomeEmbed() {
             >
               »
             </Button>
-          </div>
-        )}
-      </Card>
+              </div>
+            )}
+        </Card>
 
       {/* 글 본문 미리보기 모달 */}
       <Dialog open={!!previewArticleId} onOpenChange={(open) => !open && setPreviewArticleId(null)}>
@@ -894,7 +1076,7 @@ function HomeEmbed() {
             <div className="py-12 text-center">
               <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-2" />
               <p className="text-sm text-muted-foreground">본문 로딩 중...</p>
-            </div>
+      </div>
           ) : articleDetail?.contentHtml ? (
             <div
               className="prose prose-sm max-w-none dark:prose-invert overflow-hidden"
@@ -918,8 +1100,8 @@ function HomeEmbed() {
               >
                 <ExternalLink className="w-4 h-4" />
                 카페에서 보기
-              </Button>
-            </div>
+        </Button>
+      </div>
           )}
 
           {/* 하단 버튼 */}
@@ -931,9 +1113,9 @@ function HomeEmbed() {
                 onClick={() => window.open(articleDetail.fallbackUrl, "_blank", "noopener,noreferrer")}
                 className="gap-1.5 text-xs"
               >
-                <ExternalLink className="w-3 h-3" />
+                  <ExternalLink className="w-3 h-3" />
                 카페에서 보기
-              </Button>
+                </Button>
             </div>
           )}
         </DialogContent>
@@ -970,8 +1152,8 @@ function HomeEmbed() {
                     ))}
                 </SelectContent>
               </Select>
-            </div>
-
+          </div>
+          
             {/* 제목 */}
             <div>
               <label className="text-sm font-medium mb-1.5 block">제목</label>
@@ -996,8 +1178,8 @@ function HomeEmbed() {
               <p className="text-xs text-muted-foreground mt-1">
                 HTML 태그를 사용할 수 있습니다. (예: &lt;b&gt;굵게&lt;/b&gt;, &lt;br&gt;줄바꿈)
               </p>
-            </div>
-          </div>
+    </div>
+      </div>
 
           {/* 하단 버튼 */}
           <div className="flex justify-between items-center pt-2 border-t">
@@ -1005,7 +1187,7 @@ function HomeEmbed() {
               {naverStatus?.isNaverLoggedIn && (
                 <>✅ {naverStatus.naverNickname} 계정으로 작성</>
               )}
-            </div>
+                        </div>
             <div className="flex gap-2">
               <Button
                 variant="outline"
@@ -1026,8 +1208,8 @@ function HomeEmbed() {
                 )}
                 카페에 올리기
               </Button>
-            </div>
-          </div>
+                    </div>
+                      </div>
         </DialogContent>
       </Dialog>
     </>
