@@ -1154,6 +1154,59 @@ export async function registerRoutes(
     }
   }
 
+  // ===== 네이버 카페 전체글 목록 API =====
+  app.get("/api/cafe/articles", async (req, res) => {
+    try {
+      const page = parseInt(req.query.page as string) || 1;
+      const perPage = Math.min(parseInt(req.query.perPage as string) || 20, 50);
+      
+      const response = await axios.get(
+        "https://apis.naver.com/cafe-web/cafe2/ArticleListV2.json",
+        {
+          params: {
+            "search.clubid": "31316681",
+            "search.boardtype": "L",
+            "search.page": page,
+            "search.perPage": perPage,
+          },
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "https://cafe.naver.com/lifefit",
+          },
+          timeout: 10000,
+        }
+      );
+
+      const result = response.data?.message?.result;
+      const articles = (result?.articleList || []).map((a: any) => ({
+        articleId: a.articleId,
+        subject: a.subject,
+        writerNickname: a.writerNickname,
+        menuName: a.menuName,
+        readCount: a.readCount,
+        commentCount: a.commentCount,
+        likeItCount: a.likeItCount,
+        representImage: a.representImage || null,
+        writeDateTimestamp: a.writeDateTimestamp,
+        newArticle: a.newArticle,
+        attachImage: a.attachImage,
+        attachMovie: a.attachMovie,
+        attachFile: a.attachFile,
+        openArticle: a.openArticle,
+      }));
+
+      return res.json({
+        articles,
+        page,
+        perPage,
+        totalArticles: result?.totalArticleCount || articles.length,
+      });
+    } catch (error: any) {
+      console.error("[Cafe] Failed to fetch articles:", error.message);
+      return res.status(500).json({ message: "카페 글 목록을 불러올 수 없습니다." });
+    }
+  });
+
   // ETF 검색 (네이버 금융 전체 ETF 목록에서 검색)
   app.get("/api/etf/search", async (req, res) => {
     try {

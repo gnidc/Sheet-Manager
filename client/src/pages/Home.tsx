@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, Suspense, lazy } from "react";
+import { useState, Suspense, lazy } from "react";
 import { Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { Input } from "@/components/ui/input";
@@ -276,49 +276,72 @@ export default function Home() {
   );
 }
 
-// ===== 홈 탭: 네이버 카페 임베드 =====
+// ===== 홈 탭: 네이버 카페 전체글보기 =====
 const CAFE_URL = "https://cafe.naver.com/lifefit";
 
+interface CafeArticle {
+  articleId: number;
+  subject: string;
+  writerNickname: string;
+  menuName: string;
+  readCount: number;
+  commentCount: number;
+  likeItCount: number;
+  representImage: string | null;
+  writeDateTimestamp: number;
+  newArticle: boolean;
+  attachImage: boolean;
+  attachMovie: boolean;
+  attachFile: boolean;
+  openArticle: boolean;
+}
+
 function HomeEmbed() {
-  const [iframeError, setIframeError] = useState(false);
-  const [iframeLoaded, setIframeLoaded] = useState(false);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [page, setPage] = useState(1);
 
-  const handleIframeLoad = useCallback(() => {
-    setIframeLoaded(true);
-    // iframe이 로드됐지만 cross-origin 정책으로 접근 불가한 경우 체크
-    try {
-      const doc = iframeRef.current?.contentDocument;
-      // contentDocument 접근이 가능하면 same-origin → 정상 로드가 아닐 수 있음 (에러페이지)
-      if (doc && doc.body && doc.body.innerHTML.length < 100) {
-        setIframeError(true);
-      }
-    } catch {
-      // cross-origin이면 접근 불가 → 정상적으로 외부 페이지가 로드된 것
+  const { data, isLoading, isFetching } = useQuery<{
+    articles: CafeArticle[];
+    page: number;
+    perPage: number;
+    totalArticles: number;
+  }>({
+    queryKey: ["/api/cafe/articles", page],
+    queryFn: async () => {
+      const res = await fetch(`/api/cafe/articles?page=${page}&perPage=20`);
+      if (!res.ok) throw new Error("카페 글 목록을 불러올 수 없습니다.");
+      return res.json();
+    },
+    staleTime: 2 * 60 * 1000, // 2분
+  });
+
+  const articles = data?.articles || [];
+  const totalArticles = data?.totalArticles || 0;
+  const totalPages = Math.ceil(totalArticles / 20);
+
+  const formatDate = (timestamp: number) => {
+    const date = new Date(timestamp);
+    const now = new Date();
+    const isToday = date.toDateString() === now.toDateString();
+    if (isToday) {
+      return date.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
     }
-  }, []);
+    return date.toLocaleDateString("ko-KR", { month: "2-digit", day: "2-digit" });
+  };
 
-  const handleIframeError = useCallback(() => {
-    setIframeError(true);
-    setIframeLoaded(true);
-  }, []);
+  const openArticle = (articleId: number) => {
+    window.open(
+      `https://cafe.naver.com/lifefit/${articleId}`,
+      "_blank",
+      "noopener,noreferrer"
+    );
+  };
 
-  if (iframeError) {
+  if (isLoading) {
     return (
-      <Card className="overflow-hidden">
-        <CardContent className="py-16 text-center">
-          <Globe className="w-16 h-16 mx-auto text-primary/20 mb-4" />
-          <h3 className="text-lg font-semibold mb-2">Life Fitness 네이버 카페</h3>
-          <p className="text-sm text-muted-foreground mb-6">
-            보안 정책으로 페이지 내 표시가 제한됩니다. 아래 버튼을 클릭하여 방문하세요.
-          </p>
-          <Button
-            onClick={() => window.open(CAFE_URL, "_blank", "noopener,noreferrer")}
-            className="gap-2"
-          >
-            <ExternalLink className="w-4 h-4" />
-            네이버 카페 열기
-          </Button>
+      <Card>
+        <CardContent className="py-20 text-center">
+          <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-2" />
+          <p className="text-sm text-muted-foreground">카페 글 목록 로딩 중...</p>
         </CardContent>
       </Card>
     );
@@ -326,10 +349,18 @@ function HomeEmbed() {
 
   return (
     <Card className="overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-2 bg-muted/50 border-b">
-        <p className="text-xs text-muted-foreground">
-          ⚠️ 로그인 등 일부 기능은 임베드 화면에서 제한됩니다.
-        </p>
+      {/* 헤더 */}
+      <div className="flex items-center justify-between px-4 py-3 border-b bg-muted/30">
+        <div className="flex items-center gap-2">
+          <img
+            src="https://ssl.pstatic.net/static/cafe/cafe_pc/default/cafe_logo_img.png"
+            alt="카페"
+            className="w-5 h-5"
+          />
+          <h3 className="font-semibold text-sm">Life Fitness 전체글보기</h3>
+          <span className="text-xs text-muted-foreground">({totalArticles})</span>
+          {isFetching && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
+        </div>
         <Button
           variant="outline"
           size="sm"
@@ -337,30 +368,130 @@ function HomeEmbed() {
           className="gap-1.5 text-xs h-7"
         >
           <ExternalLink className="w-3 h-3" />
-          새 탭에서 열기
+          카페 열기
         </Button>
       </div>
-      <CardContent className="p-0 relative">
-        {!iframeLoaded && (
-          <div className="absolute inset-0 flex items-center justify-center bg-background z-10">
-            <div className="text-center">
-              <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-2" />
-              <p className="text-sm text-muted-foreground">카페 페이지 로딩 중...</p>
-            </div>
+
+      {/* 글 목록 */}
+      <div className="divide-y">
+        {articles.length === 0 ? (
+          <div className="py-16 text-center text-muted-foreground">
+            게시글이 없습니다.
           </div>
+        ) : (
+          articles.map((article) => (
+            <button
+              key={article.articleId}
+              onClick={() => openArticle(article.articleId)}
+              className="w-full text-left px-4 py-3 hover:bg-muted/40 transition-colors flex gap-3"
+            >
+              {/* 썸네일 */}
+              {article.representImage && (
+                <div className="flex-shrink-0 w-16 h-16 rounded-md overflow-hidden bg-muted">
+                  <img
+                    src={article.representImage}
+                    alt=""
+                    className="w-full h-full object-cover"
+                    loading="lazy"
+                  />
+                </div>
+              )}
+              {/* 본문 */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium truncate max-w-[80px]">
+                    {article.menuName}
+                  </span>
+                  {article.newArticle && (
+                    <span className="text-[10px] px-1 py-0.5 rounded bg-red-500 text-white font-bold">N</span>
+                  )}
+                </div>
+                <h4 className="text-sm font-medium line-clamp-1 mb-1">
+                  {article.subject}
+                </h4>
+                <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                  <span>{article.writerNickname}</span>
+                  <span className="opacity-40">|</span>
+                  <span>{formatDate(article.writeDateTimestamp)}</span>
+                  <span className="opacity-40">|</span>
+                  <span>조회 {article.readCount}</span>
+                  {article.commentCount > 0 && (
+                    <>
+                      <span className="opacity-40">|</span>
+                      <span className="text-primary">댓글 {article.commentCount}</span>
+                    </>
+                  )}
+                  {article.likeItCount > 0 && (
+                    <>
+                      <span className="opacity-40">|</span>
+                      <span className="text-red-400">♥ {article.likeItCount}</span>
+                    </>
+                  )}
+                </div>
+              </div>
+            </button>
+          ))
         )}
-        <iframe
-          ref={iframeRef}
-          src={CAFE_URL}
-          title="Life Fitness 네이버 카페"
-          className="w-full border-0"
-          style={{ height: "calc(100vh - 220px)", minHeight: "600px" }}
-          sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"
-          referrerPolicy="no-referrer"
-          onLoad={handleIframeLoad}
-          onError={handleIframeError}
-        />
-      </CardContent>
+      </div>
+
+      {/* 페이지네이션 */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-1 py-3 border-t bg-muted/20">
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={page <= 1 || isFetching}
+            onClick={() => setPage(1)}
+            className="h-8 w-8 p-0 text-xs"
+          >
+            «
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={page <= 1 || isFetching}
+            onClick={() => setPage(p => Math.max(1, p - 1))}
+            className="h-8 w-8 p-0 text-xs"
+          >
+            ‹
+          </Button>
+          {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+            const startPage = Math.max(1, Math.min(page - 2, totalPages - 4));
+            const p = startPage + i;
+            if (p > totalPages) return null;
+            return (
+              <Button
+                key={p}
+                variant={p === page ? "default" : "ghost"}
+                size="sm"
+                onClick={() => setPage(p)}
+                disabled={isFetching}
+                className="h-8 w-8 p-0 text-xs"
+              >
+                {p}
+              </Button>
+            );
+          })}
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={page >= totalPages || isFetching}
+            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+            className="h-8 w-8 p-0 text-xs"
+          >
+            ›
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={page >= totalPages || isFetching}
+            onClick={() => setPage(totalPages)}
+            className="h-8 w-8 p-0 text-xs"
+          >
+            »
+          </Button>
+        </div>
+      )}
     </Card>
   );
 }
