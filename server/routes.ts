@@ -1371,6 +1371,7 @@ ${newsSummary}`;
 
   // ===== 네이버 카페 API (관리자 전용) =====
   const CAFE_ID = "31316681";
+  const CAFE_URL_ID = "lifefit"; // 카페 Open API 글쓰기용 URL 식별자
   const CAFE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     "Referer": "https://cafe.naver.com/lifefit",
@@ -1901,7 +1902,7 @@ ${newsSummary}`;
     }
     const state = Math.random().toString(36).substring(2, 15);
     (req.session as any).naverOAuthState = state;
-    const authUrl = `https://nid.naver.com/oauth2.0/authorize?response_type=code&client_id=${NAVER_CLIENT_ID}&redirect_uri=${encodeURIComponent(NAVER_REDIRECT_URI)}&state=${state}`;
+    const authUrl = `https://nid.naver.com/oauth2.0/authorize?response_type=code&client_id=${NAVER_CLIENT_ID}&redirect_uri=${encodeURIComponent(NAVER_REDIRECT_URI)}&state=${state}&scope=cafe_article_write`;
     return res.json({ authUrl });
   });
 
@@ -2072,7 +2073,7 @@ ${newsSummary}`;
         cleanContent += '</div>';
       }
 
-      console.log(`[Cafe Write] Posting "${subject}" to menu ${menuId}, content length: ${contentBytes} bytes`);
+      console.log(`[Cafe Write] Posting "${subject}" to cafe=${CAFE_URL_ID} menu=${menuId}, content length: ${contentBytes} bytes`);
 
       // multipart/form-data 형식으로 전송
       const FormData = (await import("form-data")).default;
@@ -2081,7 +2082,7 @@ ${newsSummary}`;
       formData.append("content", cleanContent);
 
       const response = await axios.post(
-        `https://openapi.naver.com/v1/cafe/${CAFE_ID}/menu/${menuId}/articles`,
+        `https://openapi.naver.com/v1/cafe/${CAFE_URL_ID}/menu/${menuId}/articles`,
         formData,
         {
           headers: {
