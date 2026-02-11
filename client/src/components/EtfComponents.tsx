@@ -265,7 +265,7 @@ ${htmlAnalysis}
     sections.push(`<hr/>
 <p style="color:#aaa;font-size:11px;">* 본 보고서는 AI(Gemini)가 실시간 데이터를 기반으로 자동 생성한 내용을 포함하고 있습니다.<br/>데이터 출처: 네이버 금융, FnGuide, 한국투자증권 API</p>`);
 
-    const fullContent = sections.join("\n");
+    const fullContent = `<div style="font-size:19px;line-height:1.8;">${sections.join("\n")}</div>`;
 
     cafeWriteMutation.mutate({ subject: cafePostTitle, content: fullContent, menuId: cafeMenuId });
   };
