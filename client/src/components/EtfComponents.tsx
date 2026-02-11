@@ -194,6 +194,11 @@ export default function EtfComponents() {
     const today = new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric" });
     setCafePostTitle(`[ETF 리포트] ${today} 실시간 상승 ETF & AI 분석`);
     setCafeComment("");
+    // 기본 게시판: "시황" 또는 "매크로" 포함된 게시판 자동 선택
+    if (!cafeMenuId && cafeMenusData?.menus) {
+      const defaultMenu = cafeMenusData.menus.find(m => m.menuName.includes("시황") || m.menuName.includes("매크로"));
+      if (defaultMenu) setCafeMenuId(String(defaultMenu.menuId));
+    }
     setCafePostDialogOpen(true);
   };
 
@@ -1179,7 +1184,7 @@ ${htmlAnalysis}
                 <SelectTrigger>
                   <SelectValue placeholder="게시판을 선택하세요" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm">
                   {cafeMenusData?.menus?.map((menu) => (
                     <SelectItem key={menu.menuId} value={String(menu.menuId)}>
                       {menu.menuName}
