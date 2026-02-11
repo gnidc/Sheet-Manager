@@ -28,10 +28,13 @@ async function callAI(prompt: string): Promise<string> {
       try {
         const res = await axios.post(url, {
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.7, maxOutputTokens: 2000 },
-        }, { timeout: 60000 });
+          generationConfig: { maxOutputTokens: 8192 },
+        }, { timeout: 90000 });
         
-        const content = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        // gemini-2.5-flash는 thinking 파트와 text 파트를 분리하여 반환할 수 있음
+        const parts = res.data?.candidates?.[0]?.content?.parts || [];
+        const content = parts.filter((p: any) => p.text && !p.thought).map((p: any) => p.text).join("\n") 
+          || parts.map((p: any) => p.text).filter(Boolean).pop();
         if (!content) throw new Error("AI 응답이 비어있습니다.");
         return content;
       } catch (err: any) {
@@ -1270,29 +1273,20 @@ export async function registerRoutes(
   // ===== ETF 상승 트렌드 AI 분석 =====
   app.post("/api/etf/analyze-trend", async (req, res) => {
     try {
+      const userPrompt = (req.body.prompt as string) || "";
 
-      // 1) ETF 상승 데이터 수집
+      // 1) ETF 상승/하락 데이터 수집
       const allEtfs = await getEtfFullList();
       const EXCLUDE_KEYWORDS = ["레버리지", "인버스", "2X", "bear", "BEAR", "곱버스", "숏", "SHORT", "울트라"];
-      const filtered = allEtfs.filter((etf) => {
-        return !EXCLUDE_KEYWORDS.some((kw) => etf.name.includes(kw));
-      });
-      const risingEtfs = filtered
-        .filter((etf) => etf.changeRate > 0)
-        .sort((a, b) => b.changeRate - a.changeRate)
-        .slice(0, 20);
-      
-      const fallingEtfs = filtered
-        .filter((etf) => etf.changeRate < 0)
-        .sort((a, b) => a.changeRate - b.changeRate)
-        .slice(0, 10);
+      const filtered = allEtfs.filter((etf) => !EXCLUDE_KEYWORDS.some((kw) => etf.name.includes(kw)));
+      const risingEtfs = filtered.filter((etf) => etf.changeRate > 0).sort((a, b) => b.changeRate - a.changeRate).slice(0, 20);
+      const fallingEtfs = filtered.filter((etf) => etf.changeRate < 0).sort((a, b) => a.changeRate - b.changeRate).slice(0, 10);
 
       // 2) 뉴스 데이터 수집
       let newsData: string[] = [];
       try {
         const newsRes = await axios.get("https://finance.naver.com/news/news_list.naver?mode=RANK&page=1", {
-          headers: { "User-Agent": "Mozilla/5.0" },
-          timeout: 5000,
+          headers: { "User-Agent": "Mozilla/5.0" }, timeout: 5000,
         });
         const $ = cheerio.load(newsRes.data);
         $(".block1 li a, .block2 li a").each((_, el) => {
@@ -1308,8 +1302,7 @@ export async function registerRoutes(
       let marketInfo = "";
       try {
         const marketRes = await axios.get("https://finance.naver.com/sise/", {
-          headers: { "User-Agent": "Mozilla/5.0" },
-          timeout: 5000,
+          headers: { "User-Agent": "Mozilla/5.0" }, timeout: 5000,
         });
         const $ = cheerio.load(marketRes.data);
         const kospi = $("#KOSPI_now").text().trim();
@@ -1320,48 +1313,44 @@ export async function registerRoutes(
         console.error("[Analyze] Market data fetch failed:", (e as Error).message);
       }
 
-      // 4) AI 프롬프트 구성
+      // 4) 수집 데이터를 컨텍스트로 구성
+      const today = new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric", weekday: "long" });
       const etfSummary = risingEtfs.map((e, i) => 
         `${i+1}. ${e.name}(${e.code}) 현재가:${e.nowVal.toLocaleString()} 등락률:+${e.changeRate}% 시총:${e.marketCap}억 거래량:${e.quant.toLocaleString()}`
       ).join("\n");
-
       const fallingSummary = fallingEtfs.map((e, i) => 
         `${i+1}. ${e.name}(${e.code}) 등락률:${e.changeRate}%`
       ).join("\n");
+      const newsSummary = newsData.length > 0 ? newsData.map((n, i) => `${i+1}. ${n}`).join("\n") : "뉴스 데이터 없음";
 
-      const newsSummary = newsData.length > 0 
-        ? newsData.map((n, i) => `${i+1}. ${n}`).join("\n") 
-        : "뉴스 데이터 없음";
-
-      const today = new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric", weekday: "long" });
-
-      const prompt = `당신은 한국 금융시장 전문 애널리스트입니다. 아래 데이터를 기반으로 오늘의 ETF 상승 트렌드를 분석해주세요.
-
+      const dataContext = `[실시간 수집 데이터]
 📅 날짜: ${today}
 📊 시장 현황: ${marketInfo || "데이터 없음"}
 
-📈 실시간 상승 ETF TOP 20:
+📈 실시간 상승 ETF TOP 20 (레버리지·인버스 제외):
 ${etfSummary}
 
 📉 하락 ETF TOP 10:
 ${fallingSummary}
 
-📰 주요 뉴스:
-${newsSummary}
+📰 네이버 실시간 주요 뉴스 (https://stock.naver.com/news):
+${newsSummary}`;
 
-다음 형식으로 분석 보고서를 작성해주세요 (30줄 내외, 한국어):
+      // 5) 최종 프롬프트 = 시스템 역할 + 데이터 + 사용자 요청
+      const systemRole = `당신은 한국 금융시장 전문 애널리스트입니다. 아래 실시간 데이터를 기반으로 분석해주세요. 반드시 30줄 이상, 한국어로 작성하세요. 구체적인 ETF명과 수치를 인용하세요.`;
 
+      const defaultInstruction = `위 데이터를 참고하여 다음을 포함한 분석 보고서를 작성하세요:
 1. **📊 오늘의 시장 개요** (3-4줄): 전반적인 시장 분위기와 주요 지수 동향
 2. **🔥 주요 상승 섹터/테마 분석** (8-10줄): 상승 ETF들의 공통 테마, 섹터별 분류, 상승 원인 분석
 3. **📰 뉴스·매크로 연관 분석** (5-6줄): 뉴스와 ETF 상승의 연관성
 4. **📉 하락 섹터 동향** (3-4줄): 하락하는 섹터와 원인
-5. **💡 투자 시사점 및 주의사항** (5-6줄): 단기 투자 전략 제안 및 리스크 요인
+5. **💡 투자 시사점 및 주의사항** (5-6줄): 단기 투자 전략 제안 및 리스크 요인`;
 
-각 섹션은 제목을 포함하고, 구체적인 ETF명과 수치를 인용하여 작성해주세요.`;
+      const finalPrompt = `${systemRole}\n\n${dataContext}\n\n[분석 요청]\n${userPrompt || defaultInstruction}`;
 
-      // 5) AI API 호출
-      console.log("[Analyze] Calling AI API...");
-      const analysis = await callAI(prompt);
+      // 6) AI API 호출
+      console.log("[Analyze] Calling AI API with prompt length:", finalPrompt.length);
+      const analysis = await callAI(finalPrompt);
       console.log("[Analyze] Analysis generated successfully");
 
       res.json({ 

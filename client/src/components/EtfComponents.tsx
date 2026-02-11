@@ -1,8 +1,9 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   Loader2,
@@ -23,6 +24,9 @@ import {
   Flame,
   BrainCircuit,
   FileText,
+  Play,
+  X,
+  Send,
 } from "lucide-react";
 
 type SortField = "weight" | "changePercent" | null;
@@ -106,19 +110,33 @@ export default function EtfComponents() {
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [chartPeriod, setChartPeriod] = useState<"day" | "week" | "month" | "year">("day");
   const [chartType, setChartType] = useState<"candle" | "area">("candle");
+  const [showAnalysisPanel, setShowAnalysisPanel] = useState(false);
+  const [analysisPrompt, setAnalysisPrompt] = useState(
+    `실시간 ETF 상승리스트, 네이버 실시간 뉴스(https://stock.naver.com/news), 네이버 마켓동향(https://stock.naver.com/market/stock/kr)을 참고하여 다음을 포함한 분석 보고서를 30줄 이상으로 요약 정리해줘:\n\n1. 오늘의 시장 개요 (코스피/코스닥 지수 동향)\n2. 주요 상승 섹터/테마 분석\n3. 뉴스·매크로 연관 분석\n4. 하락 섹터 동향\n5. 투자 시사점 및 주의사항`
+  );
   const [analysisResult, setAnalysisResult] = useState<{
     analysis: string;
     analyzedAt: string;
     dataPoints?: { risingCount: number; fallingCount: number; newsCount: number; market: string };
   } | null>(null);
+  const analysisSectionRef = useRef<HTMLDivElement>(null);
+
+  // AI 분석 섹션으로 스크롤
+  const scrollToAnalysis = useCallback(() => {
+    setShowAnalysisPanel(true);
+    setTimeout(() => {
+      analysisSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 100);
+  }, []);
 
   // ETF 트렌드 AI 분석
   const analyzeMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (prompt: string) => {
       const res = await fetch("/api/etf/analyze-trend", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
+        body: JSON.stringify({ prompt }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -284,16 +302,12 @@ export default function EtfComponents() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => analyzeMutation.mutate()}
-                disabled={analyzeMutation.isPending || topGainers.length === 0}
+                onClick={scrollToAnalysis}
+                disabled={topGainers.length === 0}
                 className="h-7 text-xs gap-1"
               >
-                {analyzeMutation.isPending ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <BrainCircuit className="w-3.5 h-3.5" />
-                )}
-                {analyzeMutation.isPending ? "분석 중..." : "AI 분석"}
+                <BrainCircuit className="w-3.5 h-3.5" />
+                AI 분석
               </Button>
               <Button
                 variant="ghost"
@@ -785,85 +799,165 @@ export default function EtfComponents() {
         </>
       )}
 
-      {/* ===== AI 분석 결과 ===== */}
-      {analyzeMutation.isPending && (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12 gap-3">
-            <Loader2 className="w-8 h-8 animate-spin text-primary" />
-            <p className="text-sm text-muted-foreground">ETF 상승 트렌드를 AI가 분석하고 있습니다...</p>
-            <p className="text-xs text-muted-foreground">상승/하락 ETF + 뉴스 + 매크로 데이터 수집 → AI 분석 중</p>
-          </CardContent>
-        </Card>
-      )}
-
-      {analyzeMutation.isError && (
-        <Card className="border-destructive/50">
-          <CardContent className="flex items-center gap-3 py-4">
-            <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0" />
-            <div>
-              <p className="text-sm font-medium text-destructive">분석 실패</p>
-              <p className="text-xs text-muted-foreground">{(analyzeMutation.error as Error)?.message}</p>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {analysisResult && !analyzeMutation.isPending && (
-        <Card className="border-primary/20 bg-primary/[0.02]">
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-lg flex items-center gap-2">
-                <FileText className="w-5 h-5 text-primary" />
-                AI 트렌드 분석 보고서
-              </CardTitle>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground flex items-center gap-1">
-                  <Clock className="w-3 h-3" />
-                  {analysisResult.analyzedAt}
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => analyzeMutation.mutate()}
-                  disabled={analyzeMutation.isPending}
-                  className="h-7 text-xs gap-1"
-                >
-                  <RefreshCw className="w-3 h-3" />
-                  재분석
-                </Button>
+      {/* ===== AI 분석 섹션 ===== */}
+      {showAnalysisPanel && (
+        <div ref={analysisSectionRef} className="space-y-4">
+          {/* 프롬프트 입력 영역 */}
+          <Card className="border-primary/30">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <BrainCircuit className="w-5 h-5 text-primary" />
+                  AI 트렌드 분석
+                </CardTitle>
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => setAnalysisResult(null)}
-                  className="h-7 text-xs"
+                  onClick={() => { setShowAnalysisPanel(false); setAnalysisResult(null); }}
+                  className="h-7 w-7 p-0"
                 >
-                  닫기
+                  <X className="w-4 h-4" />
                 </Button>
               </div>
-            </div>
-            {analysisResult.dataPoints && (
-              <div className="flex gap-3 text-xs text-muted-foreground mt-1">
-                <span>📈 상승 ETF {analysisResult.dataPoints.risingCount}개</span>
-                <span>📉 하락 ETF {analysisResult.dataPoints.fallingCount}개</span>
-                <span>📰 뉴스 {analysisResult.dataPoints.newsCount}건</span>
-                {analysisResult.dataPoints.market && <span>📊 {analysisResult.dataPoints.market}</span>}
+              <p className="text-xs text-muted-foreground">
+                실시간 ETF 상승/하락 데이터 + 네이버 뉴스 + 시장 지표를 자동 수집하여 AI가 분석합니다.
+                프롬프트를 수정하여 원하는 분석을 요청할 수 있습니다.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="relative">
+                <Textarea
+                  value={analysisPrompt}
+                  onChange={(e) => setAnalysisPrompt(e.target.value)}
+                  placeholder="분석 요청 프롬프트를 입력하세요..."
+                  className="min-h-[120px] text-sm pr-2 resize-y"
+                  disabled={analyzeMutation.isPending}
+                />
               </div>
-            )}
-          </CardHeader>
-          <CardContent>
-            <div className="prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap text-sm leading-relaxed">
-              {analysisResult.analysis.split("\n").map((line, i) => {
-                // 볼드 처리 (**text**)
-                const formattedLine = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-                if (formattedLine.includes("<strong>")) {
-                  return <p key={i} className="mb-1" dangerouslySetInnerHTML={{ __html: formattedLine }} />;
-                }
-                if (line.trim() === "") return <br key={i} />;
-                return <p key={i} className="mb-1">{line}</p>;
-              })}
-            </div>
-          </CardContent>
-        </Card>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span className="flex items-center gap-1">📈 ETF 상승/하락 데이터</span>
+                  <span>+</span>
+                  <span className="flex items-center gap-1">📰 실시간 뉴스</span>
+                  <span>+</span>
+                  <span className="flex items-center gap-1">📊 시장 지표</span>
+                  <span className="text-muted-foreground/50">→ 자동 수집</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setAnalysisPrompt(
+                      `실시간 ETF 상승리스트, 네이버 실시간 뉴스(https://stock.naver.com/news), 네이버 마켓동향(https://stock.naver.com/market/stock/kr)을 참고하여 다음을 포함한 분석 보고서를 30줄 이상으로 요약 정리해줘:\n\n1. 오늘의 시장 개요 (코스피/코스닥 지수 동향)\n2. 주요 상승 섹터/테마 분석\n3. 뉴스·매크로 연관 분석\n4. 하락 섹터 동향\n5. 투자 시사점 및 주의사항`
+                    )}
+                    disabled={analyzeMutation.isPending}
+                    className="h-8 text-xs"
+                  >
+                    <RefreshCw className="w-3 h-3 mr-1" />
+                    기본 프롬프트
+                  </Button>
+                  <Button
+                    onClick={() => analyzeMutation.mutate(analysisPrompt)}
+                    disabled={analyzeMutation.isPending || !analysisPrompt.trim()}
+                    className="h-8 gap-1.5 px-4"
+                  >
+                    {analyzeMutation.isPending ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        분석 중...
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-4 h-4" />
+                        실행
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* 분석 진행 상태 */}
+          {analyzeMutation.isPending && (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-12 gap-3">
+                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                <p className="text-sm text-muted-foreground">ETF 상승 트렌드를 AI가 분석하고 있습니다...</p>
+                <p className="text-xs text-muted-foreground">상승/하락 ETF + 뉴스 + 매크로 데이터 수집 → AI 분석 중 (30초~1분 소요)</p>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* 에러 표시 */}
+          {analyzeMutation.isError && !analyzeMutation.isPending && (
+            <Card className="border-destructive/50">
+              <CardContent className="flex items-center gap-3 py-4">
+                <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-destructive">분석 실패</p>
+                  <p className="text-xs text-muted-foreground">{(analyzeMutation.error as Error)?.message}</p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => analyzeMutation.mutate(analysisPrompt)}
+                  className="h-7 text-xs"
+                >
+                  다시 시도
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* 분석 결과 표시 */}
+          {analysisResult && !analyzeMutation.isPending && (
+            <Card className="border-primary/20 bg-primary/[0.02]">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <FileText className="w-5 h-5 text-primary" />
+                    AI 트렌드 분석 보고서
+                  </CardTitle>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground flex items-center gap-1">
+                      <Clock className="w-3 h-3" />
+                      {analysisResult.analyzedAt}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setAnalysisResult(null)}
+                      className="h-7 text-xs"
+                    >
+                      닫기
+                    </Button>
+                  </div>
+                </div>
+                {analysisResult.dataPoints && (
+                  <div className="flex flex-wrap gap-3 text-xs text-muted-foreground mt-1">
+                    <span>📈 상승 ETF {analysisResult.dataPoints.risingCount}개</span>
+                    <span>📉 하락 ETF {analysisResult.dataPoints.fallingCount}개</span>
+                    <span>📰 뉴스 {analysisResult.dataPoints.newsCount}건</span>
+                    {analysisResult.dataPoints.market && <span>📊 {analysisResult.dataPoints.market}</span>}
+                  </div>
+                )}
+              </CardHeader>
+              <CardContent>
+                <div className="prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap text-sm leading-relaxed">
+                  {analysisResult.analysis.split("\n").map((line, i) => {
+                    const formattedLine = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+                    if (formattedLine.includes("<strong>")) {
+                      return <p key={i} className="mb-1" dangerouslySetInnerHTML={{ __html: formattedLine }} />;
+                    }
+                    if (line.trim() === "") return <br key={i} />;
+                    return <p key={i} className="mb-1">{line}</p>;
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
       )}
 
       {componentData && (
