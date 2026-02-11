@@ -1109,9 +1109,79 @@ export async function registerRoutes(
     }
   });
 
-  // ETF 검색 (DB 제거됨 - 빈 결과 반환)
+  // ========== ETF 전체 목록 캐시 (네이버 금융 API) ==========
+  let etfListCache: { items: Array<{ code: string; name: string; marketCap: number; changeRate: number }>; expiry: number } | null = null;
+  const ETF_LIST_CACHE_TTL = 30 * 60 * 1000; // 30분 캐시
+
+  async function getEtfFullList() {
+    // 캐시 유효하면 반환
+    if (etfListCache && Date.now() < etfListCache.expiry) {
+      return etfListCache.items;
+    }
+
+    try {
+      const response = await axios.get(
+        "https://finance.naver.com/api/sise/etfItemList.nhn",
+        {
+          params: { etfType: 0, targetColumn: "market_sum", sortOrder: "desc" },
+          headers: { "User-Agent": "Mozilla/5.0" },
+          timeout: 15000,
+          responseType: "arraybuffer",
+        }
+      );
+
+      // EUC-KR → UTF-8 디코딩
+      const iconv = await import("iconv-lite");
+      const decoded = iconv.default.decode(Buffer.from(response.data), "euc-kr");
+      const data = JSON.parse(decoded);
+      const rawItems = data?.result?.etfItemList || [];
+
+      const items = rawItems.map((item: any) => ({
+        code: item.itemcode || "",
+        name: item.itemname || "",
+        marketCap: item.marketSum || 0,
+        changeRate: item.changeRate || 0,
+      }));
+
+      etfListCache = { items, expiry: Date.now() + ETF_LIST_CACHE_TTL };
+      console.log(`[ETF Search] Loaded ${items.length} ETFs from Naver Finance`);
+      return items;
+    } catch (err: any) {
+      console.error("[ETF Search] Failed to load ETF list:", err.message);
+      // 캐시가 만료되었어도 있으면 반환 (fallback)
+      if (etfListCache) return etfListCache.items;
+      return [];
+    }
+  }
+
+  // ETF 검색 (네이버 금융 전체 ETF 목록에서 검색)
   app.get("/api/etf/search", async (req, res) => {
-    res.json({ results: [], total: 0 });
+    try {
+      const query = (req.query.q as string || "").trim();
+      if (!query || query.length < 2) {
+        return res.status(400).json({ message: "검색어는 2자 이상 입력해주세요." });
+      }
+
+      const allEtfs = await getEtfFullList();
+      const lowerQuery = query.toLowerCase();
+
+      // 코드 또는 이름에 검색어가 포함된 ETF 필터링
+      const results = allEtfs
+        .filter((etf: any) =>
+          etf.code.includes(query) ||
+          etf.name.toLowerCase().includes(lowerQuery)
+        )
+        .slice(0, 30)
+        .map((etf: any) => ({
+          code: etf.code,
+          name: etf.name,
+        }));
+
+      res.json({ results, total: results.length });
+    } catch (error: any) {
+      console.error("Failed to search ETFs:", error);
+      res.status(500).json({ message: error.message || "ETF 검색 실패" });
+    }
   });
 
   // ========== 시장 보고서 (일일/주간/월간/연간) ==========

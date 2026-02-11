@@ -106,16 +106,16 @@ export default function EtfComponents() {
   const [sortField, setSortField] = useState<SortField>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
-  // ETF 검색
+  // ETF 검색 (네이버 금융 전체 ETF 목록에서 실시간 검색)
   const { data: searchResults, isFetching: isSearching } = useQuery<{ results: EtfSearchResult[] }>({
     queryKey: ["/api/etf/search", searchTerm],
     queryFn: async () => {
-      const res = await fetch(`/api/etf/search?q=${encodeURIComponent(searchTerm)}`, { credentials: "include" });
+      const res = await fetch(`/api/etf/search?q=${encodeURIComponent(searchTerm.trim())}`, { credentials: "include" });
       if (!res.ok) return { results: [] };
       return res.json();
     },
-    enabled: searchMode === "search" && searchTerm.length >= 2 && !/^\d{6}$/.test(searchTerm),
-    staleTime: 30 * 1000,
+    enabled: searchMode === "search" && searchTerm.trim().length >= 2 && !selectedEtfCode,
+    staleTime: 60 * 1000,
   });
 
   // ETF 구성종목 조회
@@ -144,6 +144,9 @@ export default function EtfComponents() {
     const trimmed = searchTerm.trim();
     if (/^\d{6}$/.test(trimmed)) {
       setSelectedEtfCode(trimmed);
+    } else if (combinedResults.length === 1) {
+      // 검색 결과가 1개이면 자동 선택
+      handleSelectEtf(combinedResults[0].code);
     }
   };
 
@@ -159,18 +162,26 @@ export default function EtfComponents() {
   };
 
   // 검색 결과와 인기 ETF 결합
-  const combinedResults = searchTerm.length >= 2
-    ? [
-        ...POPULAR_ETFS.filter(
-          e =>
-            e.code.includes(searchTerm) ||
-            e.name.toLowerCase().includes(searchTerm.toLowerCase())
-        ),
-        ...(searchResults?.results || [])
-          .filter(r => !POPULAR_ETFS.some(p => p.code === r.code))
-          .map(r => ({ code: r.code, name: r.name })),
-      ].slice(0, 15)
-    : [];
+  const combinedResults = useMemo(() => {
+    if (searchTerm.trim().length < 2) return [];
+    const term = searchTerm.trim().toLowerCase();
+
+    // API 검색 결과 (전체 거래소 ETF에서 검색)
+    const apiResults = (searchResults?.results || []).map((r: any) => ({
+      code: r.code,
+      name: r.name,
+    }));
+
+    // 인기 ETF 중 매칭되는 항목 (API 결과에 없는 것만)
+    const popularMatches = POPULAR_ETFS.filter(
+      e =>
+        (e.code.includes(term) || e.name.toLowerCase().includes(term)) &&
+        !apiResults.some((r: any) => r.code === e.code)
+    );
+
+    // 인기 ETF 매칭 결과를 먼저, 그 뒤에 API 결과
+    return [...popularMatches, ...apiResults].slice(0, 20);
+  }, [searchTerm, searchResults]);
 
   // 정렬 토글 핸들러: 클릭할 때마다 내림차순 ↔ 오름차순 토글
   const handleSort = (field: SortField) => {
@@ -255,9 +266,11 @@ export default function EtfComponents() {
                 onChange={(e) => {
                   setSearchTerm(e.target.value);
                   setSearchMode("search");
+                  // 검색어 변경 시 선택 해제 (새로운 검색 가능)
+                  if (selectedEtfCode) setSelectedEtfCode("");
                 }}
                 onKeyDown={handleKeyDown}
-                placeholder="ETF 코드 (예: 069500) 또는 이름 검색"
+                placeholder="ETF 코드 (예: 069500) 또는 이름 검색 (예: KODEX, TIGER, 반도체)"
                 className="pl-9"
               />
             </div>
@@ -287,23 +300,37 @@ export default function EtfComponents() {
           </div>
 
           {/* 검색 결과 드롭다운 */}
-          {combinedResults.length > 0 && !selectedEtfCode && (
-            <div className="border rounded-lg overflow-hidden divide-y max-h-64 overflow-y-auto">
-              {combinedResults.map((item) => (
-                <button
-                  key={item.code}
-                  onClick={() => handleSelectEtf(item.code)}
-                  className="w-full text-left px-4 py-3 hover:bg-muted/50 transition-colors flex items-center justify-between"
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs font-mono text-muted-foreground bg-muted px-2 py-0.5 rounded">
-                      {item.code}
-                    </span>
-                    <span className="font-medium text-sm">{item.name}</span>
-                  </div>
-                  <ArrowRight className="w-4 h-4 text-muted-foreground" />
-                </button>
-              ))}
+          {!selectedEtfCode && searchTerm.trim().length >= 2 && (
+            <div className="border rounded-lg overflow-hidden max-h-72 overflow-y-auto">
+              {isSearching && (
+                <div className="flex items-center gap-2 px-4 py-3 text-sm text-muted-foreground">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  ETF 검색 중...
+                </div>
+              )}
+              {combinedResults.length > 0 ? (
+                <div className="divide-y">
+                  {combinedResults.map((item) => (
+                    <button
+                      key={item.code}
+                      onClick={() => handleSelectEtf(item.code)}
+                      className="w-full text-left px-4 py-3 hover:bg-muted/50 transition-colors flex items-center justify-between"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs font-mono text-muted-foreground bg-muted px-2 py-0.5 rounded">
+                          {item.code}
+                        </span>
+                        <span className="font-medium text-sm">{item.name}</span>
+                      </div>
+                      <ArrowRight className="w-4 h-4 text-muted-foreground" />
+                    </button>
+                  ))}
+                </div>
+              ) : !isSearching ? (
+                <div className="px-4 py-3 text-sm text-muted-foreground text-center">
+                  검색 결과가 없습니다
+                </div>
+              ) : null}
             </div>
           )}
 
