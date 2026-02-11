@@ -1204,6 +1204,7 @@ export async function registerRoutes(
           quant: etf.quant,
           amount: etf.amount,
           marketCap: etf.marketCap,
+          nav: etf.nav,
         }));
 
       res.json({ items: rising, updatedAt: new Date().toLocaleString("ko-KR") });

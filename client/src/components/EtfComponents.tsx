@@ -72,6 +72,7 @@ interface TopGainerEtf {
   quant: number;
   amount: number;
   marketCap: number;
+  nav: number;
 }
 
 function getChangeColor(sign?: string): string {
@@ -293,7 +294,8 @@ export default function EtfComponents() {
                     <TableHead className="text-right w-[80px]">등락률</TableHead>
                     <TableHead className="text-right w-[80px]">전일대비</TableHead>
                     <TableHead className="text-right w-[100px] hidden sm:table-cell">거래량</TableHead>
-                    <TableHead className="text-right w-[100px] hidden md:table-cell">거래대금(억)</TableHead>
+                    <TableHead className="text-right w-[90px] hidden md:table-cell">시가총액(억)</TableHead>
+                    <TableHead className="text-right w-[80px] hidden md:table-cell">순자산(NAV)</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -334,7 +336,10 @@ export default function EtfComponents() {
                         {etf.quant.toLocaleString()}
                       </TableCell>
                       <TableCell className="text-right tabular-nums text-sm text-muted-foreground hidden md:table-cell">
-                        {(etf.amount / 100000000).toFixed(0)}
+                        {etf.marketCap.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-sm text-muted-foreground hidden md:table-cell">
+                        {etf.nav.toLocaleString()}
                       </TableCell>
                     </TableRow>
                   ))}
