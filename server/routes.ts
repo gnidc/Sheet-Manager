@@ -2073,7 +2073,7 @@ ${newsSummary}`;
         cleanContent += '</div>';
       }
 
-      console.log(`[Cafe Write] Posting "${subject}" to cafe=${CAFE_URL_ID} menu=${menuId}, content length: ${contentBytes} bytes`);
+      console.log(`[Cafe Write] Posting "${subject}" to cafe=${CAFE_ID} menu=${menuId}, content length: ${contentBytes} bytes`);
 
       // multipart/form-data 형식으로 전송
       const FormData = (await import("form-data")).default;
@@ -2082,7 +2082,7 @@ ${newsSummary}`;
       formData.append("content", cleanContent);
 
       const response = await axios.post(
-        `https://openapi.naver.com/v1/cafe/${CAFE_URL_ID}/menu/${menuId}/articles`,
+        `https://openapi.naver.com/v1/cafe/${CAFE_ID}/menu/${menuId}/articles`,
         formData,
         {
           headers: {
