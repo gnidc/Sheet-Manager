@@ -143,6 +143,7 @@ export default function EtfComponents() {
   const [cafePostDialogOpen, setCafePostDialogOpen] = useState(false);
   const [cafeMenuId, setCafeMenuId] = useState("");
   const [cafePostTitle, setCafePostTitle] = useState("");
+  const [cafeComment, setCafeComment] = useState("");
   const analysisSectionRef = useRef<HTMLDivElement>(null);
 
   // 카페 게시판 목록 (admin만)
@@ -190,29 +191,86 @@ export default function EtfComponents() {
 
   // 카페 전송 핸들러
   const handleCafePost = () => {
-    if (!analysisResult) return;
-    // 기본 제목 설정
     const today = new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric" });
-    setCafePostTitle(`[AI 분석] ${today} ETF 시장 트렌드 보고서`);
+    setCafePostTitle(`[ETF 리포트] ${today} 실시간 상승 ETF & AI 분석`);
+    setCafeComment("");
     setCafePostDialogOpen(true);
   };
 
   const submitCafePost = () => {
-    if (!cafePostTitle.trim() || !cafeMenuId || !analysisResult) {
+    if (!cafePostTitle.trim() || !cafeMenuId) {
       toast({ title: "입력 오류", description: "제목과 게시판을 선택해주세요.", variant: "destructive" });
       return;
     }
-    // 분석 결과를 HTML로 변환
-    const htmlContent = analysisResult.analysis
-      .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
-      .replace(/\n/g, '<br/>');
-    const fullContent = `<div style="font-size:14px;line-height:1.8;">
-<p style="color:#888;font-size:12px;">📅 분석 시간: ${analysisResult.analyzedAt} | 📈 상승 ETF ${analysisResult.dataPoints?.risingCount || 0}개 | 📉 하락 ETF ${analysisResult.dataPoints?.fallingCount || 0}개 | 📰 뉴스 ${analysisResult.dataPoints?.newsCount || 0}건 | 📊 ${analysisResult.dataPoints?.market || ""}</p>
-<hr/>
-${htmlContent}
-<hr/>
-<p style="color:#aaa;font-size:11px;">※ AI(Gemini)가 실시간 데이터를 기반으로 자동 생성한 보고서입니다.</p>
-</div>`;
+
+    const now = new Date().toLocaleString("ko-KR");
+    let sections: string[] = [];
+
+    // 0) Comment (개인 의견) — 제일 상단
+    if (cafeComment.trim()) {
+      sections.push(`<div style="background:#fffbe6;border-left:4px solid #f5a623;padding:12px 16px;margin-bottom:16px;border-radius:4px;">
+<p style="font-weight:bold;color:#b8860b;margin:0 0 6px 0;">💬 *Comment</p>
+<p style="margin:0;font-size:14px;line-height:1.7;white-space:pre-wrap;">${cafeComment.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br/>')}</p>
+</div>`);
+    }
+
+    // 1) 실시간 상승 ETF 리스트
+    if (topGainers.length > 0) {
+      let etfRows = topGainers.map((etf, i) =>
+        `<tr style="border-bottom:1px solid #eee;">
+          <td style="padding:4px 8px;text-align:center;font-weight:bold;${i < 3 ? 'color:#e67e22;' : ''}">${i + 1}</td>
+          <td style="padding:4px 8px;"><b>${etf.name}</b> <span style="color:#999;font-size:11px;">${etf.code}</span></td>
+          <td style="padding:4px 8px;text-align:right;">${etf.nowVal.toLocaleString()}원</td>
+          <td style="padding:4px 8px;text-align:right;color:red;font-weight:bold;">+${etf.changeRate.toFixed(2)}%</td>
+          <td style="padding:4px 8px;text-align:right;color:#999;">${etf.quant.toLocaleString()}</td>
+        </tr>`
+      ).join("");
+
+      sections.push(`<div style="margin-bottom:20px;">
+<h3 style="color:#e67e22;border-bottom:2px solid #e67e22;padding-bottom:6px;">🔥 실시간 상승 ETF TOP ${topGainers.length} (레버리지·인버스 제외)</h3>
+<p style="color:#888;font-size:12px;">기준시간: ${topGainersData?.updatedAt || now}</p>
+<table style="width:100%;border-collapse:collapse;font-size:13px;">
+<tr style="background:#f5f5f5;font-weight:bold;">
+  <th style="padding:6px 8px;text-align:center;">#</th>
+  <th style="padding:6px 8px;">ETF명</th>
+  <th style="padding:6px 8px;text-align:right;">현재가</th>
+  <th style="padding:6px 8px;text-align:right;">등락률</th>
+  <th style="padding:6px 8px;text-align:right;">거래량</th>
+</tr>
+${etfRows}
+</table>
+</div>`);
+    }
+
+    // 2) 선택된 ETF 차트
+    if (selectedEtfCode) {
+      const chartUrl = `https://ssl.pstatic.net/imgfinance/chart/item/${chartType}/${chartPeriod}/${selectedEtfCode}.png`;
+      const etfName = componentData?.etfName || selectedEtfCode;
+      sections.push(`<div style="margin-bottom:20px;">
+<h3 style="color:#2980b9;border-bottom:2px solid #2980b9;padding-bottom:6px;">📈 ${etfName} 차트</h3>
+<p><img src="${chartUrl}" alt="${etfName} 차트" style="max-width:100%;border-radius:8px;" /></p>
+</div>`);
+    }
+
+    // 3) AI 분석 결과
+    if (analysisResult) {
+      const htmlAnalysis = analysisResult.analysis
+        .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
+        .replace(/\n/g, '<br/>');
+      sections.push(`<div style="margin-bottom:20px;">
+<h3 style="color:#8e44ad;border-bottom:2px solid #8e44ad;padding-bottom:6px;">🧠 AI 트렌드 분석 보고서</h3>
+<p style="color:#888;font-size:12px;">📅 분석 시간: ${analysisResult.analyzedAt} | 📈 상승 ${analysisResult.dataPoints?.risingCount || 0}개 | 📉 하락 ${analysisResult.dataPoints?.fallingCount || 0}개 | 📰 뉴스 ${analysisResult.dataPoints?.newsCount || 0}건 | 📊 ${analysisResult.dataPoints?.market || ""}</p>
+<div style="font-size:14px;line-height:1.8;">
+${htmlAnalysis}
+</div>
+</div>`);
+    }
+
+    // Footer
+    sections.push(`<hr style="border:none;border-top:1px solid #ddd;margin:16px 0;"/>
+<p style="color:#aaa;font-size:11px;">※ 본 보고서는 AI(Gemini)가 실시간 데이터를 기반으로 자동 생성한 내용을 포함하고 있습니다.<br/>데이터 출처: 네이버 금융 · FnGuide · 한국투자증권 API</p>`);
+
+    const fullContent = `<div style="font-family:'Malgun Gothic',sans-serif;font-size:14px;line-height:1.8;">\n${sections.join("\n")}\n</div>`;
 
     cafeWriteMutation.mutate({ subject: cafePostTitle, content: fullContent, menuId: cafeMenuId });
   };
@@ -397,16 +455,32 @@ ${htmlContent}
                 </span>
               )}
               {isAdmin && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={scrollToAnalysis}
-                  disabled={topGainers.length === 0}
-                  className="h-7 text-xs gap-1"
-                >
-                  <BrainCircuit className="w-3.5 h-3.5" />
-                  AI 분석
-                </Button>
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={scrollToAnalysis}
+                    disabled={topGainers.length === 0}
+                    className="h-7 text-xs gap-1"
+                  >
+                    <BrainCircuit className="w-3.5 h-3.5" />
+                    AI 분석
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleCafePost}
+                    disabled={topGainers.length === 0 || cafeWriteMutation.isPending}
+                    className="h-7 text-xs gap-1 border-green-300 text-green-700 hover:bg-green-50"
+                  >
+                    {cafeWriteMutation.isPending ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Upload className="w-3.5 h-3.5" />
+                    )}
+                    카페 전송
+                  </Button>
+                </>
               )}
               <Button
                 variant="ghost"
@@ -1046,20 +1120,6 @@ ${htmlContent}
                       {analysisResult.analyzedAt}
                     </span>
                     <Button
-                      variant="default"
-                      size="sm"
-                      onClick={handleCafePost}
-                      disabled={cafeWriteMutation.isPending}
-                      className="h-7 text-xs gap-1 bg-green-600 hover:bg-green-700"
-                    >
-                      {cafeWriteMutation.isPending ? (
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                      ) : (
-                        <Upload className="w-3 h-3" />
-                      )}
-                      카페 전송
-                    </Button>
-                    <Button
                       variant="ghost"
                       size="sm"
                       onClick={() => { setAnalysisResult(null); try { localStorage.removeItem("etf_analysis_result"); } catch {} }}
@@ -1097,11 +1157,11 @@ ${htmlContent}
 
       {/* ===== 카페 전송 다이얼로그 ===== */}
       <Dialog open={cafePostDialogOpen} onOpenChange={setCafePostDialogOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Upload className="w-5 h-5 text-green-600" />
-              네이버 카페에 분석 보고서 전송
+              네이버 카페에 ETF 리포트 전송
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 mt-2">
@@ -1129,11 +1189,46 @@ ${htmlContent}
               </Select>
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-muted-foreground">전송 내용 미리보기</label>
-              <div className="text-xs text-muted-foreground bg-muted/50 rounded-md p-3 max-h-[200px] overflow-y-auto">
-                {analysisResult?.analysis
-                  ? analysisResult.analysis.substring(0, 500) + (analysisResult.analysis.length > 500 ? "..." : "")
-                  : "분석 결과 없음"}
+              <label className="text-sm font-medium flex items-center gap-1">
+                💬 <span className="text-amber-600">*Comment</span>
+                <span className="text-xs text-muted-foreground font-normal ml-1">(보고서 상단에 표시됩니다)</span>
+              </label>
+              <Textarea
+                value={cafeComment}
+                onChange={(e) => setCafeComment(e.target.value)}
+                placeholder="개인적인 의견이나 코멘트를 입력하세요 (선택사항)"
+                className="min-h-[80px] text-sm resize-y"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-muted-foreground">전송 내용 구성</label>
+              <div className="text-xs bg-muted/50 rounded-md p-3 space-y-1.5">
+                {cafeComment.trim() && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                    <span className="text-amber-700 font-medium">*Comment — 개인 의견</span>
+                  </div>
+                )}
+                <div className="flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-orange-500" />
+                  <span>🔥 실시간 상승 ETF TOP {topGainers.length} 리스트</span>
+                </div>
+                {selectedEtfCode && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                    <span>📈 {componentData?.etfName || selectedEtfCode} 차트</span>
+                  </div>
+                )}
+                {analysisResult && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
+                    <span>🧠 AI 트렌드 분석 보고서 ({analysisResult.analyzedAt})</span>
+                  </div>
+                )}
+                <div className="flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-gray-400" />
+                  <span className="text-muted-foreground">푸터 (데이터 출처 안내)</span>
+                </div>
               </div>
             </div>
             <div className="flex justify-end gap-2 pt-2">
