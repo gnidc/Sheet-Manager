@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Plus, ExternalLink, TrendingUp, Globe, Loader2, Star, Newspaper, Youtube, FileText, Link as LinkIcon, Trash2, Pencil, Scale, Zap, ChevronDown, Calendar, Home as HomeIcon, Bot } from "lucide-react";
+import { Plus, ExternalLink, TrendingUp, Globe, Loader2, Star, Newspaper, Youtube, FileText, Link as LinkIcon, Trash2, Pencil, Scale, Zap, ChevronDown, Calendar, Home as HomeIcon, Bot, Search, X, Eye, ChevronLeft, ChevronRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
 import { LoginDialog } from "@/components/LoginDialog";
@@ -276,13 +276,14 @@ export default function Home() {
   );
 }
 
-// ===== 홈 탭: 네이버 카페 전체글보기 =====
+// ===== 홈 탭: 네이버 카페 전체글보기 (관리자 전용) =====
 const CAFE_URL = "https://cafe.naver.com/lifefit";
 
 interface CafeArticle {
   articleId: number;
   subject: string;
   writerNickname: string;
+  menuId?: number;
   menuName: string;
   readCount: number;
   commentCount: number;
@@ -296,27 +297,118 @@ interface CafeArticle {
   openArticle: boolean;
 }
 
-function HomeEmbed() {
-  const [page, setPage] = useState(1);
+interface CafeMenu {
+  menuId: number;
+  menuName: string;
+  menuType: string;
+}
 
+interface ArticleDetail {
+  articleId: number;
+  subject: string;
+  writerNickname: string;
+  writeDate: string;
+  contentHtml: string;
+  fallbackUrl: string;
+}
+
+function HomeEmbed() {
+  const { isAdmin } = useAuth();
+  const [page, setPage] = useState(1);
+  const [selectedMenuId, setSelectedMenuId] = useState("0"); // "0" = 전체
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [isSearchMode, setIsSearchMode] = useState(false);
+  const [previewArticleId, setPreviewArticleId] = useState<number | null>(null);
+
+  // 게시판 목록 조회
+  const { data: menusData } = useQuery<{ menus: CafeMenu[] }>({
+    queryKey: ["/api/cafe/menus"],
+    queryFn: async () => {
+      const res = await fetch("/api/cafe/menus", { credentials: "include" });
+      if (!res.ok) return { menus: [] };
+      return res.json();
+    },
+    enabled: isAdmin,
+    staleTime: 10 * 60 * 1000, // 10분
+  });
+
+  // 글 목록 조회 (게시판 필터 지원)
   const { data, isLoading, isFetching } = useQuery<{
     articles: CafeArticle[];
     page: number;
     perPage: number;
     totalArticles: number;
   }>({
-    queryKey: ["/api/cafe/articles", page],
+    queryKey: ["/api/cafe/articles", page, selectedMenuId],
     queryFn: async () => {
-      const res = await fetch(`/api/cafe/articles?page=${page}&perPage=20`);
+      const params = new URLSearchParams({ page: String(page), perPage: "20" });
+      if (selectedMenuId !== "0") params.set("menuId", selectedMenuId);
+      const res = await fetch(`/api/cafe/articles?${params}`, { credentials: "include" });
       if (!res.ok) throw new Error("카페 글 목록을 불러올 수 없습니다.");
       return res.json();
     },
-    staleTime: 2 * 60 * 1000, // 2분
+    enabled: isAdmin && !isSearchMode,
+    staleTime: 2 * 60 * 1000,
   });
 
-  const articles = data?.articles || [];
-  const totalArticles = data?.totalArticles || 0;
+  // 검색 결과 조회
+  const { data: searchData, isFetching: isSearching } = useQuery<{
+    articles: CafeArticle[];
+    totalArticles: number;
+  }>({
+    queryKey: ["/api/cafe/search", searchQuery, page],
+    queryFn: async () => {
+      const params = new URLSearchParams({ q: searchQuery, page: String(page), perPage: "20" });
+      const res = await fetch(`/api/cafe/search?${params}`, { credentials: "include" });
+      if (!res.ok) throw new Error("검색에 실패했습니다.");
+      return res.json();
+    },
+    enabled: isAdmin && isSearchMode && searchQuery.length > 0,
+    staleTime: 60 * 1000,
+  });
+
+  // 글 본문 미리보기 조회
+  const { data: articleDetail, isLoading: isLoadingDetail } = useQuery<ArticleDetail>({
+    queryKey: ["/api/cafe/article", previewArticleId],
+    queryFn: async () => {
+      const res = await fetch(`/api/cafe/article/${previewArticleId}`, { credentials: "include" });
+      if (!res.ok) throw new Error("글을 불러올 수 없습니다.");
+      return res.json();
+    },
+    enabled: !!previewArticleId && isAdmin,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // admin 체크
+  if (!isAdmin) {
+    return (
+      <Card>
+        <CardContent className="py-16 text-center">
+          <Globe className="w-16 h-16 mx-auto text-muted-foreground/20 mb-4" />
+          <h3 className="text-lg font-semibold">관리자 전용 기능입니다</h3>
+          <p className="text-sm text-muted-foreground mt-2">
+            카페 전체글보기는 관리자 로그인 후 이용 가능합니다.
+          </p>
+          <Button
+            variant="outline"
+            className="mt-4 gap-2"
+            onClick={() => window.open(CAFE_URL, "_blank", "noopener,noreferrer")}
+          >
+            <ExternalLink className="w-4 h-4" />
+            네이버 카페 직접 방문
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const activeData = isSearchMode ? searchData : data;
+  const articles = activeData?.articles || [];
+  const totalArticles = activeData?.totalArticles || 0;
   const totalPages = Math.ceil(totalArticles / 20);
+  const menus = menusData?.menus || [];
+  const loading = isLoading || (isSearchMode && isSearching);
 
   const formatDate = (timestamp: number) => {
     const date = new Date(timestamp);
@@ -328,15 +420,29 @@ function HomeEmbed() {
     return date.toLocaleDateString("ko-KR", { month: "2-digit", day: "2-digit" });
   };
 
-  const openArticle = (articleId: number) => {
-    window.open(
-      `https://cafe.naver.com/lifefit/${articleId}`,
-      "_blank",
-      "noopener,noreferrer"
-    );
+  const handleSearch = () => {
+    const q = searchInput.trim();
+    if (q) {
+      setSearchQuery(q);
+      setIsSearchMode(true);
+      setPage(1);
+    }
   };
 
-  if (isLoading) {
+  const clearSearch = () => {
+    setSearchInput("");
+    setSearchQuery("");
+    setIsSearchMode(false);
+    setPage(1);
+  };
+
+  const handleMenuChange = (menuId: string) => {
+    setSelectedMenuId(menuId);
+    setPage(1);
+    if (isSearchMode) clearSearch();
+  };
+
+  if (isLoading && !isSearchMode) {
     return (
       <Card>
         <CardContent className="py-20 text-center">
@@ -348,151 +454,327 @@ function HomeEmbed() {
   }
 
   return (
-    <Card className="overflow-hidden">
-      {/* 헤더 */}
-      <div className="flex items-center justify-between px-4 py-3 border-b bg-muted/30">
-        <div className="flex items-center gap-2">
-          <img
-            src="https://ssl.pstatic.net/static/cafe/cafe_pc/default/cafe_logo_img.png"
-            alt="카페"
-            className="w-5 h-5"
-          />
-          <h3 className="font-semibold text-sm">Life Fitness 전체글보기</h3>
-          <span className="text-xs text-muted-foreground">({totalArticles})</span>
-          {isFetching && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => window.open(CAFE_URL, "_blank", "noopener,noreferrer")}
-          className="gap-1.5 text-xs h-7"
-        >
-          <ExternalLink className="w-3 h-3" />
-          카페 열기
-        </Button>
-      </div>
-
-      {/* 글 목록 */}
-      <div className="divide-y">
-        {articles.length === 0 ? (
-          <div className="py-16 text-center text-muted-foreground">
-            게시글이 없습니다.
+    <>
+      <Card className="overflow-hidden">
+        {/* 헤더 */}
+        <div className="flex items-center justify-between px-4 py-3 border-b bg-muted/30">
+          <div className="flex items-center gap-2">
+            <img
+              src="https://ssl.pstatic.net/static/cafe/cafe_pc/default/cafe_logo_img.png"
+              alt="카페"
+              className="w-5 h-5"
+            />
+            <h3 className="font-semibold text-sm">Life Fitness</h3>
+            {!isSearchMode && (
+              <span className="text-xs text-muted-foreground">({totalArticles})</span>
+            )}
+            {isSearchMode && searchQuery && (
+              <span className="text-xs text-primary font-medium">"{searchQuery}" 검색결과</span>
+            )}
+            {(isFetching || isSearching) && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
           </div>
-        ) : (
-          articles.map((article) => (
-            <button
-              key={article.articleId}
-              onClick={() => openArticle(article.articleId)}
-              className="w-full text-left px-4 py-3 hover:bg-muted/40 transition-colors flex gap-3"
-            >
-              {/* 썸네일 */}
-              {article.representImage && (
-                <div className="flex-shrink-0 w-16 h-16 rounded-md overflow-hidden bg-muted">
-                  <img
-                    src={article.representImage}
-                    alt=""
-                    className="w-full h-full object-cover"
-                    loading="lazy"
-                  />
-                </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => window.open(CAFE_URL, "_blank", "noopener,noreferrer")}
+            className="gap-1.5 text-xs h-7"
+          >
+            <ExternalLink className="w-3 h-3" />
+            카페 열기
+          </Button>
+        </div>
+
+        {/* 검색바 */}
+        <div className="px-4 py-2 border-b bg-muted/10">
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+              <Input
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                placeholder="카페 글 검색..."
+                className="h-8 pl-8 text-sm"
+              />
+              {searchInput && (
+                <button
+                  onClick={clearSearch}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
               )}
-              {/* 본문 */}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5 mb-1">
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium truncate max-w-[80px]">
-                    {article.menuName}
-                  </span>
-                  {article.newArticle && (
-                    <span className="text-[10px] px-1 py-0.5 rounded bg-red-500 text-white font-bold">N</span>
-                  )}
+            </div>
+            <Button size="sm" onClick={handleSearch} disabled={!searchInput.trim()} className="h-8 text-xs gap-1">
+              <Search className="w-3 h-3" />
+              검색
+            </Button>
+          </div>
+        </div>
+
+        {/* 게시판 필터 탭 */}
+        {!isSearchMode && menus.length > 0 && (
+          <div className="px-4 py-2 border-b overflow-x-auto">
+            <div className="flex gap-1 min-w-max">
+              <Button
+                variant={selectedMenuId === "0" ? "default" : "ghost"}
+                size="sm"
+                onClick={() => handleMenuChange("0")}
+                className="h-7 text-xs px-3 whitespace-nowrap"
+              >
+                전체
+              </Button>
+              {menus.map((menu) => (
+                <Button
+                  key={menu.menuId}
+                  variant={selectedMenuId === String(menu.menuId) ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => handleMenuChange(String(menu.menuId))}
+                  className="h-7 text-xs px-3 whitespace-nowrap"
+                >
+                  {menu.menuName}
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 검색 모드 해제 버튼 */}
+        {isSearchMode && (
+          <div className="px-4 py-2 border-b bg-primary/5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">
+                "{searchQuery}" 검색결과: {totalArticles}건
+              </span>
+              <Button variant="ghost" size="sm" onClick={clearSearch} className="h-6 text-xs gap-1">
+                <X className="w-3 h-3" />
+                검색 해제
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* 글 목록 */}
+        <div className="divide-y">
+          {loading ? (
+            <div className="py-12 text-center">
+              <Loader2 className="w-6 h-6 animate-spin text-primary mx-auto mb-2" />
+              <p className="text-xs text-muted-foreground">{isSearchMode ? "검색 중..." : "로딩 중..."}</p>
+            </div>
+          ) : articles.length === 0 ? (
+            <div className="py-16 text-center text-muted-foreground">
+              {isSearchMode ? "검색 결과가 없습니다." : "게시글이 없습니다."}
+            </div>
+          ) : (
+            articles.map((article) => (
+              <div
+                key={article.articleId}
+                className="w-full text-left px-4 py-3 hover:bg-muted/40 transition-colors flex gap-3 group"
+              >
+                {/* 썸네일 */}
+                {article.representImage && (
+                  <div className="flex-shrink-0 w-16 h-16 rounded-md overflow-hidden bg-muted cursor-pointer"
+                    onClick={() => setPreviewArticleId(article.articleId)}
+                  >
+                    <img
+                      src={article.representImage}
+                      alt=""
+                      className="w-full h-full object-cover"
+                      loading="lazy"
+                    />
+                  </div>
+                )}
+                {/* 본문 */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium truncate max-w-[100px]">
+                      {article.menuName}
+                    </span>
+                    {article.newArticle && (
+                      <span className="text-[10px] px-1 py-0.5 rounded bg-red-500 text-white font-bold">N</span>
+                    )}
+                  </div>
+                  <h4
+                    className="text-sm font-medium line-clamp-1 mb-1 cursor-pointer hover:text-primary transition-colors"
+                    onClick={() => setPreviewArticleId(article.articleId)}
+                  >
+                    {article.subject}
+                  </h4>
+                  <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                    <span>{article.writerNickname}</span>
+                    <span className="opacity-40">|</span>
+                    <span>{formatDate(article.writeDateTimestamp)}</span>
+                    <span className="opacity-40">|</span>
+                    <span>조회 {article.readCount}</span>
+                    {article.commentCount > 0 && (
+                      <>
+                        <span className="opacity-40">|</span>
+                        <span className="text-primary">댓글 {article.commentCount}</span>
+                      </>
+                    )}
+                    {article.likeItCount > 0 && (
+                      <>
+                        <span className="opacity-40">|</span>
+                        <span className="text-red-400">♥ {article.likeItCount}</span>
+                      </>
+                    )}
+                  </div>
                 </div>
-                <h4 className="text-sm font-medium line-clamp-1 mb-1">
-                  {article.subject}
-                </h4>
-                <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                  <span>{article.writerNickname}</span>
-                  <span className="opacity-40">|</span>
-                  <span>{formatDate(article.writeDateTimestamp)}</span>
-                  <span className="opacity-40">|</span>
-                  <span>조회 {article.readCount}</span>
-                  {article.commentCount > 0 && (
-                    <>
-                      <span className="opacity-40">|</span>
-                      <span className="text-primary">댓글 {article.commentCount}</span>
-                    </>
-                  )}
-                  {article.likeItCount > 0 && (
-                    <>
-                      <span className="opacity-40">|</span>
-                      <span className="text-red-400">♥ {article.likeItCount}</span>
-                    </>
-                  )}
+                {/* 미리보기 / 새탭 버튼 */}
+                <div className="flex-shrink-0 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    title="미리보기"
+                    onClick={() => setPreviewArticleId(article.articleId)}
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    title="새 탭에서 열기"
+                    onClick={() => window.open(`${CAFE_URL}/${article.articleId}`, "_blank", "noopener,noreferrer")}
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </Button>
                 </div>
               </div>
-            </button>
-          ))
-        )}
-      </div>
-
-      {/* 페이지네이션 */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-center gap-1 py-3 border-t bg-muted/20">
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={page <= 1 || isFetching}
-            onClick={() => setPage(1)}
-            className="h-8 w-8 p-0 text-xs"
-          >
-            «
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={page <= 1 || isFetching}
-            onClick={() => setPage(p => Math.max(1, p - 1))}
-            className="h-8 w-8 p-0 text-xs"
-          >
-            ‹
-          </Button>
-          {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-            const startPage = Math.max(1, Math.min(page - 2, totalPages - 4));
-            const p = startPage + i;
-            if (p > totalPages) return null;
-            return (
-              <Button
-                key={p}
-                variant={p === page ? "default" : "ghost"}
-                size="sm"
-                onClick={() => setPage(p)}
-                disabled={isFetching}
-                className="h-8 w-8 p-0 text-xs"
-              >
-                {p}
-              </Button>
-            );
-          })}
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={page >= totalPages || isFetching}
-            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-            className="h-8 w-8 p-0 text-xs"
-          >
-            ›
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={page >= totalPages || isFetching}
-            onClick={() => setPage(totalPages)}
-            className="h-8 w-8 p-0 text-xs"
-          >
-            »
-          </Button>
+            ))
+          )}
         </div>
-      )}
-    </Card>
+
+        {/* 페이지네이션 */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-center gap-1 py-3 border-t bg-muted/20">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={page <= 1 || isFetching}
+              onClick={() => setPage(1)}
+              className="h-8 w-8 p-0 text-xs"
+            >
+              «
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={page <= 1 || isFetching}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              className="h-8 w-8 p-0 text-xs"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </Button>
+            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+              const startPage = Math.max(1, Math.min(page - 2, totalPages - 4));
+              const p = startPage + i;
+              if (p > totalPages) return null;
+              return (
+                <Button
+                  key={p}
+                  variant={p === page ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => setPage(p)}
+                  disabled={isFetching}
+                  className="h-8 w-8 p-0 text-xs"
+                >
+                  {p}
+                </Button>
+              );
+            })}
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={page >= totalPages || isFetching}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              className="h-8 w-8 p-0 text-xs"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={page >= totalPages || isFetching}
+              onClick={() => setPage(totalPages)}
+              className="h-8 w-8 p-0 text-xs"
+            >
+              »
+            </Button>
+          </div>
+        )}
+      </Card>
+
+      {/* 글 본문 미리보기 모달 */}
+      <Dialog open={!!previewArticleId} onOpenChange={(open) => !open && setPreviewArticleId(null)}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-base pr-8 line-clamp-2">
+              {isLoadingDetail ? "로딩 중..." : articleDetail?.subject || "게시글"}
+            </DialogTitle>
+            {articleDetail && (
+              <DialogDescription className="flex items-center gap-2 text-xs">
+                <span>{articleDetail.writerNickname}</span>
+                {articleDetail.writeDate && (
+                  <>
+                    <span className="opacity-40">|</span>
+                    <span>{articleDetail.writeDate}</span>
+                  </>
+                )}
+              </DialogDescription>
+            )}
+          </DialogHeader>
+
+          {isLoadingDetail ? (
+            <div className="py-12 text-center">
+              <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-2" />
+              <p className="text-sm text-muted-foreground">본문 로딩 중...</p>
+            </div>
+          ) : articleDetail?.contentHtml ? (
+            <div
+              className="prose prose-sm max-w-none dark:prose-invert overflow-hidden"
+              dangerouslySetInnerHTML={{ __html: articleDetail.contentHtml }}
+            />
+          ) : (
+            <div className="py-8 text-center">
+              <p className="text-sm text-muted-foreground mb-4">
+                본문을 앱 내에서 표시할 수 없습니다.
+              </p>
+              <Button
+                onClick={() => {
+                  window.open(
+                    articleDetail?.fallbackUrl || `${CAFE_URL}/${previewArticleId}`,
+                    "_blank",
+                    "noopener,noreferrer"
+                  );
+                  setPreviewArticleId(null);
+                }}
+                className="gap-2"
+              >
+                <ExternalLink className="w-4 h-4" />
+                카페에서 보기
+              </Button>
+            </div>
+          )}
+
+          {/* 하단 버튼 */}
+          {articleDetail && (
+            <div className="flex justify-end pt-2 border-t">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => window.open(articleDetail.fallbackUrl, "_blank", "noopener,noreferrer")}
+                className="gap-1.5 text-xs"
+              >
+                <ExternalLink className="w-3 h-3" />
+                카페에서 보기
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 

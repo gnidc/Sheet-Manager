@@ -1154,25 +1154,62 @@ export async function registerRoutes(
     }
   }
 
-  // ===== 네이버 카페 전체글 목록 API =====
-  app.get("/api/cafe/articles", async (req, res) => {
+  // ===== 네이버 카페 API (관리자 전용) =====
+  const CAFE_ID = "31316681";
+  const CAFE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Referer": "https://cafe.naver.com/lifefit",
+  };
+
+  // 카페 게시판(메뉴) 목록 조회
+  app.get("/api/cafe/menus", requireAdmin, async (req, res) => {
+    try {
+      const response = await axios.get(
+        "https://apis.naver.com/cafe-web/cafe2/SideMenuList.json",
+        {
+          params: { cafeId: CAFE_ID },
+          headers: CAFE_HEADERS,
+          timeout: 10000,
+        }
+      );
+
+      const menus = (response.data?.message?.result?.menus || [])
+        .filter((m: any) => m.menuType === "B") // 일반 게시판만
+        .map((m: any) => ({
+          menuId: m.menuId,
+          menuName: m.menuName,
+          menuType: m.menuType,
+        }));
+
+      return res.json({ menus });
+    } catch (error: any) {
+      console.error("[Cafe] Failed to fetch menus:", error.message);
+      return res.status(500).json({ message: "게시판 목록을 불러올 수 없습니다." });
+    }
+  });
+
+  // 카페 글 목록 조회 (게시판 필터 지원)
+  app.get("/api/cafe/articles", requireAdmin, async (req, res) => {
     try {
       const page = parseInt(req.query.page as string) || 1;
       const perPage = Math.min(parseInt(req.query.perPage as string) || 20, 50);
-      
+      const menuId = req.query.menuId as string;
+
+      const params: Record<string, string | number> = {
+        "search.clubid": CAFE_ID,
+        "search.boardtype": "L",
+        "search.page": page,
+        "search.perPage": perPage,
+      };
+      if (menuId && menuId !== "0") {
+        params["search.menuid"] = menuId;
+      }
+
       const response = await axios.get(
         "https://apis.naver.com/cafe-web/cafe2/ArticleListV2.json",
         {
-          params: {
-            "search.clubid": "31316681",
-            "search.boardtype": "L",
-            "search.page": page,
-            "search.perPage": perPage,
-          },
-          headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://cafe.naver.com/lifefit",
-          },
+          params,
+          headers: CAFE_HEADERS,
           timeout: 10000,
         }
       );
@@ -1182,6 +1219,7 @@ export async function registerRoutes(
         articleId: a.articleId,
         subject: a.subject,
         writerNickname: a.writerNickname,
+        menuId: a.menuId,
         menuName: a.menuName,
         readCount: a.readCount,
         commentCount: a.commentCount,
@@ -1204,6 +1242,141 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("[Cafe] Failed to fetch articles:", error.message);
       return res.status(500).json({ message: "카페 글 목록을 불러올 수 없습니다." });
+    }
+  });
+
+  // 카페 글 본문 상세 조회 (HTML 스크래핑)
+  app.get("/api/cafe/article/:articleId", requireAdmin, async (req, res) => {
+    try {
+      const articleId = req.params.articleId;
+
+      // cafe.naver.com의 내부 iframe URL로 글 본문 HTML 가져오기
+      const response = await axios.get(
+        `https://cafe.naver.com/ca-fe/cafes/${CAFE_ID}/articles/${articleId}`,
+        {
+          params: { fromList: true, page: 1 },
+          headers: {
+            ...CAFE_HEADERS,
+            "Accept": "text/html",
+          },
+          timeout: 15000,
+        }
+      );
+
+      const html = typeof response.data === "string" ? response.data : "";
+
+      // 본문 영역 추출 (se-main-container 또는 article_viewer)
+      let contentHtml = "";
+      const seMatch = html.match(/<div[^>]*class="[^"]*se-main-container[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>\s*<\/div>/);
+      if (seMatch) {
+        contentHtml = seMatch[0];
+      } else {
+        // 구버전 에디터
+        const viewerMatch = html.match(/<div[^>]*class="[^"]*article_viewer[^"]*"[^>]*>([\s\S]*?)<\/div>/);
+        if (viewerMatch) {
+          contentHtml = viewerMatch[0];
+        }
+      }
+
+      // 제목 추출
+      let subject = "";
+      const titleMatch = html.match(/<h3[^>]*class="[^"]*title_text[^"]*"[^>]*>([\s\S]*?)<\/h3>/);
+      if (titleMatch) {
+        subject = titleMatch[1].replace(/<[^>]+>/g, "").trim();
+      }
+
+      // 작성자 추출
+      let writerNickname = "";
+      const writerMatch = html.match(/<button[^>]*class="[^"]*nick[^"]*"[^>]*>([\s\S]*?)<\/button>/);
+      if (writerMatch) {
+        writerNickname = writerMatch[1].replace(/<[^>]+>/g, "").trim();
+      }
+
+      // 작성일 추출
+      let writeDate = "";
+      const dateMatch = html.match(/<span[^>]*class="[^"]*date[^"]*"[^>]*>([\s\S]*?)<\/span>/);
+      if (dateMatch) {
+        writeDate = dateMatch[1].replace(/<[^>]+>/g, "").trim();
+      }
+
+      if (!contentHtml) {
+        // HTML 파싱이 안 되면 기본 링크로 폴백
+        return res.json({
+          articleId: parseInt(articleId),
+          subject: subject || `게시글 #${articleId}`,
+          writerNickname,
+          writeDate,
+          contentHtml: "",
+          fallbackUrl: `https://cafe.naver.com/lifefit/${articleId}`,
+        });
+      }
+
+      return res.json({
+        articleId: parseInt(articleId),
+        subject,
+        writerNickname,
+        writeDate,
+        contentHtml,
+        fallbackUrl: `https://cafe.naver.com/lifefit/${articleId}`,
+      });
+    } catch (error: any) {
+      console.error("[Cafe] Failed to fetch article detail:", error.message);
+      return res.status(500).json({ message: "글 본문을 불러올 수 없습니다." });
+    }
+  });
+
+  // 카페 내 검색
+  app.get("/api/cafe/search", requireAdmin, async (req, res) => {
+    try {
+      const query = (req.query.q as string || "").trim();
+      const page = parseInt(req.query.page as string) || 1;
+      const perPage = Math.min(parseInt(req.query.perPage as string) || 20, 50);
+
+      if (!query) {
+        return res.json({ articles: [], page, perPage, totalArticles: 0, query: "" });
+      }
+
+      const response = await axios.get(
+        "https://apis.naver.com/cafe-web/cafe2/ArticleSearchListV2.json",
+        {
+          params: {
+            "search.clubid": CAFE_ID,
+            "search.query": query,
+            "search.page": page,
+            "search.perPage": perPage,
+            "search.sortBy": "sim", // sim: 관련도순, date: 최신순
+          },
+          headers: CAFE_HEADERS,
+          timeout: 10000,
+        }
+      );
+
+      const result = response.data?.message?.result;
+      const articles = (result?.articleList || []).map((a: any) => ({
+        articleId: a.articleId,
+        subject: a.subject,
+        writerNickname: a.writerNickname,
+        menuId: a.menuId,
+        menuName: a.menuName,
+        readCount: a.readCount,
+        commentCount: a.commentCount,
+        likeItCount: a.likeItCount,
+        representImage: a.representImage || null,
+        writeDateTimestamp: a.writeDateTimestamp,
+        newArticle: a.newArticle,
+        openArticle: a.openArticle,
+      }));
+
+      return res.json({
+        articles,
+        page,
+        perPage,
+        totalArticles: result?.totalArticleCount || articles.length,
+        query,
+      });
+    } catch (error: any) {
+      console.error("[Cafe] Failed to search articles:", error.message);
+      return res.status(500).json({ message: "카페 검색에 실패했습니다." });
     }
   });
 
