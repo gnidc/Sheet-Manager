@@ -123,7 +123,15 @@ export default function EtfComponents() {
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [chartPeriod, setChartPeriod] = useState<"day" | "week" | "month" | "year">("day");
   const [chartType, setChartType] = useState<"candle" | "area">("candle");
-  const [showAnalysisPanel, setShowAnalysisPanel] = useState(false);
+  // localStorage에서 이전 분석 결과 복원
+  const savedAnalysis = useMemo(() => {
+    try {
+      const saved = localStorage.getItem("etf_analysis_result");
+      if (saved) return JSON.parse(saved) as { analysis: string; analyzedAt: string; dataPoints?: { risingCount: number; fallingCount: number; newsCount: number; market: string } };
+    } catch {}
+    return null;
+  }, []);
+  const [showAnalysisPanel, setShowAnalysisPanel] = useState(!!savedAnalysis);
   const [analysisPrompt, setAnalysisPrompt] = useState(
     `실시간 ETF 상승리스트, 네이버 실시간 뉴스(https://stock.naver.com/news), 네이버 마켓동향(https://stock.naver.com/market/stock/kr)을 참고하여 다음을 포함한 분석 보고서를 30줄 이상으로 요약 정리해줘:\n\n1. 오늘의 시장 개요 (코스피/코스닥 지수 동향)\n2. 주요 상승 섹터/테마 분석\n3. 뉴스·매크로 연관 분석\n4. 하락 섹터 동향\n5. 투자 시사점 및 주의사항`
   );
@@ -131,7 +139,7 @@ export default function EtfComponents() {
     analysis: string;
     analyzedAt: string;
     dataPoints?: { risingCount: number; fallingCount: number; newsCount: number; market: string };
-  } | null>(null);
+  } | null>(savedAnalysis);
   const [cafePostDialogOpen, setCafePostDialogOpen] = useState(false);
   const [cafeMenuId, setCafeMenuId] = useState("");
   const [cafePostTitle, setCafePostTitle] = useState("");
@@ -234,6 +242,7 @@ ${htmlContent}
     },
     onSuccess: (data) => {
       setAnalysisResult(data);
+      try { localStorage.setItem("etf_analysis_result", JSON.stringify(data)); } catch {}
     },
   });
 
@@ -903,7 +912,7 @@ ${htmlContent}
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => { setShowAnalysisPanel(false); setAnalysisResult(null); }}
+                  onClick={() => { setShowAnalysisPanel(false); setAnalysisResult(null); try { localStorage.removeItem("etf_analysis_result"); } catch {} }}
                   className="h-7 w-7 p-0"
                 >
                   <X className="w-4 h-4" />
@@ -1031,7 +1040,7 @@ ${htmlContent}
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => setAnalysisResult(null)}
+                      onClick={() => { setAnalysisResult(null); try { localStorage.removeItem("etf_analysis_result"); } catch {} }}
                       className="h-7 text-xs"
                     >
                       닫기
