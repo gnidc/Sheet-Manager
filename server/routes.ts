@@ -2059,11 +2059,26 @@ ${newsSummary}`;
         return res.status(401).json({ message: "네이버 로그인이 필요합니다.", requireNaverLogin: true });
       }
 
+      // 네이버 카페 API용 컨텐츠 정제
+      // 1) 이모지 및 특수 유니코드 제거 (네이버 API에서 거부할 수 있음)
+      let cleanContent = content.replace(/[^\u0000-\uFFFF]/g, '');
+
+      // 2) 컨텐츠 길이 제한 (네이버 API 최대 약 65000 바이트)
+      const contentBytes = Buffer.byteLength(cleanContent, 'utf8');
+      if (contentBytes > 60000) {
+        // HTML 태그를 보존하면서 텍스트 부분만 자르기
+        cleanContent = cleanContent.substring(0, Math.floor(cleanContent.length * (60000 / contentBytes)));
+        // 잘린 태그 복구를 위해 닫는 div 추가
+        cleanContent += '</div>';
+      }
+
+      console.log(`[Cafe Write] Posting "${subject}" to menu ${menuId}, content length: ${contentBytes} bytes`);
+
       // multipart/form-data 형식으로 전송
       const FormData = (await import("form-data")).default;
       const formData = new FormData();
       formData.append("subject", subject);
-      formData.append("content", content);
+      formData.append("content", cleanContent);
 
       const response = await axios.post(
         `https://openapi.naver.com/v1/cafe/${CAFE_ID}/menu/${menuId}/articles`,
@@ -2073,11 +2088,11 @@ ${newsSummary}`;
             Authorization: `Bearer ${naverToken}`,
             ...formData.getHeaders(),
           },
-          timeout: 15000,
+          timeout: 30000,
         }
       );
 
-      console.log(`[Cafe Write] Article posted: "${subject}" to menu ${menuId}`);
+      console.log(`[Cafe Write] Article posted successfully: "${subject}" to menu ${menuId}`, response.data);
       return res.json({
         message: "카페에 글이 등록되었습니다.",
         result: response.data,
@@ -2085,10 +2100,11 @@ ${newsSummary}`;
       });
     } catch (error: any) {
       const errorData = error.response?.data;
-      console.error("[Cafe Write] Failed:", error.message, errorData);
+      const statusCode = error.response?.status;
+      const errorMsg = errorData?.message?.error?.msg || errorData?.message || error.message;
+      console.error(`[Cafe Write] Failed (HTTP ${statusCode}):`, errorMsg, JSON.stringify(errorData));
 
-      if (error.response?.status === 401) {
-        // 토큰 만료 → 갱신 시도
+      if (statusCode === 401) {
         const newToken = await refreshNaverToken(req);
         if (!newToken) {
           return res.status(401).json({ message: "네이버 토큰이 만료되었습니다. 다시 로그인해주세요.", requireNaverLogin: true });
@@ -2096,8 +2112,14 @@ ${newsSummary}`;
         return res.status(500).json({ message: "토큰을 갱신했습니다. 다시 시도해주세요." });
       }
 
+      if (statusCode === 403) {
+        return res.status(403).json({
+          message: `카페 글쓰기 권한이 없습니다. 네이버 개발자센터에서 카페 글쓰기(cafe_article_write) 권한을 확인해주세요. (${errorMsg})`,
+        });
+      }
+
       return res.status(500).json({
-        message: errorData?.message || error.message || "글 등록에 실패했습니다.",
+        message: `글 등록 실패: ${errorMsg}`,
       });
     }
   });

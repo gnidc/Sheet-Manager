@@ -213,48 +213,40 @@ export default function EtfComponents() {
 
     // 0) Comment (개인 의견) — 제일 상단
     if (cafeComment.trim()) {
-      sections.push(`<div style="background:#fffbe6;border-left:4px solid #f5a623;padding:12px 16px;margin-bottom:16px;border-radius:4px;">
-<p style="font-weight:bold;color:#b8860b;margin:0 0 6px 0;">💬 *Comment</p>
-<p style="margin:0;font-size:14px;line-height:1.7;white-space:pre-wrap;">${cafeComment.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br/>')}</p>
+      sections.push(`<div style="background:#fffbe6;border-left:4px solid #f5a623;padding:12px 16px;margin-bottom:16px;">
+<p style="font-weight:bold;color:#b8860b;margin:0 0 6px 0;">[ Comment ]</p>
+<p style="margin:0;line-height:1.7;">${cafeComment.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br/>')}</p>
 </div>`);
     }
 
     // 1) 실시간 상승 ETF 리스트
     if (topGainers.length > 0) {
       let etfRows = topGainers.map((etf, i) =>
-        `<tr style="border-bottom:1px solid #eee;">
-          <td style="padding:4px 8px;text-align:center;font-weight:bold;${i < 3 ? 'color:#e67e22;' : ''}">${i + 1}</td>
-          <td style="padding:4px 8px;"><b>${etf.name}</b> <span style="color:#999;font-size:11px;">${etf.code}</span></td>
-          <td style="padding:4px 8px;text-align:right;">${etf.nowVal.toLocaleString()}원</td>
-          <td style="padding:4px 8px;text-align:right;color:red;font-weight:bold;">+${etf.changeRate.toFixed(2)}%</td>
-          <td style="padding:4px 8px;text-align:right;color:#999;">${etf.quant.toLocaleString()}</td>
-        </tr>`
+        `<tr>
+<td style="padding:4px 8px;text-align:center;font-weight:bold;">${i + 1}</td>
+<td style="padding:4px 8px;"><b>${etf.name}</b> (${etf.code})</td>
+<td style="padding:4px 8px;text-align:right;">${etf.nowVal.toLocaleString()}</td>
+<td style="padding:4px 8px;text-align:right;color:red;font-weight:bold;">+${etf.changeRate.toFixed(2)}%</td>
+<td style="padding:4px 8px;text-align:right;">${etf.quant.toLocaleString()}</td>
+</tr>`
       ).join("");
 
-      sections.push(`<div style="margin-bottom:20px;">
-<h3 style="color:#e67e22;border-bottom:2px solid #e67e22;padding-bottom:6px;">🔥 실시간 상승 ETF TOP ${topGainers.length} (레버리지·인버스 제외)</h3>
-<p style="color:#888;font-size:12px;">기준시간: ${topGainersData?.updatedAt || now}</p>
-<table style="width:100%;border-collapse:collapse;font-size:13px;">
+      sections.push(`<h3>[실시간 상승 ETF TOP ${topGainers.length}] (레버리지/인버스 제외)</h3>
+<p>기준시간: ${topGainersData?.updatedAt || now}</p>
+<table border="1" cellpadding="4" cellspacing="0" style="width:100%;border-collapse:collapse;">
 <tr style="background:#f5f5f5;font-weight:bold;">
-  <th style="padding:6px 8px;text-align:center;">#</th>
-  <th style="padding:6px 8px;">ETF명</th>
-  <th style="padding:6px 8px;text-align:right;">현재가</th>
-  <th style="padding:6px 8px;text-align:right;">등락률</th>
-  <th style="padding:6px 8px;text-align:right;">거래량</th>
+<th>#</th><th>ETF명</th><th>현재가</th><th>등락률</th><th>거래량</th>
 </tr>
 ${etfRows}
-</table>
-</div>`);
+</table><br/>`);
     }
 
     // 2) 선택된 ETF 차트
     if (selectedEtfCode) {
       const chartUrl = `https://ssl.pstatic.net/imgfinance/chart/item/${chartType}/${chartPeriod}/${selectedEtfCode}.png`;
       const etfName = componentData?.etfName || selectedEtfCode;
-      sections.push(`<div style="margin-bottom:20px;">
-<h3 style="color:#2980b9;border-bottom:2px solid #2980b9;padding-bottom:6px;">📈 ${etfName} 차트</h3>
-<p><img src="${chartUrl}" alt="${etfName} 차트" style="max-width:100%;border-radius:8px;" /></p>
-</div>`);
+      sections.push(`<h3>[${etfName} 차트]</h3>
+<p><img src="${chartUrl}" alt="${etfName}" /></p><br/>`);
     }
 
     // 3) AI 분석 결과
@@ -262,20 +254,18 @@ ${etfRows}
       const htmlAnalysis = analysisResult.analysis
         .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
         .replace(/\n/g, '<br/>');
-      sections.push(`<div style="margin-bottom:20px;">
-<h3 style="color:#8e44ad;border-bottom:2px solid #8e44ad;padding-bottom:6px;">🧠 AI 트렌드 분석 보고서</h3>
-<p style="color:#888;font-size:12px;">📅 분석 시간: ${analysisResult.analyzedAt} | 📈 상승 ${analysisResult.dataPoints?.risingCount || 0}개 | 📉 하락 ${analysisResult.dataPoints?.fallingCount || 0}개 | 📰 뉴스 ${analysisResult.dataPoints?.newsCount || 0}건 | 📊 ${analysisResult.dataPoints?.market || ""}</p>
-<div style="font-size:14px;line-height:1.8;">
+      sections.push(`<h3>[AI 트렌드 분석 보고서]</h3>
+<p>분석 시간: ${analysisResult.analyzedAt} | 상승 ${analysisResult.dataPoints?.risingCount || 0}개 | 하락 ${analysisResult.dataPoints?.fallingCount || 0}개 | 뉴스 ${analysisResult.dataPoints?.newsCount || 0}건 | ${analysisResult.dataPoints?.market || ""}</p>
+<div style="line-height:1.8;">
 ${htmlAnalysis}
-</div>
-</div>`);
+</div><br/>`);
     }
 
     // Footer
-    sections.push(`<hr style="border:none;border-top:1px solid #ddd;margin:16px 0;"/>
-<p style="color:#aaa;font-size:11px;">※ 본 보고서는 AI(Gemini)가 실시간 데이터를 기반으로 자동 생성한 내용을 포함하고 있습니다.<br/>데이터 출처: 네이버 금융 · FnGuide · 한국투자증권 API</p>`);
+    sections.push(`<hr/>
+<p style="color:#aaa;font-size:11px;">* 본 보고서는 AI(Gemini)가 실시간 데이터를 기반으로 자동 생성한 내용을 포함하고 있습니다.<br/>데이터 출처: 네이버 금융, FnGuide, 한국투자증권 API</p>`);
 
-    const fullContent = `<div style="font-family:'Malgun Gothic',sans-serif;font-size:14px;line-height:1.8;">\n${sections.join("\n")}\n</div>`;
+    const fullContent = sections.join("\n");
 
     cafeWriteMutation.mutate({ subject: cafePostTitle, content: fullContent, menuId: cafeMenuId });
   };
