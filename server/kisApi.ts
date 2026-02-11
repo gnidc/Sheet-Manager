@@ -530,14 +530,16 @@ export interface EtfComponentResult {
 const etfComponentCache: Map<string, { data: EtfComponentResult; expiry: number }> = new Map();
 const ETF_CACHE_TTL = 5 * 60 * 1000; // 5분
 
-// 종목명 → 종목코드 캐시 (세션 내 유지)
+// 종목명 → 종목코드 캐시 (영구 유지 - 종목코드는 잘 안 변함)
 const stockCodeCache: Map<string, string> = new Map();
 
 // 네이버 주식 자동완성 API로 종목코드 조회
 async function resolveStockCode(stockName: string): Promise<string> {
   // 현금, 선물 등 비주식 항목 필터링
   if (stockName.includes("현금") || stockName.includes("선물") || stockName.includes("원화") ||
-      stockName.includes("달러") || stockName.includes("국채") || stockName.includes("채권")) {
+      stockName.includes("달러") || stockName.includes("국채") || stockName.includes("채권") ||
+      stockName.includes("스왑") || stockName.includes("예금") || stockName.includes("콜") ||
+      stockName.includes("RP") || stockName.includes("CASH")) {
     return "";
   }
 
@@ -568,7 +570,82 @@ async function resolveStockCode(stockName: string): Promise<string> {
   return "";
 }
 
+// ===== 네이버 금융 실시간 시세 bulk 조회 (레이트리밋 없음, 20개씩 1회 요청) =====
+interface NaverRealtimePrice {
+  stockCode: string;
+  stockName: string;
+  price: string;
+  change: string;
+  changePercent: string;
+  changeSign: string; // 1:상한, 2:상승, 3:보합, 4:하한, 5:하락 (KIS 포맷 변환)
+  volume: string;
+  high: string;
+  low: string;
+  open: string;
+}
+
+async function fetchNaverBulkPrices(stockCodes: string[]): Promise<Map<string, NaverRealtimePrice>> {
+  const result = new Map<string, NaverRealtimePrice>();
+  if (stockCodes.length === 0) return result;
+
+  // 네이버 API는 한 번에 여러 종목 가능 (쉼표 구분)
+  // 안전하게 40개씩 나눠서 요청
+  const BATCH_SIZE = 40;
+  for (let i = 0; i < stockCodes.length; i += BATCH_SIZE) {
+    const batch = stockCodes.slice(i, i + BATCH_SIZE);
+    const codesParam = batch.join(",");
+
+    try {
+      const res = await axios.get(
+        `https://polling.finance.naver.com/api/realtime/domestic/stock/${codesParam}`,
+        {
+          headers: { "User-Agent": "Mozilla/5.0" },
+          timeout: 10000,
+        }
+      );
+
+      const datas = res.data?.datas || [];
+      for (const item of datas) {
+        const code = item.itemCode || "";
+        if (!code) continue;
+
+        // 네이버 compareToPreviousPrice.code → KIS changeSign 변환
+        // 네이버: "1"=하락, "2"=상승, "3"=보합, "4"=상한, "5"=하한
+        // KIS:    "1"=상한, "2"=상승, "3"=보합, "4"=하한, "5"=하락
+        const naverSignCode = item.compareToPreviousPrice?.code || "3";
+        let kisChangeSign = "3"; // 기본: 보합
+        if (naverSignCode === "2") kisChangeSign = "2"; // 상승
+        else if (naverSignCode === "1") kisChangeSign = "5"; // 하락
+        else if (naverSignCode === "4") kisChangeSign = "1"; // 상한
+        else if (naverSignCode === "5") kisChangeSign = "4"; // 하한
+
+        // 가격 문자열에서 쉼표 제거
+        const cleanNum = (s: string) => (s || "0").replace(/,/g, "");
+
+        result.set(code, {
+          stockCode: code,
+          stockName: item.stockName || "",
+          price: cleanNum(item.closePrice),
+          change: cleanNum(item.compareToPreviousClosePrice),
+          changePercent: item.fluctuationsRatio || "0",
+          changeSign: kisChangeSign,
+          volume: cleanNum(item.accumulatedTradingVolume),
+          high: cleanNum(item.highPrice),
+          low: cleanNum(item.lowPrice),
+          open: cleanNum(item.openPrice),
+        });
+      }
+    } catch (err: any) {
+      console.log(`[Naver Bulk] Failed to fetch batch: ${err.message}`);
+    }
+  }
+
+  return result;
+}
+
 export async function getEtfComponents(etfCode: string): Promise<EtfComponentResult> {
+  const startTime = Date.now();
+
   // 캐시 확인
   const cached = etfComponentCache.get(etfCode);
   if (cached && Date.now() < cached.expiry) {
@@ -583,7 +660,7 @@ export async function getEtfComponents(etfCode: string): Promise<EtfComponentRes
   let nav = "";
   let marketCap = "";
 
-  // ===== WiseReport (네이버 금융 ETF 분석 데이터) =====
+  // ===== Step 1: WiseReport에서 구성종목 목록 가져오기 =====
   try {
     const wrRes = await axios.get(
       `https://navercomp.wisereport.co.kr/v2/ETF/Index.aspx`,
@@ -620,7 +697,7 @@ export async function getEtfComponents(etfCode: string): Promise<EtfComponentRes
 
           if (name) {
             components.push({
-              stockCode: "", // 나중에 네이버 검색으로 해결
+              stockCode: "",
               stockName: name,
               weight: typeof weight === "number" ? weight : parseFloat(weight) || 0,
               quantity: typeof qty === "number" ? Math.floor(qty) : parseInt(qty) || 0,
@@ -633,126 +710,106 @@ export async function getEtfComponents(etfCode: string): Promise<EtfComponentRes
       }
     }
 
-    console.log(`[ETF Components] WiseReport: found ${components.length} components for ${etfCode}`);
+    console.log(`[ETF Components] WiseReport: ${components.length} components (${Date.now() - startTime}ms)`);
   } catch (err: any) {
     console.log(`[ETF Components] WiseReport failed for ${etfCode}: ${err.message}`);
   }
 
-  // ETF 이름이 없으면 KIS API로 가져오기
+  // ETF 이름이 없으면 네이버에서 조회
   if (!etfName) {
     try {
-      const priceData = await getCurrentPrice(etfCode);
-      etfName = priceData?.stockName || `ETF ${etfCode}`;
+      const naverRes = await axios.get(
+        `https://polling.finance.naver.com/api/realtime/domestic/stock/${etfCode}`,
+        { headers: { "User-Agent": "Mozilla/5.0" }, timeout: 5000 }
+      );
+      const datas = naverRes.data?.datas;
+      if (datas && datas.length > 0) {
+        etfName = datas[0].stockName || `ETF ${etfCode}`;
+      }
     } catch {
       etfName = `ETF ${etfCode}`;
     }
   }
 
-  // ===== 종목코드 해결 (상위 30개만, 네이버 자동완성 API 활용) =====
+  // ===== Step 2: 종목코드 변환 (10개씩 병렬 배치, 캐시 활용) =====
   const stockComponents = components.filter(c =>
     !c.stockName.includes("현금") && !c.stockName.includes("선물") &&
     !c.stockName.includes("원화") && !c.stockName.includes("달러") &&
-    !c.stockName.includes("국채") && !c.stockName.includes("채권")
+    !c.stockName.includes("국채") && !c.stockName.includes("채권") &&
+    !c.stockName.includes("스왑") && !c.stockName.includes("예금") &&
+    !c.stockName.includes("콜") && !c.stockName.includes("RP") &&
+    !c.stockName.includes("CASH")
   );
   const topForCode = stockComponents.slice(0, 30);
 
   if (topForCode.length > 0) {
-    console.log(`[ETF Components] Resolving stock codes for ${topForCode.length} stocks...`);
-    // 병렬로 5개씩 종목코드 조회
-    for (let i = 0; i < topForCode.length; i += 5) {
-      const batch = topForCode.slice(i, i + 5);
-      const codes = await Promise.all(batch.map(c => resolveStockCode(c.stockName)));
-      batch.forEach((c, idx) => {
-        c.stockCode = codes[idx];
-      });
-      // 네이버 API 레이트 리밋 방지
-      if (i + 5 < topForCode.length) {
-        await new Promise(resolve => setTimeout(resolve, 200));
+    const codeStartTime = Date.now();
+    // 캐시된 것과 아닌 것 분리
+    const needsResolve: typeof topForCode = [];
+    for (const comp of topForCode) {
+      const cached = stockCodeCache.get(comp.stockName);
+      if (cached !== undefined) {
+        comp.stockCode = cached;
+      } else {
+        needsResolve.push(comp);
       }
     }
-    console.log(`[ETF Components] Resolved ${topForCode.filter(c => c.stockCode).length} stock codes`);
+
+    // 캐시 미스 종목만 10개씩 병렬 조회
+    if (needsResolve.length > 0) {
+      const BATCH_SIZE = 10;
+      for (let i = 0; i < needsResolve.length; i += BATCH_SIZE) {
+        const batch = needsResolve.slice(i, i + BATCH_SIZE);
+        const codes = await Promise.all(batch.map(c => resolveStockCode(c.stockName)));
+        batch.forEach((c, idx) => {
+          c.stockCode = codes[idx];
+        });
+        // 다음 배치 전 짧은 딜레이
+        if (i + BATCH_SIZE < needsResolve.length) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      }
+    }
+
+    const resolvedCount = topForCode.filter(c => c.stockCode).length;
+    console.log(`[ETF Components] Stock codes resolved: ${resolvedCount}/${topForCode.length} (cache: ${topForCode.length - needsResolve.length}, API: ${needsResolve.length}) (${Date.now() - codeStartTime}ms)`);
   }
 
-  // ===== KIS API로 실시간 시세 조회 (종목코드가 있는 상위 20개) =====
-  if (isConfigured() && components.length > 0) {
-    const topComponents = components
-      .filter(c => c.stockCode && c.stockCode.match(/^\d{6}$/))
-      .slice(0, 20);
+  // ===== Step 3: 네이버 실시간 bulk API로 시세 조회 (1회 요청으로 전체 조회) =====
+  const validCodes = components
+    .filter(c => c.stockCode && /^\d{6}$/.test(c.stockCode))
+    .map(c => c.stockCode);
 
-    if (topComponents.length > 0) {
-      console.log(`[ETF Components] Fetching real-time prices for ${topComponents.length} stocks...`);
+  if (validCodes.length > 0) {
+    const priceStartTime = Date.now();
+    console.log(`[ETF Components] Fetching prices for ${validCodes.length} stocks via Naver bulk API...`);
 
-      // 실패한 종목을 모아두고 나중에 재시도
-      const failedIndices: number[] = [];
+    const priceMap = await fetchNaverBulkPrices(validCodes);
 
-      for (let i = 0; i < topComponents.length; i++) {
-        try {
-          const priceData = await getCurrentPrice(topComponents[i].stockCode);
-          if (priceData) {
-            const comp = components.find(c => c.stockCode === topComponents[i].stockCode);
-            if (comp) {
-              comp.price = priceData.price;
-              comp.change = priceData.change;
-              comp.changePercent = priceData.changePercent;
-              comp.changeSign = priceData.changeSign;
-              comp.volume = priceData.volume;
-              comp.high = priceData.high;
-              comp.low = priceData.low;
-              comp.open = priceData.open;
-            }
-          }
-        } catch (err: any) {
-          // 레이트 리밋 에러인 경우 재시도 대상으로
-          if (err.message?.includes("500") || err.response?.data?.msg_cd === "EGW00201") {
-            failedIndices.push(i);
-          }
-        }
-        // KIS API 레이트 리밋 방지 (초당 거래건수 제한)
-        if (i < topComponents.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 350));
-        }
+    // 시세 데이터 매핑
+    for (const comp of components) {
+      const priceData = priceMap.get(comp.stockCode);
+      if (priceData) {
+        comp.price = priceData.price;
+        comp.change = priceData.change;
+        comp.changePercent = priceData.changePercent;
+        comp.changeSign = priceData.changeSign;
+        comp.volume = priceData.volume;
+        comp.high = priceData.high;
+        comp.low = priceData.low;
+        comp.open = priceData.open;
       }
-
-      // 레이트 리밋으로 실패한 종목 재시도 (1초 대기 후)
-      if (failedIndices.length > 0) {
-        console.log(`[ETF Components] Retrying ${failedIndices.length} rate-limited stocks...`);
-        await new Promise(resolve => setTimeout(resolve, 1500));
-
-        for (let j = 0; j < failedIndices.length; j++) {
-          const i = failedIndices[j];
-          try {
-            const priceData = await getCurrentPrice(topComponents[i].stockCode);
-            if (priceData) {
-              const comp = components.find(c => c.stockCode === topComponents[i].stockCode);
-              if (comp) {
-                comp.price = priceData.price;
-                comp.change = priceData.change;
-                comp.changePercent = priceData.changePercent;
-                comp.changeSign = priceData.changeSign;
-                comp.volume = priceData.volume;
-                comp.high = priceData.high;
-                comp.low = priceData.low;
-                comp.open = priceData.open;
-              }
-            }
-          } catch {
-            // 재시도도 실패하면 무시
-          }
-          if (j < failedIndices.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, 500));
-          }
-        }
-      }
-
-      const pricedCount = topComponents.filter(tc =>
-        components.find(c => c.stockCode === tc.stockCode)?.price
-      ).length;
-      console.log(`[ETF Components] Prices fetched: ${pricedCount}/${topComponents.length}`);
     }
+
+    const pricedCount = components.filter(c => c.price).length;
+    console.log(`[ETF Components] Prices fetched: ${pricedCount}/${validCodes.length} (${Date.now() - priceStartTime}ms)`);
   }
 
   // 비중 순으로 정렬
   components.sort((a, b) => b.weight - a.weight);
+
+  const totalTime = Date.now() - startTime;
+  console.log(`[ETF Components] Total time for ${etfCode}: ${totalTime}ms`);
 
   const result: EtfComponentResult = {
     etfCode,
