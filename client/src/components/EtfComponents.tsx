@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +21,8 @@ import {
   ArrowUp,
   ArrowDown,
   Flame,
+  BrainCircuit,
+  FileText,
 } from "lucide-react";
 
 type SortField = "weight" | "changePercent" | null;
@@ -104,6 +106,30 @@ export default function EtfComponents() {
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [chartPeriod, setChartPeriod] = useState<"day" | "week" | "month" | "year">("day");
   const [chartType, setChartType] = useState<"candle" | "area">("candle");
+  const [analysisResult, setAnalysisResult] = useState<{
+    analysis: string;
+    analyzedAt: string;
+    dataPoints?: { risingCount: number; fallingCount: number; newsCount: number; market: string };
+  } | null>(null);
+
+  // ETF 트렌드 AI 분석
+  const analyzeMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/etf/analyze-trend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "분석 실패");
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      setAnalysisResult(data);
+    },
+  });
 
   // ETF 실시간 상승 상위 15개
   const { data: topGainersData, isFetching: isLoadingGainers, refetch: refetchGainers } = useQuery<{
@@ -255,6 +281,20 @@ export default function EtfComponents() {
                   {topGainersData.updatedAt}
                 </span>
               )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => analyzeMutation.mutate()}
+                disabled={analyzeMutation.isPending || topGainers.length === 0}
+                className="h-7 text-xs gap-1"
+              >
+                {analyzeMutation.isPending ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <BrainCircuit className="w-3.5 h-3.5" />
+                )}
+                {analyzeMutation.isPending ? "분석 중..." : "AI 분석"}
+              </Button>
               <Button
                 variant="ghost"
                 size="sm"
@@ -742,32 +782,114 @@ export default function EtfComponents() {
               />
             </CardContent>
           </Card>
-
-          {/* 하단 안내 */}
-          <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
-            <p>데이터 출처: 네이버 금융 · FnGuide · 한국투자증권 API</p>
-            <div className="flex gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => window.open(`https://www.etfcheck.co.kr/mobile/etpitem/${selectedEtfCode}/pdf`, "_blank")}
-                className="text-xs gap-1 h-7"
-              >
-                <ExternalLink className="w-3 h-3" />
-                etfcheck
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => window.open(`https://finance.naver.com/item/coinfo.naver?code=${selectedEtfCode}`, "_blank")}
-                className="text-xs gap-1 h-7"
-              >
-                <ExternalLink className="w-3 h-3" />
-                네이버금융
-              </Button>
-            </div>
-          </div>
         </>
+      )}
+
+      {/* ===== AI 분석 결과 ===== */}
+      {analyzeMutation.isPending && (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center py-12 gap-3">
+            <Loader2 className="w-8 h-8 animate-spin text-primary" />
+            <p className="text-sm text-muted-foreground">ETF 상승 트렌드를 AI가 분석하고 있습니다...</p>
+            <p className="text-xs text-muted-foreground">상승/하락 ETF + 뉴스 + 매크로 데이터 수집 → AI 분석 중</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {analyzeMutation.isError && (
+        <Card className="border-destructive/50">
+          <CardContent className="flex items-center gap-3 py-4">
+            <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-destructive">분석 실패</p>
+              <p className="text-xs text-muted-foreground">{(analyzeMutation.error as Error)?.message}</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {analysisResult && !analyzeMutation.isPending && (
+        <Card className="border-primary/20 bg-primary/[0.02]">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <FileText className="w-5 h-5 text-primary" />
+                AI 트렌드 분석 보고서
+              </CardTitle>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Clock className="w-3 h-3" />
+                  {analysisResult.analyzedAt}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => analyzeMutation.mutate()}
+                  disabled={analyzeMutation.isPending}
+                  className="h-7 text-xs gap-1"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  재분석
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setAnalysisResult(null)}
+                  className="h-7 text-xs"
+                >
+                  닫기
+                </Button>
+              </div>
+            </div>
+            {analysisResult.dataPoints && (
+              <div className="flex gap-3 text-xs text-muted-foreground mt-1">
+                <span>📈 상승 ETF {analysisResult.dataPoints.risingCount}개</span>
+                <span>📉 하락 ETF {analysisResult.dataPoints.fallingCount}개</span>
+                <span>📰 뉴스 {analysisResult.dataPoints.newsCount}건</span>
+                {analysisResult.dataPoints.market && <span>📊 {analysisResult.dataPoints.market}</span>}
+              </div>
+            )}
+          </CardHeader>
+          <CardContent>
+            <div className="prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap text-sm leading-relaxed">
+              {analysisResult.analysis.split("\n").map((line, i) => {
+                // 볼드 처리 (**text**)
+                const formattedLine = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+                if (formattedLine.includes("<strong>")) {
+                  return <p key={i} className="mb-1" dangerouslySetInnerHTML={{ __html: formattedLine }} />;
+                }
+                if (line.trim() === "") return <br key={i} />;
+                return <p key={i} className="mb-1">{line}</p>;
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {componentData && (
+        <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
+          <p>데이터 출처: 네이버 금융 · FnGuide · 한국투자증권 API</p>
+          <div className="flex gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => window.open(`https://www.etfcheck.co.kr/mobile/etpitem/${selectedEtfCode}/pdf`, "_blank")}
+              className="text-xs gap-1 h-7"
+            >
+              <ExternalLink className="w-3 h-3" />
+              etfcheck
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => window.open(`https://finance.naver.com/item/coinfo.naver?code=${selectedEtfCode}`, "_blank")}
+              className="text-xs gap-1 h-7"
+            >
+              <ExternalLink className="w-3 h-3" />
+              네이버금융
+            </Button>
+          </div>
+        </div>
       )}
     </div>
   );

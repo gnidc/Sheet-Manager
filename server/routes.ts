@@ -7,12 +7,36 @@ import axios from "axios";
 import bcrypt from "bcryptjs";
 import * as kisApi from "./kisApi.js";
 import * as cheerio from "cheerio";
+import OpenAI from "openai";
 
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
 const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH;
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const NAVER_CLIENT_ID = process.env.NAVER_CLIENT_ID;
 const NAVER_CLIENT_SECRET = process.env.NAVER_CLIENT_SECRET;
+
+// AI API 설정 (Gemini 또는 OpenAI)
+function getAIClient(): OpenAI | null {
+  const geminiKey = process.env.GEMINI_API_KEY;
+  const openaiKey = process.env.OPENAI_API_KEY;
+  
+  if (geminiKey) {
+    return new OpenAI({
+      apiKey: geminiKey,
+      baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
+    });
+  }
+  if (openaiKey) {
+    return new OpenAI({ apiKey: openaiKey });
+  }
+  return null;
+}
+
+function getAIModel(): string {
+  if (process.env.GEMINI_API_KEY) return "gemini-2.0-flash";
+  if (process.env.OPENAI_API_KEY) return "gpt-4o-mini";
+  return "";
+}
 
 // 환경 변수 확인 (디버깅)
 if (process.env.VERCEL) {
@@ -1211,6 +1235,132 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("[ETF] Failed to get top gainers:", error.message);
       res.status(500).json({ message: "ETF 상승 데이터 조회 실패" });
+    }
+  });
+
+  // ===== ETF 상승 트렌드 AI 분석 =====
+  app.post("/api/etf/analyze-trend", async (req, res) => {
+    try {
+      const aiClient = getAIClient();
+      if (!aiClient) {
+        return res.status(400).json({ 
+          message: "AI API 키가 설정되지 않았습니다. GEMINI_API_KEY 또는 OPENAI_API_KEY를 .env에 추가하세요." 
+        });
+      }
+
+      // 1) ETF 상승 데이터 수집
+      const allEtfs = await getEtfFullList();
+      const EXCLUDE_KEYWORDS = ["레버리지", "인버스", "2X", "bear", "BEAR", "곱버스", "숏", "SHORT", "울트라"];
+      const filtered = allEtfs.filter((etf) => {
+        return !EXCLUDE_KEYWORDS.some((kw) => etf.name.includes(kw));
+      });
+      const risingEtfs = filtered
+        .filter((etf) => etf.changeRate > 0)
+        .sort((a, b) => b.changeRate - a.changeRate)
+        .slice(0, 20);
+      
+      const fallingEtfs = filtered
+        .filter((etf) => etf.changeRate < 0)
+        .sort((a, b) => a.changeRate - b.changeRate)
+        .slice(0, 10);
+
+      // 2) 뉴스 데이터 수집
+      let newsData: string[] = [];
+      try {
+        const newsRes = await axios.get("https://finance.naver.com/news/news_list.naver?mode=RANK&page=1", {
+          headers: { "User-Agent": "Mozilla/5.0" },
+          timeout: 5000,
+        });
+        const $ = cheerio.load(newsRes.data);
+        $(".block1 li a, .block2 li a").each((_, el) => {
+          const title = $(el).text().trim();
+          if (title && title.length > 5) newsData.push(title);
+        });
+        newsData = newsData.slice(0, 20);
+      } catch (e) {
+        console.error("[Analyze] News fetch failed:", (e as Error).message);
+      }
+
+      // 3) 시장 지표 수집
+      let marketInfo = "";
+      try {
+        const marketRes = await axios.get("https://finance.naver.com/sise/", {
+          headers: { "User-Agent": "Mozilla/5.0" },
+          timeout: 5000,
+        });
+        const $ = cheerio.load(marketRes.data);
+        const kospi = $("#KOSPI_now").text().trim();
+        const kosdaq = $("#KOSDAQ_now").text().trim();
+        if (kospi) marketInfo += `코스피: ${kospi} `;
+        if (kosdaq) marketInfo += `코스닥: ${kosdaq} `;
+      } catch (e) {
+        console.error("[Analyze] Market data fetch failed:", (e as Error).message);
+      }
+
+      // 4) AI 프롬프트 구성
+      const etfSummary = risingEtfs.map((e, i) => 
+        `${i+1}. ${e.name}(${e.code}) 현재가:${e.nowVal.toLocaleString()} 등락률:+${e.changeRate}% 시총:${e.marketCap}억 거래량:${e.quant.toLocaleString()}`
+      ).join("\n");
+
+      const fallingSummary = fallingEtfs.map((e, i) => 
+        `${i+1}. ${e.name}(${e.code}) 등락률:${e.changeRate}%`
+      ).join("\n");
+
+      const newsSummary = newsData.length > 0 
+        ? newsData.map((n, i) => `${i+1}. ${n}`).join("\n") 
+        : "뉴스 데이터 없음";
+
+      const today = new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric", weekday: "long" });
+
+      const prompt = `당신은 한국 금융시장 전문 애널리스트입니다. 아래 데이터를 기반으로 오늘의 ETF 상승 트렌드를 분석해주세요.
+
+📅 날짜: ${today}
+📊 시장 현황: ${marketInfo || "데이터 없음"}
+
+📈 실시간 상승 ETF TOP 20:
+${etfSummary}
+
+📉 하락 ETF TOP 10:
+${fallingSummary}
+
+📰 주요 뉴스:
+${newsSummary}
+
+다음 형식으로 분석 보고서를 작성해주세요 (30줄 내외, 한국어):
+
+1. **📊 오늘의 시장 개요** (3-4줄): 전반적인 시장 분위기와 주요 지수 동향
+2. **🔥 주요 상승 섹터/테마 분석** (8-10줄): 상승 ETF들의 공통 테마, 섹터별 분류, 상승 원인 분석
+3. **📰 뉴스·매크로 연관 분석** (5-6줄): 뉴스와 ETF 상승의 연관성
+4. **📉 하락 섹터 동향** (3-4줄): 하락하는 섹터와 원인
+5. **💡 투자 시사점 및 주의사항** (5-6줄): 단기 투자 전략 제안 및 리스크 요인
+
+각 섹션은 제목을 포함하고, 구체적인 ETF명과 수치를 인용하여 작성해주세요.`;
+
+      // 5) AI API 호출
+      console.log("[Analyze] Calling AI API...");
+      const completion = await aiClient.chat.completions.create({
+        model: getAIModel(),
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 2000,
+        temperature: 0.7,
+      });
+
+      const analysis = completion.choices[0]?.message?.content || "분석 생성에 실패했습니다.";
+      console.log("[Analyze] Analysis generated successfully");
+
+      res.json({ 
+        analysis, 
+        analyzedAt: new Date().toLocaleString("ko-KR"),
+        dataPoints: {
+          risingCount: risingEtfs.length,
+          fallingCount: fallingEtfs.length,
+          newsCount: newsData.length,
+          market: marketInfo,
+        }
+      });
+    } catch (error: any) {
+      console.error("[Analyze] Failed:", error.message);
+      res.status(500).json({ message: `분석 실패: ${error.message}` });
     }
   });
 
