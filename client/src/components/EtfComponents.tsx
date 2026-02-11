@@ -101,6 +101,7 @@ export default function EtfComponents() {
   const [searchMode, setSearchMode] = useState<"search" | "direct">("search");
   const [sortField, setSortField] = useState<SortField>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+  const [chartPeriod, setChartPeriod] = useState<"day" | "week" | "month" | "year">("day");
 
   // ETF 실시간 상승 상위 15개
   const { data: topGainersData, isFetching: isLoadingGainers, refetch: refetchGainers } = useQuery<{
@@ -679,6 +680,42 @@ export default function EtfComponents() {
               </CardContent>
             </Card>
           )}
+
+          {/* 실시간 차트 */}
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <TrendingUp className="w-5 h-5 text-primary" />
+                  {componentData.etfName} 차트
+                </CardTitle>
+                <div className="flex gap-1">
+                  {(["day", "week", "month", "year"] as const).map((period) => (
+                    <Button
+                      key={period}
+                      variant={chartPeriod === period ? "default" : "outline"}
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={() => setChartPeriod(period)}
+                    >
+                      {{ day: "일봉", week: "주봉", month: "월봉", year: "연봉" }[period]}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="flex justify-center">
+              <img
+                key={`${selectedEtfCode}-${chartPeriod}`}
+                src={`https://ssl.pstatic.net/imgfinance/chart/item/area/${chartPeriod}/${selectedEtfCode}.png`}
+                alt={`${componentData.etfName} ${chartPeriod} 차트`}
+                className="max-w-full h-auto rounded-lg"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).style.display = "none";
+                }}
+              />
+            </CardContent>
+          </Card>
 
           {/* 하단 안내 */}
           <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
