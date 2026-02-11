@@ -205,6 +205,8 @@ export default function EtfComponents() {
     setCafePostDialogOpen(true);
   };
 
+  const topGainers = topGainersData?.items || [];
+
   // 카페 전송용 HTML 컨텐츠 생성
   const buildCafeContent = useCallback(() => {
     const now = new Date().toLocaleString("ko-KR");
@@ -442,8 +444,6 @@ ${htmlAnalysis}
   const upCount = componentData?.components.filter(c => c.changeSign === "1" || c.changeSign === "2").length || 0;
   const downCount = componentData?.components.filter(c => c.changeSign === "4" || c.changeSign === "5").length || 0;
   const flatCount = (componentData?.totalComponentCount || 0) - upCount - downCount;
-
-  const topGainers = topGainersData?.items || [];
 
   return (
     <div className="space-y-6">
