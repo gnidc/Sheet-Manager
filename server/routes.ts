@@ -1328,9 +1328,147 @@ export async function registerRoutes(
   });
 
   // 카페 내 검색 (여러 페이지를 스캔하여 키워드 매칭)
+  // 카페 전체 글 인덱스 캐시 (검색용)
+  let cafeArticleIndex: {
+    articles: Array<{
+      articleId: number;
+      subject: string;
+      writerNickname: string;
+      menuId?: number;
+      menuName: string;
+      readCount: number;
+      commentCount: number;
+      likeItCount: number;
+      representImage: string | null;
+      writeDateTimestamp: number;
+      newArticle: boolean;
+      openArticle: boolean;
+    }>;
+    totalArticleCount: number;
+    lastUpdated: number;
+    isBuilding: boolean;
+  } = { articles: [], totalArticleCount: 0, lastUpdated: 0, isBuilding: false };
+
+  const ARTICLE_INDEX_TTL = 10 * 60 * 1000; // 10분
+
+  // 전체 글 인덱스 구축 (병렬 스캔)
+  async function buildArticleIndex() {
+    if (cafeArticleIndex.isBuilding) return;
+    cafeArticleIndex.isBuilding = true;
+
+    try {
+      // 먼저 첫 페이지에서 총 글 수 확인
+      const firstPageRes = await axios.get(
+        "https://apis.naver.com/cafe-web/cafe2/ArticleListV2.json",
+        {
+          params: {
+            "search.clubid": CAFE_ID,
+            "search.boardtype": "L",
+            "search.page": 1,
+            "search.perPage": 50,
+          },
+          headers: CAFE_HEADERS,
+          timeout: 10000,
+        }
+      );
+
+      const firstResult = firstPageRes.data?.message?.result;
+      const totalCount = firstResult?.totalArticleCount || 0;
+      const firstArticles = firstResult?.articleList || [];
+      const allArticles: any[] = [];
+
+      // 첫 페이지 결과 추가
+      for (const a of firstArticles) {
+        allArticles.push({
+          articleId: a.articleId,
+          subject: a.subject,
+          writerNickname: a.writerNickname,
+          menuId: a.menuId,
+          menuName: a.menuName || "",
+          readCount: a.readCount || 0,
+          commentCount: a.commentCount || 0,
+          likeItCount: a.likeItCount || 0,
+          representImage: a.representImage || null,
+          writeDateTimestamp: a.writeDateTimestamp,
+          newArticle: a.newArticle || false,
+          openArticle: a.openArticle ?? true,
+        });
+      }
+
+      // 나머지 페이지 병렬 스캔 (최대 200페이지 = 10,000글)
+      const maxPages = Math.min(Math.ceil(totalCount / 50), 200);
+      const BATCH_SIZE = 10; // 10페이지씩 병렬
+
+      for (let batch = 1; batch < maxPages; batch += BATCH_SIZE) {
+        const promises = [];
+        for (let i = 0; i < BATCH_SIZE && batch + i < maxPages; i++) {
+          const scanPage = batch + i + 1; // 2페이지부터
+          promises.push(
+            axios.get("https://apis.naver.com/cafe-web/cafe2/ArticleListV2.json", {
+              params: {
+                "search.clubid": CAFE_ID,
+                "search.boardtype": "L",
+                "search.page": scanPage,
+                "search.perPage": 50,
+              },
+              headers: CAFE_HEADERS,
+              timeout: 15000,
+            }).catch(() => null)
+          );
+        }
+
+        const results = await Promise.all(promises);
+        let noMoreData = true;
+
+        for (const response of results) {
+          if (!response) continue;
+          const articleList = response.data?.message?.result?.articleList || [];
+          if (articleList.length > 0) noMoreData = false;
+
+          for (const a of articleList) {
+            allArticles.push({
+              articleId: a.articleId,
+              subject: a.subject,
+              writerNickname: a.writerNickname,
+              menuId: a.menuId,
+              menuName: a.menuName || "",
+              readCount: a.readCount || 0,
+              commentCount: a.commentCount || 0,
+              likeItCount: a.likeItCount || 0,
+              representImage: a.representImage || null,
+              writeDateTimestamp: a.writeDateTimestamp,
+              newArticle: a.newArticle || false,
+              openArticle: a.openArticle ?? true,
+            });
+          }
+        }
+
+        if (noMoreData) break;
+      }
+
+      // 중복 제거 (articleId 기준)
+      const uniqueMap = new Map<number, any>();
+      for (const a of allArticles) {
+        uniqueMap.set(a.articleId, a);
+      }
+
+      cafeArticleIndex = {
+        articles: Array.from(uniqueMap.values()),
+        totalArticleCount: totalCount,
+        lastUpdated: Date.now(),
+        isBuilding: false,
+      };
+
+      console.log(`[Cafe Index] Built index: ${cafeArticleIndex.articles.length} articles (total in cafe: ${totalCount})`);
+    } catch (error: any) {
+      console.error("[Cafe Index] Failed to build:", error.message);
+      cafeArticleIndex.isBuilding = false;
+    }
+  }
+
   app.get("/api/cafe/search", requireAdmin, async (req, res) => {
     try {
-      const query = (req.query.q as string || "").trim().toLowerCase();
+      const query = (req.query.q as string || "").trim();
       const page = parseInt(req.query.page as string) || 1;
       const perPage = Math.min(parseInt(req.query.perPage as string) || 20, 50);
 
@@ -1338,68 +1476,39 @@ export async function registerRoutes(
         return res.json({ articles: [], page: 1, perPage, totalArticles: 0, query: "" });
       }
 
-      // 최대 10페이지(500건)를 스캔하여 키워드 매칭
-      const allMatched: any[] = [];
-      const maxScanPages = 10;
-      const scanPerPage = 50;
-
-      for (let scanPage = 1; scanPage <= maxScanPages; scanPage++) {
-        const response = await axios.get(
-          "https://apis.naver.com/cafe-web/cafe2/ArticleListV2.json",
-          {
-            params: {
-              "search.clubid": CAFE_ID,
-              "search.boardtype": "L",
-              "search.page": scanPage,
-              "search.perPage": scanPerPage,
-            },
-            headers: CAFE_HEADERS,
-            timeout: 10000,
-          }
-        );
-
-        const result = response.data?.message?.result;
-        const articleList = result?.articleList || [];
-
-        if (articleList.length === 0) break;
-
-        for (const a of articleList) {
-          const subject = (a.subject || "").toLowerCase();
-          const writerNickname = (a.writerNickname || "").toLowerCase();
-          const menuName = (a.menuName || "").toLowerCase();
-          if (subject.includes(query) || writerNickname.includes(query) || menuName.includes(query)) {
-            allMatched.push({
-              articleId: a.articleId,
-              subject: a.subject,
-              writerNickname: a.writerNickname,
-              menuId: a.menuId,
-              menuName: a.menuName,
-              readCount: a.readCount,
-              commentCount: a.commentCount,
-              likeItCount: a.likeItCount,
-              representImage: a.representImage || null,
-              writeDateTimestamp: a.writeDateTimestamp,
-              newArticle: a.newArticle,
-              openArticle: a.openArticle,
-            });
-          }
-        }
-
-        // 다음 페이지가 없으면 중단
-        const totalArticleCount = result?.totalArticleCount || 0;
-        if (scanPage * scanPerPage >= totalArticleCount) break;
+      // 인덱스가 없거나 만료되었으면 구축
+      const now = Date.now();
+      if (cafeArticleIndex.articles.length === 0 || now - cafeArticleIndex.lastUpdated > ARTICLE_INDEX_TTL) {
+        await buildArticleIndex();
       }
 
-      // 페이지네이션 적용
+      // 키워드 검색 (제목, 작성자, 게시판명)
+      const lowerQuery = query.toLowerCase();
+      const keywords = lowerQuery.split(/\s+/).filter(Boolean);
+
+      const matched = cafeArticleIndex.articles.filter((a) => {
+        const searchTarget = `${a.subject} ${a.writerNickname} ${a.menuName}`.toLowerCase();
+        // 모든 키워드가 포함되어야 매칭 (AND 검색)
+        return keywords.every((kw) => searchTarget.includes(kw));
+      });
+
+      // 최신순 정렬
+      matched.sort((a, b) => (b.writeDateTimestamp || 0) - (a.writeDateTimestamp || 0));
+
+      // 페이지네이션
       const startIdx = (page - 1) * perPage;
-      const pagedArticles = allMatched.slice(startIdx, startIdx + perPage);
+      const pagedArticles = matched.slice(startIdx, startIdx + perPage);
+
+      console.log(`[Cafe Search] query="${query}" matched=${matched.length}/${cafeArticleIndex.articles.length} indexed`);
 
       return res.json({
         articles: pagedArticles,
         page,
         perPage,
-        totalArticles: allMatched.length,
+        totalArticles: matched.length,
         query: req.query.q,
+        indexSize: cafeArticleIndex.articles.length,
+        indexAge: Math.round((now - cafeArticleIndex.lastUpdated) / 1000),
       });
     } catch (error: any) {
       console.error("[Cafe] Failed to search articles:", error.message);
