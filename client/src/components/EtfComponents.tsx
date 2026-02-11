@@ -956,6 +956,28 @@ ${htmlContent}
                     기본 프롬프트
                   </Button>
                   <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      try {
+                        const saved = localStorage.getItem("etf_analysis_result");
+                        if (saved) {
+                          setAnalysisResult(JSON.parse(saved));
+                          toast({ title: "불러오기 완료", description: "이전 분석 내용을 불러왔습니다." });
+                        } else {
+                          toast({ title: "저장된 내역 없음", description: "이전에 실행한 분석 내역이 없습니다.", variant: "destructive" });
+                        }
+                      } catch {
+                        toast({ title: "오류", description: "분석 내역을 불러올 수 없습니다.", variant: "destructive" });
+                      }
+                    }}
+                    disabled={analyzeMutation.isPending}
+                    className="h-8 text-xs"
+                  >
+                    <FileText className="w-3 h-3 mr-1" />
+                    이전 분석
+                  </Button>
+                  <Button
                     onClick={() => analyzeMutation.mutate(analysisPrompt)}
                     disabled={analyzeMutation.isPending || !analysisPrompt.trim()}
                     className="h-8 gap-1.5 px-4"
