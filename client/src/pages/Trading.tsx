@@ -1,9 +1,13 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { Link, useSearch } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import {
+  XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
+  ResponsiveContainer, BarChart, Bar, ComposedChart, Cell,
+} from "recharts";
 
 
 // ========== 주요 국내 종목 리스트 (KRX 시가총액 상위) ==========
@@ -173,6 +177,11 @@ export default function Trading() {
   const urlCode = urlParams.get("code") || "";
   const urlName = urlParams.get("name") || "";
 
+  // 탭 제어 상태
+  const [activeTab, setActiveTab] = useState(urlCode ? "order" : "account");
+  // 계좌현황에서 주문탭으로 넘기는 종목/주문유형/보유수량/현재가 정보
+  const [orderTarget, setOrderTarget] = useState<{ code: string; name: string; orderType: "buy" | "sell"; holdingQty?: number; currentPrice?: number } | null>(null);
+
   // KIS API 상태
   const { data: status, isLoading: statusLoading, refetch: refetchStatus } = useQuery<TradingStatus>({
     queryKey: ["/api/trading/status"],
@@ -266,7 +275,7 @@ export default function Trading() {
         ) : !status?.tradingConfigured && !statusLoading ? (
           isAdmin ? <AdminSetupGuide status={status} /> : <UserSetupGuide onComplete={() => { refetchConfig(); refetchStatus(); }} />
         ) : (
-          <Tabs defaultValue={urlCode ? "order" : "account"} className="space-y-8">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-8">
             <TabsList className="grid w-full grid-cols-5 max-w-3xl mx-auto">
               <TabsTrigger value="account" className="gap-2">
                 <Wallet className="h-4 w-4" />
@@ -291,10 +300,13 @@ export default function Trading() {
             </TabsList>
 
             <TabsContent value="account">
-              <AccountSection />
+              <AccountSection onNavigateOrder={(code, name, type, holdingQty, currentPrice) => {
+                setOrderTarget({ code, name, orderType: type, holdingQty, currentPrice });
+                setActiveTab("order");
+              }} />
             </TabsContent>
             <TabsContent value="order">
-              <OrderSection initialCode={urlCode} initialName={urlName} />
+              <OrderSection initialCode={orderTarget?.code || urlCode} initialName={orderTarget?.name || urlName} initialOrderType={orderTarget?.orderType} initialHoldingQty={orderTarget?.holdingQty} initialCurrentPrice={orderTarget?.currentPrice} />
             </TabsContent>
             <TabsContent value="stoploss">
               <StopLossSection />
@@ -645,12 +657,268 @@ function UserConfigManageButton({ config, onConfigChanged }: { config: TradingCo
   );
 }
 
+// ========== 호가 / 차트 타입 ==========
+interface AskingPriceData {
+  sellPrices: { price: string; qty: string }[];
+  buyPrices: { price: string; qty: string }[];
+  totalSellQty: string;
+  totalBuyQty: string;
+}
+interface DailyPriceData {
+  date: string;
+  closePrice: string;
+  openPrice?: string;
+  highPrice?: string;
+  lowPrice?: string;
+  volume?: string;
+}
+
+// ========== 종목 호가 컴포넌트 ==========
+function StockAskingPrice({ stockCode, stockName }: { stockCode: string; stockName: string }) {
+  const { data, isLoading, error, refetch } = useQuery<AskingPriceData>({
+    queryKey: ["/api/trading/asking-price", stockCode],
+    queryFn: async () => {
+      const res = await fetch(`/api/trading/asking-price/${stockCode}`, { credentials: "include" });
+      if (!res.ok) throw new Error("호가 조회 실패");
+      return res.json();
+    },
+    staleTime: 10000,
+    refetchInterval: 15000,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <Loader2 className="w-6 h-6 animate-spin text-primary" />
+        <span className="ml-2 text-muted-foreground">호가 조회 중...</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-4 text-muted-foreground text-sm">
+        호가 조회 실패 - <button className="text-primary underline" onClick={() => refetch()}>재시도</button>
+      </div>
+    );
+  }
+
+  if (!data) return null;
+
+  const maxQty = Math.max(
+    ...data.sellPrices.map(p => Number(p.qty)),
+    ...data.buyPrices.map(p => Number(p.qty)),
+    1
+  );
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between mb-2">
+        <h4 className="text-sm font-bold">📊 {stockName} 호가</h4>
+        <Button variant="ghost" size="sm" onClick={() => refetch()}>
+          <RefreshCw className="w-3.5 h-3.5" />
+        </Button>
+      </div>
+      <div className="text-xs grid grid-cols-1">
+        {/* 매도호가 (높은가→낮은가, 빨간바탕) */}
+        {data.sellPrices.map((p, i) => {
+          const ratio = Number(p.qty) / maxQty * 100;
+          return (
+            <div key={`sell-${i}`} className="flex items-center gap-1 py-0.5 px-1 relative">
+              <div className="absolute inset-y-0 right-0 bg-blue-100 dark:bg-blue-900/30" style={{ width: `${ratio}%` }} />
+              <span className="w-20 text-right text-blue-600 font-mono text-xs relative z-10">{Number(p.qty).toLocaleString()}</span>
+              <span className="w-24 text-center font-mono text-xs font-medium relative z-10">{Number(p.price).toLocaleString()}</span>
+              <span className="w-20 relative z-10" />
+            </div>
+          );
+        })}
+        {/* 구분선 */}
+        <div className="border-t-2 border-gray-300 dark:border-gray-600 my-0.5" />
+        {/* 매수호가 (높은가→낮은가, 파란바탕) */}
+        {data.buyPrices.map((p, i) => {
+          const ratio = Number(p.qty) / maxQty * 100;
+          return (
+            <div key={`buy-${i}`} className="flex items-center gap-1 py-0.5 px-1 relative">
+              <div className="absolute inset-y-0 left-0 bg-red-100 dark:bg-red-900/30" style={{ width: `${ratio}%` }} />
+              <span className="w-20 relative z-10" />
+              <span className="w-24 text-center font-mono text-xs font-medium relative z-10">{Number(p.price).toLocaleString()}</span>
+              <span className="w-20 text-left text-red-600 font-mono text-xs relative z-10">{Number(p.qty).toLocaleString()}</span>
+            </div>
+          );
+        })}
+        {/* 총 잔량 */}
+        <div className="border-t border-gray-200 dark:border-gray-700 mt-1 pt-1 flex justify-between text-[11px] text-muted-foreground px-1">
+          <span>매도잔량: <b className="text-blue-600">{Number(data.totalSellQty).toLocaleString()}</b></span>
+          <span>매수잔량: <b className="text-red-600">{Number(data.totalBuyQty).toLocaleString()}</b></span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ========== 종목 일봉 차트 컴포넌트 ==========
+function StockDailyChart({ stockCode, stockName }: { stockCode: string; stockName: string }) {
+  const [chartPeriod, setChartPeriod] = useState<"1M" | "3M" | "6M" | "1Y">("3M");
+
+  const { data, isLoading, error } = useQuery<DailyPriceData[]>({
+    queryKey: ["/api/trading/daily-chart", stockCode, chartPeriod],
+    queryFn: async () => {
+      const res = await fetch(`/api/trading/daily-chart/${stockCode}?period=${chartPeriod}`, { credentials: "include" });
+      if (!res.ok) throw new Error("차트 데이터 조회 실패");
+      return res.json();
+    },
+    staleTime: 60000,
+  });
+
+  const chartData = useMemo(() => {
+    if (!data) return [];
+    return data.map(d => ({
+      date: d.date.slice(5), // MM-DD
+      fullDate: d.date,
+      종가: Number(d.closePrice),
+      시가: Number(d.openPrice || 0),
+      고가: Number(d.highPrice || 0),
+      저가: Number(d.lowPrice || 0),
+      거래량: Number(d.volume || 0),
+    }));
+  }, [data]);
+
+  // 최저/최고값 계산 (Y축 범위)
+  const yDomain = useMemo(() => {
+    if (!chartData.length) return [0, 0];
+    const allPrices = chartData.flatMap(d => [d.고가, d.저가, d.시가, d.종가]).filter(Boolean);
+    const min = Math.min(...allPrices);
+    const max = Math.max(...allPrices);
+    const margin = (max - min) * 0.05 || max * 0.02;
+    return [Math.floor(min - margin), Math.ceil(max + margin)];
+  }, [chartData]);
+
+  // 캔들스틱 커스텀 Shape
+  const CandlestickBar = (props: any) => {
+    const { x, y, width, height, payload } = props;
+    if (!payload) return null;
+    const { 시가, 종가, 고가, 저가 } = payload;
+    const isUp = 종가 >= 시가;
+    const color = isUp ? "#ef4444" : "#3b82f6"; // 양봉: 빨강, 음봉: 파랑
+
+    const yScale = (val: number) => {
+      const [domMin, domMax] = yDomain;
+      const chartHeight = 210; // approx chart area height
+      const topMargin = 5;
+      return topMargin + ((domMax - val) / (domMax - domMin)) * chartHeight;
+    };
+
+    const bodyTop = yScale(Math.max(시가, 종가));
+    const bodyBottom = yScale(Math.min(시가, 종가));
+    const bodyHeight = Math.max(bodyBottom - bodyTop, 1);
+    const wickTop = yScale(고가);
+    const wickBottom = yScale(저가);
+    const centerX = x + width / 2;
+
+    return (
+      <g>
+        {/* 꼬리 (위 아래) */}
+        <line x1={centerX} y1={wickTop} x2={centerX} y2={wickBottom} stroke={color} strokeWidth={1} />
+        {/* 몸통 */}
+        <rect x={x + 1} y={bodyTop} width={Math.max(width - 2, 2)} height={bodyHeight} fill={isUp ? color : color} stroke={color} strokeWidth={0.5} />
+      </g>
+    );
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <h4 className="text-sm font-bold">📈 {stockName} 일봉 차트</h4>
+        <div className="flex gap-1">
+          {(["1M", "3M", "6M", "1Y"] as const).map(p => (
+            <Button
+              key={p}
+              variant={chartPeriod === p ? "default" : "outline"}
+              size="sm"
+              className="h-6 px-2 text-xs"
+              onClick={() => setChartPeriod(p)}
+            >
+              {p}
+            </Button>
+          ))}
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="w-6 h-6 animate-spin text-primary" />
+          <span className="ml-2 text-muted-foreground text-sm">차트 로딩 중...</span>
+        </div>
+      ) : error ? (
+        <div className="text-center py-4 text-muted-foreground text-sm">차트 데이터를 불러올 수 없습니다</div>
+      ) : chartData.length === 0 ? (
+        <div className="text-center py-4 text-muted-foreground text-sm">차트 데이터가 없습니다</div>
+      ) : (
+        <div className="space-y-2">
+          {/* 봉차트 (캔들스틱) */}
+          <ResponsiveContainer width="100%" height={240}>
+            <ComposedChart data={chartData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+              <XAxis dataKey="date" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
+              <YAxis domain={yDomain} tick={{ fontSize: 10 }} tickFormatter={v => v.toLocaleString()} width={60} />
+              <RechartsTooltip
+                contentStyle={{ fontSize: "12px" }}
+                content={({ active, payload, label }) => {
+                  if (!active || !payload?.length) return null;
+                  const d = payload[0]?.payload;
+                  if (!d) return null;
+                  const isUp = d.종가 >= d.시가;
+                  return (
+                    <div className="bg-white dark:bg-gray-800 border rounded-lg shadow-lg p-2 text-xs">
+                      <p className="font-medium mb-1">{d.fullDate}</p>
+                      <p>시가: <span className="font-mono">{d.시가.toLocaleString()}</span></p>
+                      <p>고가: <span className="font-mono text-red-500">{d.고가.toLocaleString()}</span></p>
+                      <p>저가: <span className="font-mono text-blue-500">{d.저가.toLocaleString()}</span></p>
+                      <p>종가: <span className={`font-mono font-bold ${isUp ? "text-red-500" : "text-blue-500"}`}>{d.종가.toLocaleString()}</span></p>
+                    </div>
+                  );
+                }}
+              />
+              <Bar dataKey="고가" shape={<CandlestickBar />} isAnimationActive={false} />
+            </ComposedChart>
+          </ResponsiveContainer>
+
+          {/* 거래량 차트 */}
+          <ResponsiveContainer width="100%" height={80}>
+            <BarChart data={chartData} margin={{ top: 0, right: 10, left: 10, bottom: 0 }}>
+              <XAxis dataKey="date" tick={false} />
+              <YAxis tick={{ fontSize: 9 }} tickFormatter={v => (v >= 1000000 ? (v / 1000000).toFixed(0) + "M" : v >= 1000 ? (v / 1000).toFixed(0) + "K" : v)} width={60} />
+              <RechartsTooltip
+                contentStyle={{ fontSize: "11px" }}
+                formatter={(value: number) => [value.toLocaleString(), "거래량"]}
+                labelFormatter={(label, payload) => payload?.[0]?.payload?.fullDate || label}
+              />
+              <Bar dataKey="거래량" isAnimationActive={false}>
+                {chartData.map((d, idx) => (
+                  <Cell key={idx} fill={d.종가 >= d.시가 ? "#ef4444" : "#3b82f6"} opacity={0.7} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ========== Account Section ==========
-function AccountSection() {
+function AccountSection({ onNavigateOrder }: { onNavigateOrder?: (code: string, name: string, orderType: "buy" | "sell", holdingQty: number, currentPrice: number) => void }) {
+  const [selectedStock, setSelectedStock] = useState<{ code: string; name: string } | null>(null);
   const { data: balance, isLoading, error, refetch } = useQuery<AccountBalance>({
     queryKey: ["/api/trading/balance"],
     retry: false,
   });
+
+  const handleStockClick = useCallback((stockCode: string, stockName: string) => {
+    setSelectedStock(prev =>
+      prev?.code === stockCode ? null : { code: stockCode, name: stockName }
+    );
+  }, []);
 
   return (
     <div className="space-y-6">
@@ -718,6 +986,7 @@ function AccountSection() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">보유 종목</CardTitle>
+              <CardDescription className="text-xs">종목을 클릭하면 호가와 차트를 확인할 수 있습니다</CardDescription>
             </CardHeader>
             <CardContent>
               {balance.holdings.length === 0 ? (
@@ -737,13 +1006,20 @@ function AccountSection() {
                         <TableHead className="text-right">평가금액</TableHead>
                         <TableHead className="text-right">손익</TableHead>
                         <TableHead className="text-right">수익률</TableHead>
+                        <TableHead className="text-center">주문</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {balance.holdings.map((item) => (
-                        <TableRow key={item.stockCode}>
+                        <TableRow
+                          key={item.stockCode}
+                          className={`cursor-pointer hover:bg-muted/60 transition-colors ${selectedStock?.code === item.stockCode ? "bg-primary/10 border-l-2 border-primary" : ""}`}
+                          onClick={() => handleStockClick(item.stockCode, item.stockName)}
+                        >
                           <TableCell className="font-mono text-sm">{item.stockCode}</TableCell>
-                          <TableCell className="font-medium">{item.stockName}</TableCell>
+                          <TableCell className="font-medium">
+                            <span className="text-primary hover:underline">{item.stockName}</span>
+                          </TableCell>
                           <TableCell className="text-right">{item.holdingQty.toLocaleString()}</TableCell>
                           <TableCell className="text-right">{item.avgBuyPrice.toLocaleString()}</TableCell>
                           <TableCell className="text-right">{item.currentPrice.toLocaleString()}</TableCell>
@@ -754,6 +1030,28 @@ function AccountSection() {
                           <TableCell className={`text-right font-bold ${item.evalProfitRate >= 0 ? "text-red-500" : "text-blue-500"}`}>
                             {item.evalProfitRate >= 0 ? "+" : ""}{item.evalProfitRate.toFixed(2)}%
                           </TableCell>
+                          <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex gap-1 justify-center">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-6 px-2 text-xs text-red-600 border-red-300 hover:bg-red-50 hover:text-red-700"
+                                onClick={() => onNavigateOrder?.(item.stockCode, item.stockName, "buy", item.holdingQty, item.currentPrice)}
+                              >
+                                <ArrowUpRight className="w-3 h-3 mr-0.5" />
+                                매수
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-6 px-2 text-xs text-blue-600 border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+                                onClick={() => onNavigateOrder?.(item.stockCode, item.stockName, "sell", item.holdingQty, item.currentPrice)}
+                              >
+                                <ArrowDownRight className="w-3 h-3 mr-0.5" />
+                                매도
+                              </Button>
+                            </div>
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -762,6 +1060,38 @@ function AccountSection() {
               )}
             </CardContent>
           </Card>
+
+          {/* 선택된 종목 호가 + 차트 */}
+          {selectedStock && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <BarChart3 className="w-4 h-4 text-primary" />
+                  {selectedStock.name} ({selectedStock.code})
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="ml-auto h-6 text-xs"
+                    onClick={() => setSelectedStock(null)}
+                  >
+                    닫기 ✕
+                  </Button>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* 호가 */}
+                  <div>
+                    <StockAskingPrice stockCode={selectedStock.code} stockName={selectedStock.name} />
+                  </div>
+                  {/* 차트 */}
+                  <div>
+                    <StockDailyChart stockCode={selectedStock.code} stockName={selectedStock.name} />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </>
       ) : null}
     </div>
@@ -769,16 +1099,39 @@ function AccountSection() {
 }
 
 // ========== Order Section ==========
-function OrderSection({ initialCode, initialName }: { initialCode?: string; initialName?: string }) {
+function OrderSection({ initialCode, initialName, initialOrderType, initialHoldingQty, initialCurrentPrice }: { initialCode?: string; initialName?: string; initialOrderType?: "buy" | "sell"; initialHoldingQty?: number; initialCurrentPrice?: number }) {
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState(initialName || initialCode || "");
   const [selectedStock, setSelectedStock] = useState<{ code: string; name: string } | null>(
     initialCode ? { code: initialCode, name: initialName || initialCode } : null
   );
-  const [orderType, setOrderType] = useState<"buy" | "sell">("buy");
+  const [orderType, setOrderType] = useState<"buy" | "sell">(initialOrderType || "buy");
+
+  // 계좌현황에서 넘어온 종목/주문유형/현재가/보유수량 반영
+  useEffect(() => {
+    if (initialCode) {
+      setSelectedStock({ code: initialCode, name: initialName || initialCode });
+      setSearchTerm(initialName || initialCode);
+      // 현재가를 주문가격에 자동 입력
+      if (initialCurrentPrice) {
+        setPrice(String(initialCurrentPrice));
+      } else {
+        setPrice("");
+      }
+      // 매도주문 시 보유수량을 자동 입력
+      if (initialOrderType === "sell" && initialHoldingQty) {
+        setQuantity(String(initialHoldingQty));
+      } else {
+        setQuantity("");
+      }
+    }
+    if (initialOrderType) {
+      setOrderType(initialOrderType);
+    }
+  }, [initialCode, initialName, initialOrderType, initialHoldingQty, initialCurrentPrice]);
   const [orderMethod, setOrderMethod] = useState<"limit" | "market">("limit");
-  const [quantity, setQuantity] = useState("");
-  const [price, setPrice] = useState("");
+  const [quantity, setQuantity] = useState(initialOrderType === "sell" && initialHoldingQty ? String(initialHoldingQty) : "");
+  const [price, setPrice] = useState(initialCurrentPrice ? String(initialCurrentPrice) : "");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [codeSearching, setCodeSearching] = useState(false);
 
@@ -801,12 +1154,13 @@ function OrderSection({ initialCode, initialName }: { initialCode?: string; init
     refetchInterval: 30000,
   });
 
-  // 현재가로부터 종목명 업데이트 + 주문가격 기본값 설정
+  // 현재가로부터 종목명 업데이트 + 주문가격 자동 설정
   React.useEffect(() => {
     if (priceData?.stockName && selectedStock && !selectedStock.name) {
       setSelectedStock(prev => prev ? { ...prev, name: priceData.stockName } : prev);
       setSearchTerm(priceData.stockName);
     }
+    // 현재가 조회 결과로 주문가격 자동 입력 (가격이 비어있을 때)
     if (priceData?.price && !price) {
       setPrice(priceData.price);
     }
@@ -1361,6 +1715,22 @@ function OrderSection({ initialCode, initialName }: { initialCode?: string; init
           </CardContent>
         </Card>
       </div>
+
+      {/* 선택된 종목 호가 + 차트 */}
+      {selectedStock && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <Card>
+            <CardContent className="pt-4">
+              <StockAskingPrice stockCode={selectedStock.code} stockName={selectedStock.name || selectedStock.code} />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4">
+              <StockDailyChart stockCode={selectedStock.code} stockName={selectedStock.name || selectedStock.code} />
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

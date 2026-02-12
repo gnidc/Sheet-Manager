@@ -209,7 +209,7 @@ export default function Home() {
           </TabsList>
 
           <TabsContent value="home">
-            <HomeEmbed />
+            <HomeEmbed onNavigate={setActiveTab} />
           </TabsContent>
 
           <TabsContent value="etf-components">
@@ -556,19 +556,17 @@ function PublicCafeView() {
 
   if (isLoading) {
     return (
-      <Card>
-        <CardContent className="py-20 text-center">
-          <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-2" />
-          <p className="text-sm text-muted-foreground">카페 글 목록 로딩 중...</p>
-        </CardContent>
-      </Card>
+      <div className="py-20 text-center">
+        <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-2" />
+        <p className="text-sm text-muted-foreground">카페 글 목록 로딩 중...</p>
+      </div>
     );
   }
 
   return (
     <div className="space-y-6">
       {/* 헤더 */}
-      <Card className="overflow-hidden">
+      <div className="overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b bg-muted/30">
           <div className="flex items-center gap-2">
             <img
@@ -764,11 +762,11 @@ function PublicCafeView() {
             )}
           </>
         )}
-      </Card>
+      </div>
 
       {/* 전체 공지글 (검색 모드가 아닐 때만) */}
       {!isSearchMode && noticeArticles.length > 0 && (
-        <Card className="overflow-hidden border-amber-200/50">
+        <div className="overflow-hidden">
           <div className="px-4 pt-3 pb-1 bg-amber-50/50 border-b border-amber-200/30">
             <h4 className="text-sm font-semibold flex items-center gap-1.5 mb-2">
               <Newspaper className="w-4 h-4 text-amber-600" />
@@ -813,7 +811,7 @@ function PublicCafeView() {
               </a>
             ))}
           </div>
-        </Card>
+        </div>
       )}
     </div>
   );
@@ -826,6 +824,42 @@ interface NoticeItem {
   isActive: boolean | null;
   createdAt: string;
   updatedAt: string;
+}
+
+// ===== 바로가기 버튼 =====
+function QuickLinks({ onNavigate }: { onNavigate: (tab: string) => void }) {
+  const shortcuts = [
+    { label: "ETF실시간", tab: "etf-components", icon: "📈" },
+    { label: "ETF검색", tab: "new-etf", icon: "🔍" },
+    { label: "국내증시", tab: "markets-domestic", icon: "🇰🇷" },
+    { label: "해외증시", tab: "markets-global", icon: "🌍" },
+    { label: "일간보고서", tab: "strategy-daily", icon: "📋" },
+    { label: "즐겨찾기", tab: "bookmarks", icon: "⭐" },
+  ];
+
+  return (
+    <div className="mb-4 px-1">
+      <div className="py-3 px-3">
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-sm font-bold text-foreground">⚡ 바로가기</span>
+        </div>
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+          {shortcuts.map((s) => (
+            <Button
+              key={s.tab}
+              variant="outline"
+              size="sm"
+              onClick={() => onNavigate(s.tab)}
+              className="gap-1 text-xs h-9 font-medium hover:bg-primary/10 hover:border-primary/40 transition-colors"
+            >
+              <span>{s.icon}</span>
+              {s.label}
+            </Button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function NoticeBoard() {
@@ -899,14 +933,14 @@ function NoticeBoard() {
   // ===== 일반 유저용 뷰 =====
   if (!isAdmin) {
     return (
-      <Card className="mb-4 border-yellow-300 dark:border-yellow-700">
-        <CardHeader className="pb-2 pt-3">
-          <CardTitle className="text-base flex items-center gap-2">
+      <div className="mb-4">
+        <div className="pb-2 pt-3 px-4">
+          <div className="text-base font-semibold flex items-center gap-2">
             <Bell className="w-4 h-4 text-yellow-600" />
             공지사항
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="pb-3">
+          </div>
+        </div>
+        <div className="pb-3 px-4">
           <div className="space-y-1">
             {noticeList.map((n, idx) => (
               <p key={n.id} className="text-sm font-bold text-foreground" dangerouslySetInnerHTML={{
@@ -917,24 +951,24 @@ function NoticeBoard() {
               }} />
             ))}
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     );
   }
 
   // ===== 관리자용 편집 뷰 =====
   return (
-    <Card className="mb-4 border-yellow-300 dark:border-yellow-700">
-      <CardHeader className="pb-2 pt-3">
+    <div className="mb-4">
+      <div className="pb-2 pt-3 px-4">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-base flex items-center gap-2">
+          <div className="text-base font-semibold flex items-center gap-2">
             <Bell className="w-4 h-4 text-yellow-600" />
             공지사항 관리
-          </CardTitle>
+          </div>
           <span className="text-xs text-muted-foreground">{noticeList.length}개 공지</span>
         </div>
-      </CardHeader>
-      <CardContent className="pb-3 space-y-3">
+      </div>
+      <div className="pb-3 px-4 space-y-3">
         {/* 공지 목록 */}
         {noticeList.length > 0 && (
           <div className="space-y-2">
@@ -992,12 +1026,12 @@ function NoticeBoard() {
             추가
           </Button>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
 
-function HomeEmbed() {
+function HomeEmbed({ onNavigate }: { onNavigate: (tab: string) => void }) {
   const { isAdmin } = useAuth();
   const { toast } = useToast();
   const [page, setPage] = useState(1);
@@ -1229,6 +1263,7 @@ function HomeEmbed() {
     return (
       <>
         <NoticeBoard />
+        <QuickLinks onNavigate={onNavigate} />
         <PublicCafeView />
       </>
     );
@@ -1275,19 +1310,18 @@ function HomeEmbed() {
 
   if (isLoading && !isSearchMode) {
   return (
-      <Card>
-        <CardContent className="py-20 text-center">
-          <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-2" />
-          <p className="text-sm text-muted-foreground">카페 글 목록 로딩 중...</p>
-        </CardContent>
-      </Card>
+      <div className="py-20 text-center">
+        <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-2" />
+        <p className="text-sm text-muted-foreground">카페 글 목록 로딩 중...</p>
+      </div>
     );
   }
 
   return (
     <>
       <NoticeBoard />
-      <Card className="overflow-hidden">
+      <QuickLinks onNavigate={onNavigate} />
+      <div className="overflow-hidden">
         {/* 헤더 */}
         <div className="flex items-center justify-between px-4 py-3 border-b bg-muted/30">
           <div className="flex items-center gap-2">
@@ -1713,7 +1747,7 @@ function HomeEmbed() {
             </Button>
             </div>
             )}
-        </Card>
+        </div>
 
       {/* 글 본문 미리보기 모달 */}
       <Dialog open={!!previewArticleId} onOpenChange={(open) => !open && setPreviewArticleId(null)}>

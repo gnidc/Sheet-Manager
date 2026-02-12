@@ -310,6 +310,100 @@ export async function getCurrentPrice(stockCode: string): Promise<{
   }
 }
 
+// ========== 종목 호가 조회 (네이버 금융 API - 토큰 불필요, 빠름) ==========
+export interface AskingPrice {
+  sellPrices: { price: string; qty: string }[];  // 매도호가 (높은가→낮은가)
+  buyPrices: { price: string; qty: string }[];   // 매수호가 (높은가→낮은가)
+  totalSellQty: string;
+  totalBuyQty: string;
+}
+
+export async function getAskingPrice(stockCode: string): Promise<AskingPrice | null> {
+  try {
+    const response = await axios.get(
+      `https://m.stock.naver.com/api/stock/${stockCode}/askingPrice`,
+      {
+        headers: { "User-Agent": "Mozilla/5.0" },
+        timeout: 5000,
+      }
+    );
+
+    const data = response.data;
+    if (!data) return null;
+
+    // 매도호가: sellInfo 배열 (높은가→낮은가, 이미 정렬됨)
+    const sellPrices = (data.sellInfo || []).map((item: any) => ({
+      price: String(item.price).replace(/,/g, ""),
+      qty: String(item.count).replace(/,/g, ""),
+    }));
+
+    // 매수호가: buyInfos 배열 (높은가→낮은가, 이미 정렬됨)
+    const buyPrices = (data.buyInfos || []).map((item: any) => ({
+      price: String(item.price).replace(/,/g, ""),
+      qty: String(item.count).replace(/,/g, ""),
+    }));
+
+    return {
+      sellPrices,
+      buyPrices,
+      totalSellQty: String(data.totalSell || "0").replace(/,/g, ""),
+      totalBuyQty: String(data.totalBuy || "0").replace(/,/g, ""),
+    };
+  } catch (error: any) {
+    console.error("Failed to fetch Naver asking price:", error.message);
+    throw error;
+  }
+}
+
+// ========== 종목 일봉 차트 조회 (네이버 fchart API - 토큰 불필요, 1회 요청으로 완료) ==========
+export async function getStockDailyPrices(
+  stockCode: string,
+  period: "1M" | "3M" | "6M" | "1Y" = "3M"
+): Promise<KisPriceData[]> {
+  const countMap: Record<string, number> = { "1M": 22, "3M": 66, "6M": 132, "1Y": 252 };
+  const count = countMap[period] || 66;
+
+  try {
+    const response = await axios.get(
+      `https://fchart.stock.naver.com/sise.nhn`,
+      {
+        params: { symbol: stockCode, timeframe: "day", count, requestType: 0 },
+        headers: { "User-Agent": "Mozilla/5.0" },
+        timeout: 5000,
+        responseType: "text",
+      }
+    );
+
+    const xml = response.data as string;
+    // XML 파싱: <item data="20260206|154100|160300|151600|158600|36358081" />
+    const items: KisPriceData[] = [];
+    const regex = /data="([^"]+)"/g;
+    let match;
+    while ((match = regex.exec(xml)) !== null) {
+      const parts = match[1].split("|");
+      if (parts.length >= 6) {
+        const [dateStr, open, high, low, close, volume] = parts;
+        items.push({
+          date: `${dateStr.slice(0, 4)}-${dateStr.slice(4, 6)}-${dateStr.slice(6, 8)}`,
+          closePrice: close,
+          openPrice: open,
+          highPrice: high,
+          lowPrice: low,
+          volume: volume,
+        });
+      }
+    }
+
+    console.log(`[Naver Chart] Fetched ${items.length} records for ${stockCode} (${period})`);
+    return items;
+  } catch (error: any) {
+    console.error("Failed to fetch Naver chart:", error.message);
+    // 네이버 실패 시 KIS API 폴백
+    console.log("[Naver Chart] Falling back to KIS API...");
+    return getEtfDailyPrices(stockCode, period);
+  }
+}
+
 // ========== 주가지수 조회 ==========
 export interface MarketIndex {
   name: string;

@@ -603,6 +603,36 @@ export async function registerRoutes(
     }
   });
 
+  // 호가 조회
+  app.get("/api/trading/asking-price/:stockCode", requireUser, async (req, res) => {
+    try {
+      const askingPrice = await kisApi.getAskingPrice(req.params.stockCode);
+      if (!askingPrice) {
+        return res.status(404).json({ message: "호가 정보를 찾을 수 없습니다" });
+      }
+      res.json(askingPrice);
+    } catch (error: any) {
+      console.error("Failed to get asking price:", error);
+      res.status(500).json({ message: error.message || "호가 조회 실패" });
+    }
+  });
+
+  // 일봉 차트 데이터 조회
+  app.get("/api/trading/daily-chart/:stockCode", requireUser, async (req, res) => {
+    try {
+      const period = (req.query.period as string) || "3M";
+      const validPeriods = ["1M", "3M", "6M", "1Y"];
+      if (!validPeriods.includes(period)) {
+        return res.status(400).json({ message: "유효하지 않은 기간입니다 (1M, 3M, 6M, 1Y)" });
+      }
+      const prices = await kisApi.getStockDailyPrices(req.params.stockCode, period as any);
+      res.json(prices);
+    } catch (error: any) {
+      console.error("Failed to get daily chart:", error);
+      res.status(500).json({ message: error.message || "차트 데이터 조회 실패" });
+    }
+  });
+
   // 매매 주문
   app.post("/api/trading/order", requireUser, async (req, res) => {
     try {
