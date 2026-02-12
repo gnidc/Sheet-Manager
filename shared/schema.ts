@@ -150,7 +150,7 @@ export const insertSavedEtfSchema = createInsertSchema(savedEtfs).omit({ id: tru
 export type SavedEtf = typeof savedEtfs.$inferSelect;
 export type InsertSavedEtf = z.infer<typeof insertSavedEtfSchema>;
 
-// ========== 관심(추천) ETF ==========
+// ========== 관심ETF(Core) ==========
 export const watchlistEtfs = pgTable("watchlist_etfs", {
   id: serial("id").primaryKey(),
   etfCode: text("etf_code").notNull(),
@@ -164,6 +164,21 @@ export const insertWatchlistEtfSchema = createInsertSchema(watchlistEtfs).omit({
 
 export type WatchlistEtf = typeof watchlistEtfs.$inferSelect;
 export type InsertWatchlistEtf = z.infer<typeof insertWatchlistEtfSchema>;
+
+// ========== 관심ETF(Satellite) ==========
+export const satelliteEtfs = pgTable("satellite_etfs", {
+  id: serial("id").primaryKey(),
+  etfCode: text("etf_code").notNull(),
+  etfName: text("etf_name").notNull(),
+  sector: text("sector").default("기본"),
+  memo: text("memo"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const insertSatelliteEtfSchema = createInsertSchema(satelliteEtfs).omit({ id: true, createdAt: true });
+
+export type SatelliteEtf = typeof satelliteEtfs.$inferSelect;
+export type InsertSatelliteEtf = typeof satelliteEtfs.$inferInsert;
 
 // ========== 공지사항 ==========
 export const notices = pgTable("notices", {
@@ -200,6 +215,21 @@ export const insertSteemPostSchema = createInsertSchema(steemPosts).omit({ id: t
 
 export type SteemPost = typeof steemPosts.$inferSelect;
 export type InsertSteemPost = z.infer<typeof insertSteemPostSchema>;
+
+// ========== AI 분석 보고서 ==========
+export const aiReports = pgTable("ai_reports", {
+  id: serial("id").primaryKey(),
+  analysis: text("analysis").notNull(),           // AI 분석 내용
+  analyzedAt: text("analyzed_at").notNull(),       // 분석 시점 (KST 문자열)
+  savedAt: text("saved_at").notNull(),             // 저장 시점 (KST 문자열)
+  items: text("items").notNull(),                  // 분석에 사용된 항목 JSON [{ title, source, date }]
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const insertAiReportSchema = createInsertSchema(aiReports).omit({ id: true, createdAt: true });
+
+export type AiReport = typeof aiReports.$inferSelect;
+export type InsertAiReport = z.infer<typeof insertAiReportSchema>;
 
 // ========== 즐겨찾기 (북마크) ==========
 export const bookmarks = pgTable("bookmarks", {

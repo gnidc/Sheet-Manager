@@ -9,8 +9,10 @@ import {
   stopLossOrders,
   savedEtfs,
   watchlistEtfs,
+  satelliteEtfs,
   notices,
   steemPosts,
+  aiReports,
   type EtfTrend,
   type InsertEtfTrend,
   type AutoTradeRule,
@@ -29,10 +31,14 @@ import {
   type InsertSavedEtf,
   type WatchlistEtf,
   type InsertWatchlistEtf,
+  type SatelliteEtf,
+  type InsertSatelliteEtf,
   type Notice,
   type InsertNotice,
   type SteemPost,
   type InsertSteemPost,
+  type AiReport,
+  type InsertAiReport,
 } from "../shared/schema.js";
 import { eq, and, desc, isNull } from "drizzle-orm";
 
@@ -87,6 +93,12 @@ export interface IStorage {
   updateWatchlistEtf(id: number, updates: Partial<InsertWatchlistEtf>): Promise<WatchlistEtf>;
   deleteWatchlistEtf(id: number): Promise<void>;
 
+  // Satellite ETFs
+  getSatelliteEtfs(): Promise<SatelliteEtf[]>;
+  createSatelliteEtf(data: InsertSatelliteEtf): Promise<SatelliteEtf>;
+  updateSatelliteEtf(id: number, updates: Partial<InsertSatelliteEtf>): Promise<SatelliteEtf>;
+  deleteSatelliteEtf(id: number): Promise<void>;
+
   // Notices (공지사항)
   getNotices(): Promise<Notice[]>;
   getActiveNotices(): Promise<Notice[]>;
@@ -100,6 +112,12 @@ export interface IStorage {
   createSteemPost(data: InsertSteemPost): Promise<SteemPost>;
   updateSteemPost(id: number, updates: Partial<InsertSteemPost>): Promise<SteemPost>;
   deleteSteemPost(id: number): Promise<void>;
+
+  // AI Reports (AI 분석 보고서)
+  getAiReports(limit?: number): Promise<AiReport[]>;
+  getAiReport(id: number): Promise<AiReport | undefined>;
+  createAiReport(data: InsertAiReport): Promise<AiReport>;
+  deleteAiReport(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -608,6 +626,54 @@ export class DatabaseStorage implements IStorage {
     await db.delete(watchlistEtfs).where(eq(watchlistEtfs.id, id));
   }
 
+  // ========== Satellite ETFs (관심ETF Satellite) ==========
+
+  async getSatelliteEtfs(): Promise<SatelliteEtf[]> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(satelliteEtfs).orderBy(desc(satelliteEtfs.createdAt));
+      });
+    }
+    return await db.select().from(satelliteEtfs).orderBy(desc(satelliteEtfs.createdAt));
+  }
+
+  async createSatelliteEtf(data: InsertSatelliteEtf): Promise<SatelliteEtf> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [newEtf] = await db.insert(satelliteEtfs).values(data).returning();
+        return newEtf;
+      });
+    }
+    const [newEtf] = await db.insert(satelliteEtfs).values(data).returning();
+    return newEtf;
+  }
+
+  async updateSatelliteEtf(id: number, updates: Partial<InsertSatelliteEtf>): Promise<SatelliteEtf> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [updated] = await db.update(satelliteEtfs)
+          .set(updates)
+          .where(eq(satelliteEtfs.id, id))
+          .returning();
+        return updated;
+      });
+    }
+    const [updated] = await db.update(satelliteEtfs)
+      .set(updates)
+      .where(eq(satelliteEtfs.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteSatelliteEtf(id: number): Promise<void> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        await db.delete(satelliteEtfs).where(eq(satelliteEtfs.id, id));
+      });
+    }
+    await db.delete(satelliteEtfs).where(eq(satelliteEtfs.id, id));
+  }
+
   // ========== Notices (공지사항) ==========
 
   async getNotices(): Promise<Notice[]> {
@@ -722,6 +788,48 @@ export class DatabaseStorage implements IStorage {
       });
     }
     await db.delete(steemPosts).where(eq(steemPosts.id, id));
+  }
+
+  // ========== AI Reports ==========
+
+  async getAiReports(limit: number = 20): Promise<AiReport[]> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(aiReports).orderBy(desc(aiReports.createdAt)).limit(limit);
+      });
+    }
+    return await db.select().from(aiReports).orderBy(desc(aiReports.createdAt)).limit(limit);
+  }
+
+  async getAiReport(id: number): Promise<AiReport | undefined> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [report] = await db.select().from(aiReports).where(eq(aiReports.id, id));
+        return report;
+      });
+    }
+    const [report] = await db.select().from(aiReports).where(eq(aiReports.id, id));
+    return report;
+  }
+
+  async createAiReport(data: InsertAiReport): Promise<AiReport> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [newReport] = await db.insert(aiReports).values(data).returning();
+        return newReport;
+      });
+    }
+    const [newReport] = await db.insert(aiReports).values(data).returning();
+    return newReport;
+  }
+
+  async deleteAiReport(id: number): Promise<void> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        await db.delete(aiReports).where(eq(aiReports.id, id));
+      });
+    }
+    await db.delete(aiReports).where(eq(aiReports.id, id));
   }
 }
 

@@ -479,7 +479,7 @@ export default function EtfComponents() {
 
   const topGainers = topGainersData?.items || [];
 
-  // 관심(추천) ETF 실시간 시세
+  // 관심ETF(Core) 실시간 시세
   const { data: watchlistRealtimeData, isFetching: isLoadingWatchlist, refetch: refetchWatchlist } = useQuery<{
     items: (TopGainerEtf & { sector?: string; memo?: string })[];
     updatedAt: string;
@@ -495,6 +495,23 @@ export default function EtfComponents() {
   });
 
   const watchlistItems = watchlistRealtimeData?.items || [];
+
+  // 관심ETF(Satellite) 실시간 시세
+  const { data: satelliteRealtimeData, isFetching: isLoadingSatellite, refetch: refetchSatellite } = useQuery<{
+    items: (TopGainerEtf & { sector?: string; memo?: string })[];
+    updatedAt: string;
+  }>({
+    queryKey: ["/api/satellite-etfs/realtime"],
+    queryFn: async () => {
+      const res = await fetch("/api/satellite-etfs/realtime", { credentials: "include" });
+      if (!res.ok) throw new Error("Satellite ETF 실시간 시세 조회 실패");
+      return res.json();
+    },
+    staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
+  });
+
+  const satelliteItems = satelliteRealtimeData?.items || [];
 
   // 카페 전송 핸들러
   const handleCafePost = () => {
@@ -576,15 +593,29 @@ export default function EtfComponents() {
 
   return (
     <div className="space-y-6">
-      {/* ===== 관심(추천) ETF 실시간 시세 ===== */}
+      {/* ===== 관심ETF(Core) 실시간 시세 ===== */}
       {watchlistItems.length > 0 && (
         <Card>
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Star className="w-5 h-5 text-yellow-500" />
-                관심(추천) ETF 실시간 시세
-              </CardTitle>
+              <div className="flex items-center gap-2 flex-wrap">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Star className="w-5 h-5 text-yellow-500" />
+                  관심ETF(Core) 실시간 시세
+                </CardTitle>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-6 text-[11px] gap-1 text-orange-600 border-orange-300 hover:bg-orange-50 dark:text-orange-400 dark:border-orange-700 dark:hover:bg-orange-950"
+                  onClick={() => {
+                    document.getElementById("top-gainers-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }}
+                >
+                  <Flame className="w-3 h-3" />
+                  실시간 상승 ETF 바로가기
+                  <ArrowDown className="w-3 h-3" />
+                </Button>
+              </div>
               <div className="flex items-center gap-2">
                 {watchlistRealtimeData?.updatedAt && (
                   <span className="text-xs text-muted-foreground flex items-center gap-1">
@@ -608,7 +639,7 @@ export default function EtfComponents() {
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              관심(추천) ETF에 등록된 종목의 실시간 시세 | <span className="text-blue-500">ETF명 클릭 → funetf 상세페이지</span> | <span className="text-muted-foreground">행 클릭 → 구성종목 시세</span>
+              관심ETF(Core)에 등록된 종목의 실시간 시세 | <span className="text-blue-500">ETF명 클릭 → funetf 상세페이지</span> | <span className="text-muted-foreground">행 클릭 → 구성종목 시세</span>
             </p>
           </CardHeader>
           <CardContent className="p-0">
@@ -693,8 +724,131 @@ export default function EtfComponents() {
         </Card>
       )}
 
+      {/* ===== 관심ETF(Satellite) 실시간 시세 ===== */}
+      {satelliteItems.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 flex-wrap">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  🛰️
+                  관심ETF(Satellite) 실시간 시세
+                </CardTitle>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-6 text-[11px] gap-1 text-orange-600 border-orange-300 hover:bg-orange-50 dark:text-orange-400 dark:border-orange-700 dark:hover:bg-orange-950"
+                  onClick={() => {
+                    document.getElementById("top-gainers-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }}
+                >
+                  <Flame className="w-3 h-3" />
+                  실시간 상승 ETF 바로가기
+                  <ArrowDown className="w-3 h-3" />
+                </Button>
+              </div>
+              <div className="flex items-center gap-2">
+                {satelliteRealtimeData?.updatedAt && (
+                  <span className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Clock className="w-3 h-3" />
+                    {satelliteRealtimeData.updatedAt}
+                  </span>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => refetchSatellite()}
+                  disabled={isLoadingSatellite}
+                  className="h-7 w-7 p-0"
+                >
+                  {isLoadingSatellite ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-3.5 h-3.5" />
+                  )}
+                </Button>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              관심ETF(Satellite)에 등록된 종목의 실시간 시세 | <span className="text-red-500 font-bold">종목 클릭 → 아래 구성종목 실시간 시세 & 차트 표시</span>
+            </p>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-blue-50/70 dark:bg-blue-950/20">
+                    <TableHead className="w-[36px] text-center">#</TableHead>
+                    <TableHead>ETF명</TableHead>
+                    <TableHead className="text-right w-[90px]">현재가</TableHead>
+                    <TableHead className="text-right w-[80px]">등락률</TableHead>
+                    <TableHead className="text-right w-[80px]">전일대비</TableHead>
+                    <TableHead className="text-right w-[100px] hidden sm:table-cell">거래량</TableHead>
+                    <TableHead className="text-right w-[90px] hidden md:table-cell">시가총액(억)</TableHead>
+                    <TableHead className="text-right w-[80px] hidden md:table-cell">순자산(NAV)</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {satelliteItems.map((etf, index) => {
+                    const isUp = etf.changeRate > 0;
+                    const isDown = etf.changeRate < 0;
+                    const changeColor = isUp ? "text-red-500" : isDown ? "text-blue-500" : "text-muted-foreground";
+                    return (
+                      <TableRow
+                        key={etf.code}
+                        className={`cursor-pointer transition-colors hover:bg-primary/5 ${
+                          selectedEtfCode === etf.code ? "bg-primary/10 border-l-2 border-l-primary" : ""
+                        }`}
+                        onClick={() => handleSelectEtf(etf.code)}
+                      >
+                        <TableCell className="text-center font-bold text-sm">
+                          <span className="text-blue-500">
+                            {index + 1}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2 min-w-[140px]">
+                            <div>
+                              <div className="font-medium text-sm leading-tight hover:text-primary">
+                                {etf.name}
+                              </div>
+                              <div className="text-xs text-muted-foreground font-mono">{etf.code}</div>
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums font-semibold text-sm">
+                          {etf.nowVal.toLocaleString()}
+                        </TableCell>
+                        <TableCell className={`text-right tabular-nums font-medium text-sm ${changeColor}`}>
+                          <span className="flex items-center justify-end gap-0.5">
+                            {isUp ? <TrendingUp className="w-3 h-3" /> : isDown ? <TrendingDown className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
+                            {isUp ? "+" : ""}{etf.changeRate.toFixed(2)}%
+                          </span>
+                        </TableCell>
+                        <TableCell className={`text-right tabular-nums text-sm ${changeColor}`}>
+                          {isUp ? "+" : ""}{etf.changeVal.toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-sm text-muted-foreground hidden sm:table-cell">
+                          {etf.quant.toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-sm text-muted-foreground hidden md:table-cell">
+                          {(etf.marketCap ?? 0).toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-sm text-muted-foreground hidden md:table-cell">
+                          {(etf.nav ?? 0).toLocaleString()}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* ===== 실시간 상승 ETF TOP 15 ===== */}
-      <Card>
+      <Card id="top-gainers-section">
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <CardTitle className="text-lg flex items-center gap-2">

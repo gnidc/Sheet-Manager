@@ -13,6 +13,9 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const NAVER_CLIENT_ID = process.env.NAVER_CLIENT_ID;
 const NAVER_CLIENT_SECRET = process.env.NAVER_CLIENT_SECRET;
 
+// 관리자 권한을 가진 Google 이메일 목록
+const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "kwonjs77@gmail.com").split(",").map(e => e.trim().toLowerCase());
+
 // AI API: Gemini 네이티브 REST API 또는 OpenAI
 async function callAI(prompt: string): Promise<string> {
   const geminiKey = process.env.GEMINI_API_KEY;
@@ -280,6 +283,12 @@ export async function registerRoutes(
       req.session.userName = user.name || undefined;
       req.session.userPicture = user.picture || undefined;
 
+      // 관리자 이메일 목록에 포함된 경우 admin 권한 부여
+      if (ADMIN_EMAILS.includes(email.toLowerCase())) {
+        req.session.isAdmin = true;
+        console.log(`[Auth] Admin privilege granted to Google user: ${email}`);
+      }
+
       // "로그인 유지" 체크 시 쿠키 만료를 24시간으로 설정
       const REMEMBER_MAX_AGE = 24 * 60 * 60 * 1000;
       if (rememberMe) {
@@ -291,8 +300,10 @@ export async function registerRoutes(
         }
       }
 
+      const isAdminUser = ADMIN_EMAILS.includes(email.toLowerCase());
       res.json({
         success: true,
+        isAdmin: isAdminUser,
         user: {
           id: user.id,
           email: user.email,
@@ -1288,97 +1299,211 @@ export async function registerRoutes(
     }
   });
 
-  // ========== 증권사 리서치 리포트 ==========
+  // ========== 증권사 리서치 리포트 (stock.naver.com API) ==========
   app.get("/api/news/research", async (req, res) => {
     try {
       const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-      const researchItems: { title: string; link: string; source: string; date: string; file: string }[] = [];
 
-      const researchRes = await axios.get("https://finance.naver.com/research/invest_list.naver", {
-        headers: { "User-Agent": UA },
-        timeout: 8000,
-        responseType: "arraybuffer",
+      // 두 API를 병렬로 호출
+      const [popularRes, strategyRes] = await Promise.allSettled([
+        // 1) 요즘 많이 보는 리포트
+        axios.get("https://stock.naver.com/api/domestic/research/recent-popular", {
+          headers: { "User-Agent": UA },
+          timeout: 10000,
+        }),
+        // 2) 카테고리별 최신 리포트 > 투자전략
+        axios.get("https://stock.naver.com/api/domestic/research/category", {
+          params: { category: "INVEST", pageSize: 20 },
+          headers: { "User-Agent": UA },
+          timeout: 10000,
+        }),
+      ]);
+
+      // stock.naver.com API 응답을 공통 포맷으로 변환
+      const mapItem = (item: any) => ({
+        title: item.title || "",
+        link: (item.endUrl || "").replace("m.stock.naver.com", "stock.naver.com"),
+        source: item.brokerName || "",
+        date: item.writeDate || "",
+        file: "", // stock.naver.com API에는 PDF 직접 링크 없음
+        readCount: item.readCount || "0",
+        category: item.category || item.researchCategory || "",
+        analyst: item.analyst || "",
       });
-      const html = new TextDecoder("euc-kr").decode(researchRes.data);
-      const $ = cheerio.load(html);
 
-      // 리서치 테이블 파싱 - 셀 내용 패턴 기반 매핑
-      $("table.type_1 tr").each((_i, el) => {
-        const $row = $(el);
-        const cells = $row.find("td");
-        if (cells.length < 3) return;
+      // 요즘 많이 보는 리포트 (다양한 카테고리)
+      let popularItems: any[] = [];
+      if (popularRes.status === "fulfilled" && popularRes.value?.data) {
+        const rawPopular = Array.isArray(popularRes.value.data) ? popularRes.value.data : [];
+        popularItems = rawPopular.map(mapItem);
+      }
 
-        // 링크가 포함된 셀을 제목 셀로 인식
-        let titleCell: ReturnType<typeof $> | null = null;
-        let titleIdx = -1;
-        cells.each((idx, cell) => {
-          if (!titleCell && $(cell).find("a[href*='invest_read']").length > 0) {
-            titleCell = $(cell);
-            titleIdx = idx;
-          }
-        });
-        // 링크 패턴이 없으면 첫 번째 a 태그가 있는 셀 사용
-        if (!titleCell) {
-          cells.each((idx, cell) => {
-            if (!titleCell && $(cell).find("a").length > 0) {
-              titleCell = $(cell);
-              titleIdx = idx;
-            }
-          });
-        }
-        if (!titleCell) return;
-
-        const $a = (titleCell as ReturnType<typeof $>).find("a").first();
-        const title = $a.text().trim();
-        let link = $a.attr("href") || "";
-        if (link && !link.startsWith("http")) {
-          link = "https://finance.naver.com/research/" + link;
-        }
-
-        // PDF 첨부파일 찾기
-        const $pdfLink = (titleCell as ReturnType<typeof $>).find("a[href*='.pdf'], a[href*='download']");
-        let file = "";
-        if ($pdfLink.length > 0) {
-          const fileLink = $pdfLink.attr("href") || "";
-          if (fileLink) {
-            file = fileLink.startsWith("http") ? fileLink : "https://finance.naver.com/research/" + fileLink;
-          }
-        }
-
-        // 나머지 셀에서 증권사, 날짜, 조회수 식별
-        let source = "";
-        let date = "";
-        const datePattern = /^\d{2}\.\d{2}\.\d{2}$/;
-        const viewPattern = /^\d{1,6}$/;
-
-        cells.each((idx, cell) => {
-          if (idx === titleIdx) return;
-          const text = $(cell).text().trim();
-          if (!text) return;
-
-          if (datePattern.test(text)) {
-            date = text;
-          } else if (viewPattern.test(text)) {
-            // 조회수 - 스킵
-          } else if (text.length > 1 && text.length <= 20) {
-            // 증권사 이름 (보통 짧은 텍스트)
-            source = text;
-          }
-        });
-
-        if (title && title.length > 2) {
-          researchItems.push({ title, link, source, date, file });
-        }
-      });
+      // 투자전략 최신 리포트
+      let strategyItems: any[] = [];
+      if (strategyRes.status === "fulfilled" && strategyRes.value?.data) {
+        const rawStrategy = strategyRes.value.data?.content || (Array.isArray(strategyRes.value.data) ? strategyRes.value.data : []);
+        strategyItems = rawStrategy.map(mapItem);
+      }
 
       res.json({
-        research: researchItems.slice(0, 30),
+        popular: popularItems,
+        strategy: strategyItems,
+        // 하위 호환을 위해 전체 합쳐서 research 필드도 제공
+        research: [...popularItems, ...strategyItems.filter(s => !popularItems.some(p => p.title === s.title))],
         updatedAt: new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }),
-        total: researchItems.length,
+        total: popularItems.length + strategyItems.length,
       });
     } catch (error: any) {
       console.error("Failed to fetch research:", error);
       res.status(500).json({ message: error.message || "리서치 데이터 가져오기 실패" });
+    }
+  });
+
+  // ========== 주요 리서치 저장/조회 (서버 메모리 기반, 모든 유저 공유) ==========
+  let savedKeyResearch: Array<{ title: string; link: string; source: string; date: string; file: string }> = [];
+
+  // AI 분석 보고서는 DB(ai_reports 테이블)에 저장
+
+  // 주요 리서치 조회 (모든 유저)
+  app.get("/api/research/key-research", requireUser, async (_req, res) => {
+    res.json({ items: savedKeyResearch });
+  });
+
+  // 주요 리서치 저장 (admin 전용)
+  app.post("/api/research/key-research", requireAdmin, async (req, res) => {
+    try {
+      const { items } = req.body;
+      if (!items || !Array.isArray(items)) {
+        return res.status(400).json({ message: "items 배열이 필요합니다." });
+      }
+      // 중복 제거 후 추가
+      for (const item of items) {
+        const exists = savedKeyResearch.some(k => k.title === item.title && k.source === item.source);
+        if (!exists) {
+          savedKeyResearch.push(item);
+        }
+      }
+      res.json({ items: savedKeyResearch, added: items.length });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "주요 리서치 저장 실패" });
+    }
+  });
+
+  // 주요 리서치 전체 교체 (admin 전용)
+  app.put("/api/research/key-research", requireAdmin, async (req, res) => {
+    try {
+      const { items } = req.body;
+      if (!Array.isArray(items)) {
+        return res.status(400).json({ message: "items 배열이 필요합니다." });
+      }
+      savedKeyResearch = items;
+      res.json({ items: savedKeyResearch });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "주요 리서치 업데이트 실패" });
+    }
+  });
+
+  // ========== 리서치 AI 분석 ==========
+  app.post("/api/research/ai-analyze", requireUser, async (req, res) => {
+    try {
+      const { items } = req.body;
+      if (!items || !Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ message: "분석할 리서치 항목을 선택해주세요." });
+      }
+
+      const researchList = items.map((item: any, i: number) =>
+        `${i + 1}. [${item.source || ""}] ${item.title} (${item.date || ""})`
+      ).join("\n");
+
+      const prompt = `다음은 증권사 투자전략 리서치 리포트 제목 목록입니다. 이 리포트들의 공통 주제, 시장 전망, 주요 투자전략을 분석하여 한국어로 요약해주세요.
+
+분석할 리서치 목록:
+${researchList}
+
+다음 형식으로 답변해주세요:
+## 📊 주요 리서치 AI 분석 요약
+
+### 1. 공통 주제 및 키워드
+- 리포트들에서 공통으로 다루는 주제와 핵심 키워드를 정리
+
+### 2. 시장 전망
+- 증권사들의 시장 전망을 종합적으로 정리
+
+### 3. 주요 투자전략
+- 리포트들에서 제시하는 투자전략과 추천 업종/종목
+
+### 4. 종합 의견
+- 전체적인 시장 방향성과 투자자 참고 사항
+
+간결하되 핵심 내용을 놓치지 않도록 정리해주세요.`;
+
+      const result = await callAI(prompt);
+      res.json({ analysis: result, analyzedAt: new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }) });
+    } catch (error: any) {
+      console.error("[Research AI] Error:", error.message);
+      res.status(500).json({ message: error.message || "AI 분석 실패" });
+    }
+  });
+
+  // ========== AI 분석 보고서 저장/조회 (DB 기반) ==========
+  // 보고서 조회 (모든 유저)
+  app.get("/api/research/ai-reports", requireUser, async (_req, res) => {
+    try {
+      const reports = await storage.getAiReports(20);
+      // DB의 items 필드는 JSON 문자열이므로 파싱
+      const parsed = reports.map(r => ({
+        ...r,
+        id: r.id.toString(),
+        items: typeof r.items === 'string' ? JSON.parse(r.items) : r.items,
+      }));
+      res.json({ reports: parsed });
+    } catch (error: any) {
+      console.error("[AI Reports] GET error:", error.message);
+      res.json({ reports: [] });
+    }
+  });
+
+  // 보고서 저장 (admin 전용)
+  app.post("/api/research/ai-reports", requireAdmin, async (req, res) => {
+    try {
+      const { analysis, analyzedAt, items } = req.body;
+      if (!analysis || !items) {
+        return res.status(400).json({ message: "분석 내용과 항목이 필요합니다." });
+      }
+      const savedAt = new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
+      const itemsJson = JSON.stringify(
+        items.map((item: any) => ({ title: item.title, source: item.source, date: item.date }))
+      );
+      const report = await storage.createAiReport({
+        analysis,
+        analyzedAt: analyzedAt || savedAt,
+        savedAt,
+        items: itemsJson,
+      });
+      const totalReports = await storage.getAiReports(20);
+      res.json({
+        report: {
+          ...report,
+          id: report.id.toString(),
+          items: JSON.parse(report.items),
+        },
+        total: totalReports.length,
+      });
+    } catch (error: any) {
+      console.error("[AI Reports] POST error:", error.message);
+      res.status(500).json({ message: error.message || "보고서 저장 실패" });
+    }
+  });
+
+  // 보고서 삭제 (admin 전용)
+  app.delete("/api/research/ai-reports/:id", requireAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      await storage.deleteAiReport(parseInt(id));
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("[AI Reports] DELETE error:", error.message);
+      res.status(500).json({ message: error.message || "보고서 삭제 실패" });
     }
   });
 
@@ -1505,7 +1630,7 @@ export async function registerRoutes(
     }
   });
 
-  // ===== 관심(추천) ETF 실시간 시세 (top-gainers와 동일 포맷) =====
+  // ===== 관심ETF(Core) ETF 실시간 시세 (top-gainers와 동일 포맷) =====
   app.get("/api/watchlist-etfs/realtime", async (req, res) => {
     try {
       const watchlist = await storage.getWatchlistEtfs();
@@ -1540,6 +1665,445 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("[ETF] Failed to get watchlist realtime:", error.message);
       res.status(500).json({ message: "관심 ETF 실시간 시세 조회 실패" });
+    }
+  });
+
+  // ===== 관심ETF(Satellite) 실시간 시세 (top-gainers와 동일 포맷) =====
+  app.get("/api/satellite-etfs/realtime", async (req, res) => {
+    try {
+      const satList = await storage.getSatelliteEtfs();
+      if (satList.length === 0) return res.json({ items: [], updatedAt: new Date().toLocaleString("ko-KR") });
+
+      const allEtfs = await getEtfFullList();
+      const etfMap = new Map<string, EtfListItem>();
+      allEtfs.forEach((e) => etfMap.set(e.code, e));
+
+      const items = satList
+        .map((w) => {
+          const naver = etfMap.get(w.etfCode);
+          if (!naver) return null;
+          return {
+            code: naver.code,
+            name: naver.name,
+            nowVal: naver.nowVal,
+            changeVal: naver.changeVal,
+            changeRate: naver.changeRate,
+            risefall: naver.risefall,
+            quant: naver.quant,
+            amount: naver.amount,
+            marketCap: naver.marketCap,
+            nav: naver.nav,
+            sector: w.sector || "",
+            memo: w.memo || "",
+          };
+        })
+        .filter(Boolean);
+
+      res.json({ items, updatedAt: new Date().toLocaleString("ko-KR") });
+    } catch (error: any) {
+      console.error("[ETF] Failed to get satellite realtime:", error.message);
+      res.status(500).json({ message: "Satellite ETF 실시간 시세 조회 실패" });
+    }
+  });
+
+  // ========== 국내증시 대시보드 API ==========
+
+  const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
+
+  // --- 1) 시장 지수 (KOSPI, KOSDAQ, KOSPI200) ---
+  app.get("/api/markets/domestic/indices", async (_req, res) => {
+    try {
+      const indices = [
+        { code: "KOSPI", name: "코스피" },
+        { code: "KOSDAQ", name: "코스닥" },
+        { code: "KPI200", name: "코스피200" },
+      ];
+
+      // 네이버 금융 시세 페이지에서 지수 정보 가져오기
+      const marketRes = await axios.get("https://finance.naver.com/sise/", {
+        headers: { "User-Agent": UA },
+        timeout: 8000,
+        responseType: "arraybuffer",
+      });
+      const iconv = await import("iconv-lite");
+      const html = iconv.default.decode(Buffer.from(marketRes.data), "euc-kr");
+      const $ = cheerio.load(html);
+
+      const result: any[] = [];
+
+      // KOSPI
+      const kospiNow = parseFloat($("#KOSPI_now").text().replace(/,/g, "")) || 0;
+      const kospiChange = parseFloat($("#KOSPI_change").text().replace(/,/g, "")) || 0;
+      const kospiQuant = $("#KOSPI_quant").text().trim();
+      const kospiAmount = $("#KOSPI_amount").text().trim();
+      const kospiUp = $("#KOSPI_up").length > 0 || $(".kospi_area .n_ch em").hasClass("red");
+      result.push({
+        code: "KOSPI", name: "코스피",
+        nowVal: kospiNow,
+        changeVal: kospiUp ? Math.abs(kospiChange) : -Math.abs(kospiChange),
+        changeRate: kospiNow > 0 ? parseFloat(((kospiChange / (kospiNow - kospiChange)) * 100).toFixed(2)) : 0,
+        quant: kospiQuant,
+        amount: kospiAmount,
+      });
+
+      // KOSDAQ
+      const kosdaqNow = parseFloat($("#KOSDAQ_now").text().replace(/,/g, "")) || 0;
+      const kosdaqChange = parseFloat($("#KOSDAQ_change").text().replace(/,/g, "")) || 0;
+      const kosdaqQuant = $("#KOSDAQ_quant").text().trim();
+      const kosdaqAmount = $("#KOSDAQ_amount").text().trim();
+      const kosdaqUp = $("#KOSDAQ_up").length > 0 || $(".kosdaq_area .n_ch em").hasClass("red");
+      result.push({
+        code: "KOSDAQ", name: "코스닥",
+        nowVal: kosdaqNow,
+        changeVal: kosdaqUp ? Math.abs(kosdaqChange) : -Math.abs(kosdaqChange),
+        changeRate: kosdaqNow > 0 ? parseFloat(((kosdaqChange / (kosdaqNow - kosdaqChange)) * 100).toFixed(2)) : 0,
+        quant: kosdaqQuant,
+        amount: kosdaqAmount,
+      });
+
+      // KOSPI200 (별도 API)
+      try {
+        const k200Res = await axios.get("https://polling.finance.naver.com/api/realtime/domestic/index/KPI200", {
+          headers: { "User-Agent": UA }, timeout: 5000,
+        });
+        const k200 = k200Res.data?.datas?.[0] || {};
+        result.push({
+          code: "KPI200", name: "코스피200",
+          nowVal: parseFloat(k200.nv) || 0,
+          changeVal: parseFloat(k200.cv) || 0,
+          changeRate: parseFloat(k200.cr) || 0,
+          quant: k200.aq || "0",
+          amount: k200.aa || "0",
+        });
+      } catch {
+        result.push({ code: "KPI200", name: "코스피200", nowVal: 0, changeVal: 0, changeRate: 0, quant: "0", amount: "0" });
+      }
+
+      // 미니 차트 데이터 (최근 60일)
+      const chartData: Record<string, any[]> = {};
+      await Promise.all(["KOSPI", "KOSDAQ", "KPI200"].map(async (indexCode) => {
+        try {
+          const chartRes = await axios.get("https://fchart.stock.naver.com/sise.nhn", {
+            params: { symbol: indexCode, timeframe: "day", count: 60, requestType: 0 },
+            headers: { "User-Agent": UA }, timeout: 5000, responseType: "text",
+          });
+          const matches = [...(chartRes.data as string).matchAll(/<item data="([^"]+)"/g)];
+          chartData[indexCode] = matches.map((m) => {
+            const [date, open, high, low, close, vol] = m[1].split("|");
+            return { date, open: +open, high: +high, low: +low, close: +close, vol: +vol };
+          }).slice(-30); // 최근 30일
+        } catch {
+          chartData[indexCode] = [];
+        }
+      }));
+
+      res.json({ indices: result, charts: chartData, updatedAt: new Date().toLocaleString("ko-KR") });
+    } catch (error: any) {
+      console.error("[Markets] Indices error:", error.message);
+      res.status(500).json({ message: "시장 지수 조회 실패" });
+    }
+  });
+
+  // --- 2) 업종별 등락 현황 ---
+  app.get("/api/markets/domestic/sectors", async (_req, res) => {
+    try {
+      const sectorRes = await axios.get("https://finance.naver.com/sise/sise_group.naver", {
+        params: { type: "upjong" },
+        headers: { "User-Agent": UA },
+        timeout: 8000,
+        responseType: "arraybuffer",
+      });
+      const iconv = await import("iconv-lite");
+      const html = iconv.default.decode(Buffer.from(sectorRes.data), "euc-kr");
+      const $ = cheerio.load(html);
+
+      const sectors: any[] = [];
+      $("table.type_1 tr").each((_i, row) => {
+        const tds = $(row).find("td");
+        if (tds.length < 5) return;
+        const anchor = $(tds[0]).find("a");
+        const name = anchor.text().trim();
+        if (!name) return;
+        // 업종 코드 추출 (예: /sise/sise_group_detail.naver?type=upjong&no=261)
+        const href = anchor.attr("href") || "";
+        const noMatch = href.match(/no=(\d+)/);
+        const sectorCode = noMatch ? noMatch[1] : "";
+        const changeRate = $(tds[1]).text().trim().replace("%", "");
+        const isDown = $(row).find(".tah.p11.nv01").length > 0 || $(tds[1]).find(".rate_down").length > 0;
+        const upCount = parseInt($(tds[2]).text().trim()) || 0;
+        const flatCount = parseInt($(tds[3]).text().trim()) || 0;
+        const downCount = parseInt($(tds[4]).text().trim()) || 0;
+
+        let rate = parseFloat(changeRate) || 0;
+        // 등락부호 확인
+        const signImg = $(tds[1]).find("img").attr("alt") || "";
+        if (signImg.includes("하락") || isDown) rate = -Math.abs(rate);
+
+        sectors.push({ name, code: sectorCode, changeRate: rate, upCount, flatCount, downCount });
+      });
+
+      // 등락률 내림차순 정렬
+      sectors.sort((a, b) => b.changeRate - a.changeRate);
+
+      res.json({ sectors, updatedAt: new Date().toLocaleString("ko-KR") });
+    } catch (error: any) {
+      console.error("[Markets] Sectors error:", error.message);
+      res.status(500).json({ message: "업종별 등락 조회 실패" });
+    }
+  });
+
+  // --- 2-b) 업종별 구성종목 ---
+  app.get("/api/markets/domestic/sector-stocks/:sectorCode", async (req, res) => {
+    try {
+      const { sectorCode } = req.params;
+      if (!sectorCode) return res.status(400).json({ message: "업종 코드가 필요합니다." });
+
+      const detailRes = await axios.get("https://finance.naver.com/sise/sise_group_detail.naver", {
+        params: { type: "upjong", no: sectorCode },
+        headers: { "User-Agent": UA },
+        timeout: 8000,
+        responseType: "arraybuffer",
+      });
+      const iconv = await import("iconv-lite");
+      const html = iconv.default.decode(Buffer.from(detailRes.data), "euc-kr");
+      const $ = cheerio.load(html);
+
+      // 업종명
+      const sectorName = $(".group_name strong, h4.sub_tit").first().text().trim() || `업종 ${sectorCode}`;
+
+      const stocks: any[] = [];
+      $("table.type_5 tr").each((_i, row) => {
+        const tds = $(row).find("td");
+        if (tds.length < 7) return;
+        const anchor = $(tds[0]).find("a");
+        const name = anchor.text().trim();
+        if (!name) return;
+        const code = (anchor.attr("href") || "").match(/code=(\w+)/)?.[1] || "";
+        const nowVal = $(tds[1]).text().trim().replace(/,/g, "");
+        const changeVal = $(tds[2]).text().trim().replace(/,/g, "");
+        const changeRate = $(tds[3]).text().trim().replace(/%/g, "");
+
+        // 등락 부호 감지
+        const signImg = $(tds[2]).find("img").attr("alt") || "";
+        let change = parseInt(changeVal) || 0;
+        let rate = parseFloat(changeRate) || 0;
+        if (signImg.includes("하락")) {
+          change = -Math.abs(change);
+          rate = -Math.abs(rate);
+        }
+
+        const volume = $(tds[4]).text().trim().replace(/,/g, "");
+        const prevVol = $(tds[5]).text().trim().replace(/,/g, "");
+        const marketCap = $(tds[6]).text().trim().replace(/,/g, "");
+
+        stocks.push({
+          code,
+          name,
+          nowVal: parseInt(nowVal) || 0,
+          changeVal: change,
+          changeRate: rate,
+          volume: parseInt(volume) || 0,
+          prevVolume: parseInt(prevVol) || 0,
+          marketCap: parseInt(marketCap) || 0,
+        });
+      });
+
+      res.json({ sectorName, sectorCode, stocks, updatedAt: new Date().toLocaleString("ko-KR") });
+    } catch (error: any) {
+      console.error("[Markets] Sector stocks error:", error.message);
+      res.status(500).json({ message: "업종 구성종목 조회 실패" });
+    }
+  });
+
+  // --- 3) 투자자별 매매동향 ---
+  app.get("/api/markets/domestic/investors", async (_req, res) => {
+    try {
+      const investorRes = await axios.get("https://finance.naver.com/sise/investorDealTrendDay.naver", {
+        headers: { "User-Agent": UA },
+        timeout: 8000,
+        responseType: "arraybuffer",
+      });
+      const iconv = await import("iconv-lite");
+      const html = iconv.default.decode(Buffer.from(investorRes.data), "euc-kr");
+      const $ = cheerio.load(html);
+
+      // KOSPI 투자자별
+      const investors: any[] = [];
+      $("table.type_1 tr").each((_i, row) => {
+        const tds = $(row).find("td");
+        if (tds.length < 4) return;
+        const date = $(tds[0]).text().trim();
+        if (!date || date.length < 5) return;
+
+        const individual = $(tds[1]).text().trim().replace(/,/g, "");
+        const foreign = $(tds[2]).text().trim().replace(/,/g, "");
+        const institution = $(tds[3]).text().trim().replace(/,/g, "");
+        
+        investors.push({
+          date,
+          individual: parseInt(individual) || 0,
+          foreign: parseInt(foreign) || 0,
+          institution: parseInt(institution) || 0,
+        });
+      });
+
+      // 별도로 투자자별 요약 가져오기 (sise_deal)
+      let summary: any = { kospi: {}, kosdaq: {} };
+      try {
+        const dealRes = await axios.get("https://finance.naver.com/sise/sise_deal.naver", {
+          headers: { "User-Agent": UA },
+          timeout: 8000,
+          responseType: "arraybuffer",
+        });
+        const dealHtml = iconv.default.decode(Buffer.from(dealRes.data), "euc-kr");
+        const $d = cheerio.load(dealHtml);
+
+        // 테이블에서 데이터 추출
+        const tables = $d("table.type_1");
+        
+        // 투자자별 순매수 파싱 함수
+        const parseInvestorTable = (table: any) => {
+          const result: any[] = [];
+          $d(table).find("tr").each((_i: number, row: any) => {
+            const tds = $d(row).find("td");
+            if (tds.length < 2) return;
+            const name = $d(row).find("th").text().trim();
+            if (!name) return;
+            const val = $d(tds[0]).text().trim().replace(/,/g, "");
+            result.push({ name, value: parseInt(val) || 0 });
+          });
+          return result;
+        };
+
+        if (tables.length > 0) {
+          summary.kospi = parseInvestorTable(tables[0]);
+        }
+      } catch (e) {
+        console.error("[Markets] Investor deal detail fetch failed:", (e as Error).message);
+      }
+
+      res.json({ investors: investors.slice(0, 10), summary, updatedAt: new Date().toLocaleString("ko-KR") });
+    } catch (error: any) {
+      console.error("[Markets] Investors error:", error.message);
+      res.status(500).json({ message: "투자자별 매매동향 조회 실패" });
+    }
+  });
+
+  // --- 4) 거래량·상승률·하락률 상위 종목 ---
+  app.get("/api/markets/domestic/top-stocks", async (req, res) => {
+    try {
+      const category = (req.query.category as string) || "quant"; // quant, rise, fall
+      const market = (req.query.market as string) || "kospi"; // kospi, kosdaq
+
+      const sosok = market === "kosdaq" ? "1" : "0"; // 0=코스피, 1=코스닥
+
+      let url = "";
+      if (category === "quant") {
+        url = "https://finance.naver.com/sise/sise_quant.naver";
+      } else if (category === "rise") {
+        url = "https://finance.naver.com/sise/sise_rise.naver";
+      } else {
+        url = "https://finance.naver.com/sise/sise_fall.naver";
+      }
+
+      const stockRes = await axios.get(url, {
+        params: { sosok },
+        headers: { "User-Agent": UA },
+        timeout: 8000,
+        responseType: "arraybuffer",
+      });
+      const iconv = await import("iconv-lite");
+      const html = iconv.default.decode(Buffer.from(stockRes.data), "euc-kr");
+      const $ = cheerio.load(html);
+
+      const stocks: any[] = [];
+      $("table.type_2 tr").each((_i, row) => {
+        const tds = $(row).find("td");
+        if (tds.length < 10) return;
+        const name = $(tds[1]).find("a").text().trim();
+        if (!name) return;
+        const code = $(tds[1]).find("a").attr("href")?.match(/code=(\d+)/)?.[1] || "";
+        const nowVal = $(tds[2]).text().trim().replace(/,/g, "");
+        const changeVal = $(tds[3]).text().trim().replace(/,/g, "");
+        const changeRate = $(tds[4]).text().trim().replace(/%/g, "");
+        const volume = $(tds[5]).text().trim().replace(/,/g, "");
+        const prevVol = $(tds[6]).text().trim().replace(/,/g, "");
+        const amount = $(tds[7]).text().trim().replace(/,/g, "");
+        const marketCap = $(tds[8]).text().trim().replace(/,/g, "");
+
+        // 등락 부호 감지
+        const signImg = $(tds[3]).find("img").attr("alt") || "";
+        let change = parseInt(changeVal) || 0;
+        let rate = parseFloat(changeRate) || 0;
+        if (signImg.includes("하락")) {
+          change = -Math.abs(change);
+          rate = -Math.abs(rate);
+        }
+
+        stocks.push({
+          code,
+          name,
+          nowVal: parseInt(nowVal) || 0,
+          changeVal: change,
+          changeRate: rate,
+          volume: parseInt(volume) || 0,
+          prevVolume: parseInt(prevVol) || 0,
+          amount: parseInt(amount) || 0,
+          marketCap: parseInt(marketCap) || 0,
+        });
+      });
+
+      res.json({ stocks: stocks.slice(0, 30), category, market, updatedAt: new Date().toLocaleString("ko-KR") });
+    } catch (error: any) {
+      console.error("[Markets] Top stocks error:", error.message);
+      res.status(500).json({ message: "상위 종목 조회 실패" });
+    }
+  });
+
+  // --- 5) 시장 종합 요약 (상한/하한, 상승/하락 종목수, 거래대금) ---
+  app.get("/api/markets/domestic/market-summary", async (_req, res) => {
+    try {
+      const marketRes = await axios.get("https://finance.naver.com/sise/", {
+        headers: { "User-Agent": UA },
+        timeout: 8000,
+        responseType: "arraybuffer",
+      });
+      const iconv = await import("iconv-lite");
+      const html = iconv.default.decode(Buffer.from(marketRes.data), "euc-kr");
+      const $ = cheerio.load(html);
+
+      // 거래 정보 추출
+      const kospiInfo = {
+        index: parseFloat($("#KOSPI_now").text().replace(/,/g, "")) || 0,
+        change: parseFloat($("#KOSPI_change").text().replace(/,/g, "")) || 0,
+        volume: $("#KOSPI_quant").text().trim(),
+        amount: $("#KOSPI_amount").text().trim(),
+      };
+
+      const kosdaqInfo = {
+        index: parseFloat($("#KOSDAQ_now").text().replace(/,/g, "")) || 0,
+        change: parseFloat($("#KOSDAQ_change").text().replace(/,/g, "")) || 0,
+        volume: $("#KOSDAQ_quant").text().trim(),
+        amount: $("#KOSDAQ_amount").text().trim(),
+      };
+
+      // 상한/하한/상승/하락/보합 종목 수
+      const marketStats: any = {};
+      $(".market_rise_fall .market_data").each((_i, el) => {
+        const label = $(el).find("dt").text().trim();
+        const value = parseInt($(el).find("dd").text().trim().replace(/,/g, "")) || 0;
+        marketStats[label] = value;
+      });
+
+      res.json({
+        kospi: kospiInfo,
+        kosdaq: kosdaqInfo,
+        stats: marketStats,
+        updatedAt: new Date().toLocaleString("ko-KR"),
+      });
+    } catch (error: any) {
+      console.error("[Markets] Summary error:", error.message);
+      res.status(500).json({ message: "시장 종합 조회 실패" });
     }
   });
 
@@ -2592,7 +3156,7 @@ ${newsSummary}`;
     }
   });
 
-  // ========== 관심(추천) ETF 관리 ==========
+  // ========== 관심ETF(Core) ETF 관리 ==========
 
   // 관심 ETF 목록 조회 (모든 로그인 유저)
   app.get("/api/watchlist-etfs", requireUser, async (req, res) => {
@@ -2717,6 +3281,129 @@ ${newsSummary}`;
     } catch (error: any) {
       console.error("Failed to get watchlist market data:", error);
       res.status(500).json({ message: error.message || "관심 ETF 시세 조회 실패" });
+    }
+  });
+
+  // ========== 관심ETF(Satellite) 관리 ==========
+
+  // Satellite ETF 목록 조회
+  app.get("/api/satellite-etfs", requireUser, async (req, res) => {
+    try {
+      const etfs = await storage.getSatelliteEtfs();
+      res.json(etfs);
+    } catch (error: any) {
+      console.error("Failed to get satellite ETFs:", error);
+      res.status(500).json({ message: error.message || "Satellite ETF 조회 실패" });
+    }
+  });
+
+  // Satellite ETF 추가 (Admin 전용)
+  app.post("/api/satellite-etfs", requireAdmin, async (req, res) => {
+    try {
+      const { etfCode, etfName, sector, memo } = req.body;
+      if (!etfCode || !etfName) {
+        return res.status(400).json({ message: "ETF 코드와 이름은 필수입니다." });
+      }
+      const etf = await storage.createSatelliteEtf({ etfCode, etfName, sector: sector || "기본", memo: memo || null });
+      console.log(`[Satellite] Added: ${etf.etfName} (${etf.etfCode}) - sector: ${etf.sector}`);
+      res.json(etf);
+    } catch (error: any) {
+      console.error("Failed to add satellite ETF:", error);
+      res.status(500).json({ message: error.message || "Satellite ETF 추가 실패" });
+    }
+  });
+
+  // Satellite ETF 수정 (Admin 전용)
+  app.put("/api/satellite-etfs/:id", requireAdmin, async (req, res) => {
+    try {
+      const etf = await storage.updateSatelliteEtf(Number(req.params.id), req.body);
+      res.json(etf);
+    } catch (error: any) {
+      console.error("Failed to update satellite ETF:", error);
+      res.status(500).json({ message: error.message || "Satellite ETF 수정 실패" });
+    }
+  });
+
+  // Satellite ETF 삭제 (Admin 전용)
+  app.delete("/api/satellite-etfs/:id", requireAdmin, async (req, res) => {
+    try {
+      await storage.deleteSatelliteEtf(Number(req.params.id));
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Failed to delete satellite ETF:", error);
+      res.status(500).json({ message: error.message || "Satellite ETF 삭제 실패" });
+    }
+  });
+
+  // Satellite ETF 실시간 시세 정보 조회
+  app.get("/api/satellite-etfs/market-data", requireUser, async (req, res) => {
+    try {
+      const satList = await storage.getSatelliteEtfs();
+      if (satList.length === 0) return res.json({});
+
+      const allEtfs = await getEtfFullList();
+      const etfMap = new Map<string, EtfListItem>();
+      allEtfs.forEach((e) => etfMap.set(e.code, e));
+
+      const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
+      const wiseDataMap = new Map<string, { listingDate: string; expense: string }>();
+
+      const batchSize = 10;
+      for (let i = 0; i < satList.length; i += batchSize) {
+        const batch = satList.slice(i, i + batchSize);
+        await Promise.all(batch.map(async (w) => {
+          try {
+            const wrRes = await axios.get(
+              "https://navercomp.wisereport.co.kr/v2/ETF/Index.aspx",
+              { params: { cn: "", cmp_cd: w.etfCode, menuType: "block" }, headers: { "User-Agent": UA }, timeout: 8000 }
+            );
+            const html = typeof wrRes.data === "string" ? wrRes.data : "";
+            let listingDate = "", expense = "";
+
+            const summaryMatch = html.match(/var\s+summary_data\s*=\s*(\{[\s\S]*?\});/);
+            if (summaryMatch) {
+              try {
+                const sd = JSON.parse(summaryMatch[1].replace(/'/g, '"'));
+                if (sd.LIST_DT) listingDate = sd.LIST_DT;
+                if (sd.TOT_REPORT) expense = sd.TOT_REPORT;
+              } catch {}
+            }
+
+            const productMatch = html.match(/var\s+product_summary_data\s*=\s*(\{[\s\S]*?\});/);
+            if (productMatch) {
+              try {
+                const pd = JSON.parse(productMatch[1].replace(/'/g, '"'));
+                if (!listingDate && pd.LIST_DT) listingDate = pd.LIST_DT;
+                if (!expense && pd.TOT_REPORT) expense = pd.TOT_REPORT;
+              } catch {}
+            }
+
+            wiseDataMap.set(w.etfCode, { listingDate, expense });
+          } catch {
+            wiseDataMap.set(w.etfCode, { listingDate: "", expense: "" });
+          }
+        }));
+      }
+
+      const result: Record<string, any> = {};
+      satList.forEach((w) => {
+        const naver = etfMap.get(w.etfCode);
+        const wise = wiseDataMap.get(w.etfCode);
+        result[w.etfCode] = {
+          currentPrice: naver ? naver.nowVal : 0,
+          changeVal: naver ? naver.changeVal : 0,
+          changeRate: naver ? naver.changeRate : 0,
+          marketCap: naver ? naver.marketCap : 0,
+          nav: naver ? naver.nav : 0,
+          listingDate: wise?.listingDate || "",
+          expense: wise?.expense || "",
+        };
+      });
+
+      res.json(result);
+    } catch (error: any) {
+      console.error("Failed to get satellite market data:", error);
+      res.status(500).json({ message: error.message || "Satellite ETF 시세 조회 실패" });
     }
   });
 
@@ -3527,5 +4214,218 @@ ${newsSummary}`;
     }
   });
 
+  // ========== Steem 블록체인 글 읽기 API ==========
+  const STEEM_API_URL = "https://api.steemit.com";
+
+  // 특정 사용자의 블로그 글 가져오기
+  app.get("/api/steem/blog/:author", requireAdmin, async (req, res) => {
+    try {
+      const { author } = req.params;
+      const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
+      const startPermlink = (req.query.start_permlink as string) || "";
+      const startAuthor = (req.query.start_author as string) || "";
+
+      const query: any = {
+        tag: author,
+        limit,
+      };
+      if (startPermlink && startAuthor) {
+        query.start_permlink = startPermlink;
+        query.start_author = startAuthor;
+      }
+
+      const response = await axios.post(STEEM_API_URL, {
+        jsonrpc: "2.0",
+        method: "condenser_api.get_discussions_by_blog",
+        params: [query],
+        id: 1,
+      }, { timeout: 15000 });
+
+      const posts = (response.data?.result || []).map((post: any) => ({
+        author: post.author,
+        permlink: post.permlink,
+        title: post.title,
+        body: post.body?.slice(0, 500) + (post.body?.length > 500 ? "..." : ""),
+        created: post.created,
+        category: post.category,
+        tags: (() => {
+          try {
+            const meta = JSON.parse(post.json_metadata || "{}");
+            return meta.tags || [];
+          } catch { return []; }
+        })(),
+        net_votes: post.net_votes,
+        children: post.children,
+        pending_payout_value: post.pending_payout_value,
+        total_payout_value: post.total_payout_value,
+        curator_payout_value: post.curator_payout_value,
+        url: `https://steemit.com${post.url}`,
+        // 리블로그 여부 확인
+        isReblog: post.author !== author,
+      }));
+
+      res.json({ posts, author });
+    } catch (error: any) {
+      console.error(`[Steem] Failed to fetch blog for @${req.params.author}:`, error.message);
+      res.status(500).json({ message: `스팀 글 조회 실패: ${error.message}` });
+    }
+  });
+
+  // 특정 글 전문 가져오기
+  app.get("/api/steem/post/:author/:permlink", requireAdmin, async (req, res) => {
+    try {
+      const { author, permlink } = req.params;
+
+      const response = await axios.post(STEEM_API_URL, {
+        jsonrpc: "2.0",
+        method: "condenser_api.get_content",
+        params: [author, permlink],
+        id: 1,
+      }, { timeout: 10000 });
+
+      const post = response.data?.result;
+      if (!post || !post.author) {
+        return res.status(404).json({ message: "글을 찾을 수 없습니다" });
+      }
+
+      res.json({
+        author: post.author,
+        permlink: post.permlink,
+        title: post.title,
+        body: post.body,
+        created: post.created,
+        category: post.category,
+        tags: (() => {
+          try {
+            const meta = JSON.parse(post.json_metadata || "{}");
+            return meta.tags || [];
+          } catch { return []; }
+        })(),
+        net_votes: post.net_votes,
+        children: post.children,
+        pending_payout_value: post.pending_payout_value,
+        total_payout_value: post.total_payout_value,
+        curator_payout_value: post.curator_payout_value,
+        url: `https://steemit.com${post.url}`,
+      });
+    } catch (error: any) {
+      console.error(`[Steem] Failed to fetch post:`, error.message);
+      res.status(500).json({ message: `스팀 글 조회 실패: ${error.message}` });
+    }
+  });
+
+  // 여러 사용자의 최신 글 통합 조회
+  app.post("/api/steem/feed", requireAdmin, async (req, res) => {
+    try {
+      const { authors, limit = 10 } = req.body;
+      if (!authors || !Array.isArray(authors) || authors.length === 0) {
+        return res.status(400).json({ message: "authors 배열이 필요합니다" });
+      }
+
+      // 3일치를 충분히 커버하기 위해 유저당 최대 30개씩 가져옴
+      const perAuthor = 30;
+      const allPosts: any[] = [];
+
+      // author ID 정리 (공백, @ 제거)
+      const cleanAuthors = authors.map((a: string) => a.trim().replace("@", "").toLowerCase()).filter((a: string) => a.length > 0);
+
+      await Promise.all(
+        cleanAuthors.map(async (author: string) => {
+          try {
+            const response = await axios.post(STEEM_API_URL, {
+              jsonrpc: "2.0",
+              method: "condenser_api.get_discussions_by_blog",
+              params: [{ tag: author, limit: perAuthor }],
+              id: 1,
+            }, { timeout: 15000 });
+
+            const rawResults = response.data?.result || [];
+            // 디버그: active_votes 확인
+            if (rawResults.length > 0) {
+              const sample = rawResults[0];
+              console.log(`[Steem] @${author}: ${rawResults.length} posts, active_votes sample: ${sample.active_votes?.length ?? 'undefined'} votes`);
+            }
+            const posts = rawResults.map((post: any) => ({
+              author: post.author,
+              permlink: post.permlink,
+              title: post.title,
+              body: post.body?.slice(0, 300) + (post.body?.length > 300 ? "..." : ""),
+              created: post.created,
+              category: post.category,
+              tags: (() => {
+                try {
+                  const meta = JSON.parse(post.json_metadata || "{}");
+                  return meta.tags || [];
+                } catch { return []; }
+              })(),
+              net_votes: post.net_votes,
+              children: post.children,
+              pending_payout_value: post.pending_payout_value,
+              total_payout_value: post.total_payout_value,
+              curator_payout_value: post.curator_payout_value,
+              url: `https://steemit.com${post.url}`,
+              isReblog: post.author !== author,
+              // 보팅한 사용자 목록 (voter name만 전달)
+              voters: (post.active_votes || []).map((v: any) => v.voter),
+            }));
+            allPosts.push(...posts);
+          } catch (err: any) {
+            console.error(`[Steem] Failed to fetch @${author}:`, err.message);
+          }
+        })
+      );
+
+      // 최근 3일치만 필터링
+      const threeDaysAgo = new Date();
+      threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+      const recentPosts = allPosts.filter((post) => {
+        const postDate = new Date(post.created + "Z"); // Steem은 UTC
+        return postDate >= threeDaysAgo;
+      });
+
+      // 시간순 정렬 (최신글 먼저)
+      recentPosts.sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime());
+
+      res.json({ posts: recentPosts, authors });
+    } catch (error: any) {
+      console.error("[Steem] Feed fetch failed:", error.message);
+      res.status(500).json({ message: `스팀 피드 조회 실패: ${error.message}` });
+    }
+  });
+
+  // ===== 스팀 Replies (내 글에 달린 댓글) 조회 =====
+  app.get("/api/steem/replies/:author", requireAdmin, async (req, res) => {
+    try {
+      const author = req.params.author.trim().replace("@", "").toLowerCase();
+      const limit = Math.min(parseInt(req.query.limit as string) || 7, 20);
+
+      const response = await axios.post(STEEM_API_URL, {
+        jsonrpc: "2.0",
+        method: "bridge.get_account_posts",
+        params: { sort: "replies", account: author, limit },
+        id: 1,
+      }, { timeout: 15000 });
+
+      const rawPosts = response.data?.result || [];
+      const replies = rawPosts.map((post: any) => ({
+        author: post.author,
+        permlink: post.permlink,
+        body: post.body?.slice(0, 500) + (post.body?.length > 500 ? "..." : ""),
+        created: post.created,
+        parent_author: post.parent_author,
+        parent_permlink: post.parent_permlink,
+        net_votes: post.stats?.total_votes || post.net_votes || 0,
+        children: post.children || 0,
+        url: `https://steemit.com${post.url}`,
+      }));
+
+      res.json({ replies, account: author });
+    } catch (error: any) {
+      console.error("[Steem] Replies fetch failed:", error.message);
+      res.status(500).json({ message: `Replies 조회 실패: ${error.message}` });
+    }
+  });
+
   return httpServer;
 }
+

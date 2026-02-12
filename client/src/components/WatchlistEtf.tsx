@@ -16,6 +16,7 @@ import {
   Search,
   Trash2,
   Star,
+  Satellite,
   ShoppingCart,
   Tag,
   Edit,
@@ -25,6 +26,8 @@ import {
   TrendingUp,
   TrendingDown,
 } from "lucide-react";
+
+export type WatchlistListType = "core" | "satellite";
 
 interface WatchlistEtf {
   id: number;
@@ -50,7 +53,7 @@ interface EtfMarketData {
   expense: string;
 }
 
-// ===== 섹터 입력 컴포넌트 (한글 IME 안정성) =====
+// ===== 섹터 입력 컴포넌트 (기존 섹터 선택 + 직접 입력) =====
 function SectorInput({
   value,
   onChange,
@@ -60,52 +63,64 @@ function SectorInput({
   onChange: (v: string) => void;
   existingSectors: string[];
 }) {
-  const [showSuggestions, setShowSuggestions] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const filtered = existingSectors.filter(
-    (s) => s !== value && s.toLowerCase().includes(value.toLowerCase())
-  );
-
   return (
-    <div className="relative">
-      <Input
-        ref={inputRef}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onFocus={() => setShowSuggestions(true)}
-        onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
-        placeholder="섹터명 입력 (예: 반도체, AI, 배당 등)"
-        className="text-sm"
-      />
-      {showSuggestions && filtered.length > 0 && (
-        <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-popover border rounded-md shadow-md max-h-40 overflow-y-auto">
-          {filtered.map((s) => (
+    <div className="space-y-2">
+      {/* 기존 섹터 태그 버튼 */}
+      {existingSectors.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {existingSectors.map((s) => (
             <button
               key={s}
               type="button"
-              className="w-full text-left px-3 py-2 text-sm hover:bg-muted transition-colors"
-              onMouseDown={(e) => {
-                e.preventDefault();
-                onChange(s);
-                setShowSuggestions(false);
-              }}
+              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
+                value === s
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-muted/50 text-muted-foreground border-border hover:bg-muted hover:text-foreground"
+              }`}
+              onClick={() => onChange(s)}
             >
-              <Tag className="w-3 h-3 inline mr-2 text-muted-foreground" />
+              <Tag className="w-3 h-3" />
               {s}
             </button>
           ))}
         </div>
       )}
+      {/* 직접 입력 */}
+      <div className="flex items-center gap-2">
+        <Input
+          ref={inputRef}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="섹터명 입력 또는 위에서 선택 (예: 반도체, AI, 배당)"
+          className="text-sm flex-1"
+        />
+        {value && !existingSectors.includes(value) && (
+          <span className="text-[10px] text-amber-600 dark:text-amber-400 whitespace-nowrap shrink-0">
+            새 섹터
+          </span>
+        )}
+      </div>
     </div>
   );
 }
 
-export default function WatchlistEtfComponent() {
+interface WatchlistEtfProps {
+  listType?: WatchlistListType;
+}
+
+export default function WatchlistEtfComponent({ listType = "core" }: WatchlistEtfProps) {
   const { isAdmin, isLoggedIn } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [, navigate] = useLocation();
+
+  // listType에 따른 API 경로 및 라벨 설정
+  const apiBase = listType === "satellite" ? "/api/satellite-etfs" : "/api/watchlist-etfs";
+  const listTitle = listType === "satellite" ? "관심ETF(Satellite)" : "관심ETF(Core)";
+  const TitleIcon = listType === "satellite" ? Satellite : Star;
+  const iconColor = listType === "satellite" ? "text-blue-500" : "text-yellow-500";
 
   // state
   const [addDialogOpen, setAddDialogOpen] = useState(false);
@@ -120,17 +135,17 @@ export default function WatchlistEtfComponent() {
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
   const [filterSector, setFilterSector] = useState<string | null>(null);
 
-  // API: 관심 ETF 목록 조회
+  // API: ETF 목록 조회
   const { data: watchlist = [], isLoading } = useQuery<WatchlistEtf[]>({
-    queryKey: ["/api/watchlist-etfs"],
+    queryKey: [apiBase],
     enabled: isLoggedIn,
   });
 
-  // API: 관심 ETF 시세 정보 조회
+  // API: ETF 시세 정보 조회
   const { data: marketData = {}, isLoading: isMarketLoading, refetch: refetchMarket } = useQuery<Record<string, EtfMarketData>>({
-    queryKey: ["/api/watchlist-etfs/market-data"],
+    queryKey: [`${apiBase}/market-data`],
     enabled: isLoggedIn && watchlist.length > 0,
-    staleTime: 5 * 60 * 1000, // 5분 캐시
+    staleTime: 5 * 60 * 1000,
   });
 
   // 섹터 목록 추출
@@ -182,11 +197,11 @@ export default function WatchlistEtfComponent() {
   // 추가 mutation
   const addMutation = useMutation({
     mutationFn: async (data: { etfCode: string; etfName: string; sector: string; memo: string }) => {
-      const res = await apiRequest("POST", "/api/watchlist-etfs", data);
+      const res = await apiRequest("POST", apiBase, data);
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/watchlist-etfs"] });
+      queryClient.invalidateQueries({ queryKey: [apiBase] });
       toast({ title: "추가 완료", description: "관심 ETF가 추가되었습니다." });
       closeAddDialog();
     },
@@ -198,11 +213,11 @@ export default function WatchlistEtfComponent() {
   // 수정 mutation
   const updateMutation = useMutation({
     mutationFn: async ({ id, ...data }: { id: number; sector?: string; memo?: string }) => {
-      const res = await apiRequest("PUT", `/api/watchlist-etfs/${id}`, data);
+      const res = await apiRequest("PUT", `${apiBase}/${id}`, data);
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/watchlist-etfs"] });
+      queryClient.invalidateQueries({ queryKey: [apiBase] });
       toast({ title: "수정 완료" });
       setEditDialogOpen(false);
       setEditTarget(null);
@@ -215,10 +230,10 @@ export default function WatchlistEtfComponent() {
   // 삭제 mutation
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
-      await apiRequest("DELETE", `/api/watchlist-etfs/${id}`);
+      await apiRequest("DELETE", `${apiBase}/${id}`);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/watchlist-etfs"] });
+      queryClient.invalidateQueries({ queryKey: [apiBase] });
       toast({ title: "삭제 완료" });
     },
     onError: (err: Error) => {
@@ -283,8 +298,8 @@ export default function WatchlistEtfComponent() {
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <CardTitle className="text-lg flex items-center gap-2">
-              <Star className="w-5 h-5 text-yellow-500" />
-              관심(추천) ETF
+              <TitleIcon className={`w-5 h-5 ${iconColor}`} />
+              {listTitle}
               <span className="text-sm font-normal text-muted-foreground">({watchlist.length}개)</span>
             </CardTitle>
             <div className="flex items-center gap-2">

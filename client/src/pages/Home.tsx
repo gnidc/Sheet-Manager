@@ -28,6 +28,8 @@ const EtfComponents = lazy(() => import("@/components/EtfComponents"));
 const NewEtfComp = lazy(() => import("@/components/NewEtf"));
 const WatchlistEtfComp = lazy(() => import("@/components/WatchlistEtf"));
 const SteemReport = lazy(() => import("@/components/SteemReport"));
+const SteemReader = lazy(() => import("@/components/SteemReader"));
+const DomesticMarket = lazy(() => import("@/components/DomesticMarket"));
 
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -70,79 +72,80 @@ export default function Home() {
       </header>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-8">
-          <TabsList className="grid w-full grid-cols-6 max-w-5xl mx-auto bg-violet-100/70 dark:bg-violet-950/30">
-            <TabsTrigger value="home" className="gap-2">
-              <HomeIcon className="h-4 w-4" />
-              홈
-            </TabsTrigger>
-            {/* ETF정보 드롭다운 메뉴 */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <div className="flex gap-4">
+          {/* 왼쪽 세로 메인탭 사이드바 */}
+          <div className="hidden md:flex flex-col w-40 shrink-0 sticky top-[85px] self-start max-h-[calc(100vh-100px)] overflow-y-auto">
+            <nav className="flex flex-col gap-0.5 bg-violet-100/70 dark:bg-violet-950/30 rounded-lg p-1.5">
+              {/* 홈 */}
+              <button
+                onClick={() => setActiveTab("home")}
+                className={`flex items-center gap-2 w-full rounded-md px-3 py-2 text-sm font-medium transition-all text-left ${
+                  activeTab === "home"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-background/50"
+                }`}
+              >
+                <HomeIcon className="h-4 w-4 shrink-0" />
+                홈
+              </button>
+
+              {/* ETF정보 드롭다운 */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
-                  className={`inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 gap-1 ${
-                    activeTab === "etf-components" || activeTab === "new-etf" || activeTab === "watchlist-etf"
+                    className={`flex items-center gap-2 w-full rounded-md px-3 py-2 text-sm font-medium transition-all text-left ${
+                    activeTab === "etf-components" || activeTab === "new-etf" || activeTab === "watchlist-etf" || activeTab === "satellite-etf"
                       ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
+                        : "text-muted-foreground hover:text-foreground hover:bg-background/50"
                   }`}
                 >
-                  <Scale className="h-3.5 w-3.5" />
+                    <Scale className="h-4 w-4 shrink-0" />
                   ETF정보
-                  <ChevronDown className="h-3 w-3 opacity-60" />
+                    <ChevronDown className="h-3 w-3 opacity-60 ml-auto" />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="center" className="min-w-[140px]">
-                <DropdownMenuItem
-                  onClick={() => setActiveTab("etf-components")}
-                  className="gap-2 cursor-pointer"
-                >
+                <DropdownMenuContent side="right" align="start" className="min-w-[140px]">
+                  <DropdownMenuItem onClick={() => setActiveTab("etf-components")} className="gap-2 cursor-pointer">
                   📊 ETF실시간
                 </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => setActiveTab("new-etf")}
-                  className="gap-2 cursor-pointer"
-                >
+                  <DropdownMenuItem onClick={() => setActiveTab("new-etf")} className="gap-2 cursor-pointer">
                   🆕 신규ETF
                 </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => setActiveTab("watchlist-etf")}
-                  className="gap-2 cursor-pointer"
-                >
-                  ⭐ 관심(추천)ETF
+                  <DropdownMenuItem onClick={() => setActiveTab("watchlist-etf")} className="gap-2 cursor-pointer">
+                  ⭐ 관심ETF(Core)
                 </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => window.open("https://www.funetf.co.kr/product/etf/filter", "_blank", "noopener,noreferrer")}
-                  className="gap-2 cursor-pointer"
-                >
+                  <DropdownMenuItem onClick={() => setActiveTab("satellite-etf")} className="gap-2 cursor-pointer">
+                  🛰️ 관심ETF(Satellite)
+                </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => window.open("https://www.funetf.co.kr/product/etf/filter", "_blank", "noopener,noreferrer")} className="gap-2 cursor-pointer">
                   🔍 ETF검색
                   <ExternalLink className="w-3 h-3 ml-auto opacity-50" />
                 </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => window.open("https://www.funetf.co.kr/product/comparison/etf", "_blank", "noopener,noreferrer")}
-                  className="gap-2 cursor-pointer"
-                >
+                  <DropdownMenuItem onClick={() => window.open("https://www.funetf.co.kr/product/comparison/etf", "_blank", "noopener,noreferrer")} className="gap-2 cursor-pointer">
                   ⚖️ ETF비교
                   <ExternalLink className="w-3 h-3 ml-auto opacity-50" />
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            {/* Markets 드롭다운 메뉴 */}
+
+              {/* Markets 드롭다운 */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
-                  className={`inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 gap-1 ${
+                    className={`flex items-center gap-2 w-full rounded-md px-3 py-2 text-sm font-medium transition-all text-left ${
                     activeTab.startsWith("markets-")
                       ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
+                        : "text-muted-foreground hover:text-foreground hover:bg-background/50"
                   }`}
                 >
-                  <Globe className="h-3.5 w-3.5" />
+                    <Globe className="h-4 w-4 shrink-0" />
                   Markets
-                  <ChevronDown className="h-3 w-3 opacity-60" />
+                    <ChevronDown className="h-3 w-3 opacity-60 ml-auto" />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="center" className="min-w-[140px]">
+                <DropdownMenuContent side="right" align="start" className="min-w-[140px]">
                 <DropdownMenuItem onClick={() => setActiveTab("markets-domestic")} className="gap-2 cursor-pointer">
                   🇰🇷 국내증시
                 </DropdownMenuItem>
@@ -163,22 +166,23 @@ export default function Home() {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            {/* 투자전략 드롭다운 메뉴 */}
+
+              {/* 투자전략 드롭다운 */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
-                  className={`inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 gap-1 ${
+                    className={`flex items-center gap-2 w-full rounded-md px-3 py-2 text-sm font-medium transition-all text-left ${
                     activeTab.startsWith("strategy-")
                       ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
+                        : "text-muted-foreground hover:text-foreground hover:bg-background/50"
                   }`}
                 >
-                  <Calendar className="h-3.5 w-3.5" />
+                    <Calendar className="h-4 w-4 shrink-0" />
                   투자전략
-                  <ChevronDown className="h-3 w-3 opacity-60" />
+                    <ChevronDown className="h-3 w-3 opacity-60 ml-auto" />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="center" className="min-w-[120px]">
+                <DropdownMenuContent side="right" align="start" className="min-w-[120px]">
                 <DropdownMenuItem onClick={() => setActiveTab("strategy-daily")} className="gap-2 cursor-pointer">
                   📋 일일 보고서
                 </DropdownMenuItem>
@@ -191,22 +195,145 @@ export default function Home() {
                 <DropdownMenuItem onClick={() => setActiveTab("strategy-yearly")} className="gap-2 cursor-pointer">
                   📉 연간 보고서
                 </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              {/* CRYPTO 드롭다운 (Admin 전용) */}
                 {isAdmin && (
-                <DropdownMenuItem onClick={() => setActiveTab("strategy-steam")} className="gap-2 cursor-pointer">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    className={`flex items-center gap-2 w-full rounded-md px-3 py-2 text-sm font-medium transition-all text-left ${
+                      activeTab.startsWith("crypto-")
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground hover:bg-background/50"
+                    }`}
+                  >
+                    <Zap className="h-4 w-4 shrink-0" />
+                    CRYPTO
+                    <ChevronDown className="h-3 w-3 opacity-60 ml-auto" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent side="right" align="start" className="min-w-[130px]">
+                  <DropdownMenuItem onClick={() => setActiveTab("crypto-steem-reader")} className="gap-2 cursor-pointer">
+                    📖 스팀글읽기
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setActiveTab("crypto-steem-report")} className="gap-2 cursor-pointer">
                   🔬 스팀보고서
                 </DropdownMenuItem>
-                )}
               </DropdownMenuContent>
             </DropdownMenu>
-            <TabsTrigger value="etf-trends" className="gap-2">
-              <Newspaper className="h-4 w-4" />
+              )}
+
+              {/* ETF 동향 */}
+              <button
+                onClick={() => setActiveTab("etf-trends")}
+                className={`flex items-center gap-2 w-full rounded-md px-3 py-2 text-sm font-medium transition-all text-left ${
+                  activeTab === "etf-trends"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-background/50"
+                }`}
+              >
+                <Newspaper className="h-4 w-4 shrink-0" />
               ETF 동향
-            </TabsTrigger>
-            <TabsTrigger value="bookmarks" className="gap-2">
-              <Star className="h-4 w-4 text-yellow-500" />
-              즐겨찾기
+              </button>
+
+              {/* 즐겨찾기 */}
+              <button
+                onClick={() => setActiveTab("bookmarks")}
+                className={`flex items-center gap-2 w-full rounded-md px-3 py-2 text-sm font-medium transition-all text-left ${
+                  activeTab === "bookmarks"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-background/50"
+                }`}
+              >
+                <Star className="h-4 w-4 text-yellow-500 shrink-0" />
+                즐겨찾기
+              </button>
+            </nav>
+          </div>
+
+          {/* 모바일용 가로 탭 (md 이하에서만 표시) */}
+          <div className="md:hidden w-full mb-4">
+            <TabsList className="flex w-full overflow-x-auto bg-violet-100/70 dark:bg-violet-950/30">
+              <TabsTrigger value="home" className="gap-1 text-xs shrink-0">
+                <HomeIcon className="h-3.5 w-3.5" />
+                홈
+              </TabsTrigger>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className={`inline-flex items-center gap-1 shrink-0 px-2 py-1.5 text-xs font-medium rounded-sm transition-all ${
+                    activeTab === "etf-components" || activeTab === "new-etf" || activeTab === "watchlist-etf" || activeTab === "satellite-etf"
+                      ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"
+                  }`}>
+                    <Scale className="h-3.5 w-3.5" /> ETF <ChevronDown className="h-2.5 w-2.5" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="center" className="min-w-[130px]">
+                  <DropdownMenuItem onClick={() => setActiveTab("etf-components")} className="gap-2 cursor-pointer text-xs">📊 ETF실시간</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setActiveTab("new-etf")} className="gap-2 cursor-pointer text-xs">🆕 신규ETF</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setActiveTab("watchlist-etf")} className="gap-2 cursor-pointer text-xs">⭐ 관심ETF(Core)</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setActiveTab("satellite-etf")} className="gap-2 cursor-pointer text-xs">🛰️ 관심ETF(Satellite)</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className={`inline-flex items-center gap-1 shrink-0 px-2 py-1.5 text-xs font-medium rounded-sm transition-all ${
+                    activeTab.startsWith("markets-") ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"
+                  }`}>
+                    <Globe className="h-3.5 w-3.5" /> Markets <ChevronDown className="h-2.5 w-2.5" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="center" className="min-w-[120px]">
+                  <DropdownMenuItem onClick={() => setActiveTab("markets-domestic")} className="gap-2 cursor-pointer text-xs">🇰🇷 국내증시</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setActiveTab("markets-global")} className="gap-2 cursor-pointer text-xs">🌍 해외증시</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setActiveTab("markets-etc")} className="gap-2 cursor-pointer text-xs">💹 ETC</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setActiveTab("markets-news")} className="gap-2 cursor-pointer text-xs">📰 뉴스</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setActiveTab("markets-research")} className="gap-2 cursor-pointer text-xs">📊 리서치</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setActiveTab("markets-calendar")} className="gap-2 cursor-pointer text-xs">📅 캘린더</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className={`inline-flex items-center gap-1 shrink-0 px-2 py-1.5 text-xs font-medium rounded-sm transition-all ${
+                    activeTab.startsWith("strategy-") ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"
+                  }`}>
+                    <Calendar className="h-3.5 w-3.5" /> 전략 <ChevronDown className="h-2.5 w-2.5" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="center" className="min-w-[110px]">
+                  <DropdownMenuItem onClick={() => setActiveTab("strategy-daily")} className="gap-2 cursor-pointer text-xs">📋 일일</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setActiveTab("strategy-weekly")} className="gap-2 cursor-pointer text-xs">📊 주간</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setActiveTab("strategy-monthly")} className="gap-2 cursor-pointer text-xs">📈 월간</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setActiveTab("strategy-yearly")} className="gap-2 cursor-pointer text-xs">📉 연간</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              {isAdmin && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className={`inline-flex items-center gap-1 shrink-0 px-2 py-1.5 text-xs font-medium rounded-sm transition-all ${
+                    activeTab.startsWith("crypto-") ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"
+                  }`}>
+                    <Zap className="h-3.5 w-3.5" /> CRYPTO <ChevronDown className="h-2.5 w-2.5" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="center" className="min-w-[120px]">
+                  <DropdownMenuItem onClick={() => setActiveTab("crypto-steem-reader")} className="gap-2 cursor-pointer text-xs">📖 스팀글읽기</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setActiveTab("crypto-steem-report")} className="gap-2 cursor-pointer text-xs">🔬 스팀보고서</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              )}
+              <TabsTrigger value="etf-trends" className="gap-1 text-xs shrink-0">
+                <Newspaper className="h-3.5 w-3.5" /> 동향
+              </TabsTrigger>
+              <TabsTrigger value="bookmarks" className="gap-1 text-xs shrink-0">
+                <Star className="h-3.5 w-3.5 text-yellow-500" /> 즐겨찾기
             </TabsTrigger>
           </TabsList>
+          </div>
+
+          {/* 오른쪽 콘텐츠 영역 */}
+          <div className="flex-1 min-w-0">
 
           <TabsContent value="home">
             <HomeEmbed onNavigate={setActiveTab} />
@@ -238,7 +365,17 @@ export default function Home() {
                 <Loader2 className="w-8 h-8 animate-spin text-primary" />
               </div>
             }>
-              <WatchlistEtfComp />
+              <WatchlistEtfComp listType="core" />
+            </Suspense>
+          </TabsContent>
+
+          <TabsContent value="satellite-etf">
+            <Suspense fallback={
+              <div className="flex items-center justify-center py-20">
+                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+              </div>
+            }>
+              <WatchlistEtfComp listType="satellite" />
             </Suspense>
           </TabsContent>
 
@@ -264,7 +401,13 @@ export default function Home() {
 
           {/* 국내증시 */}
           <TabsContent value="markets-domestic">
-            <MarketsView type="domestic" />
+            <Suspense fallback={
+              <div className="flex items-center justify-center py-20">
+                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+              </div>
+            }>
+              <DomesticMarket />
+            </Suspense>
           </TabsContent>
 
           {/* 해외증시 */}
@@ -295,9 +438,22 @@ export default function Home() {
           </TabsContent>
           ))}
 
-          {/* 스팀보고서 (Admin 전용) */}
+          {/* CRYPTO - 스팀글읽기 (Admin 전용) */}
           {isAdmin && (
-          <TabsContent value="strategy-steam">
+          <TabsContent value="crypto-steem-reader">
+            <Suspense fallback={
+              <div className="flex items-center justify-center py-20">
+                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+              </div>
+            }>
+              <SteemReader />
+            </Suspense>
+          </TabsContent>
+          )}
+
+          {/* CRYPTO - 스팀보고서 (Admin 전용) */}
+          {isAdmin && (
+          <TabsContent value="crypto-steem-report">
             <Suspense fallback={
               <div className="flex items-center justify-center py-20">
                 <Loader2 className="w-8 h-8 animate-spin text-primary" />
@@ -321,6 +477,8 @@ export default function Home() {
               <BookmarksComp />
             </Suspense>
           </TabsContent>
+          </div>
+          </div>
         </Tabs>
       </main>
     </div>
@@ -557,8 +715,8 @@ function PublicCafeView() {
   if (isLoading) {
     return (
       <div className="py-20 text-center">
-        <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-2" />
-        <p className="text-sm text-muted-foreground">카페 글 목록 로딩 중...</p>
+          <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-2" />
+          <p className="text-sm text-muted-foreground">카페 글 목록 로딩 중...</p>
       </div>
     );
   }
@@ -1311,8 +1469,8 @@ function HomeEmbed({ onNavigate }: { onNavigate: (tab: string) => void }) {
   if (isLoading && !isSearchMode) {
   return (
       <div className="py-20 text-center">
-        <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-2" />
-        <p className="text-sm text-muted-foreground">카페 글 목록 로딩 중...</p>
+          <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-2" />
+          <p className="text-sm text-muted-foreground">카페 글 목록 로딩 중...</p>
       </div>
     );
   }

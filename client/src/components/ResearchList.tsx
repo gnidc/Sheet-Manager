@@ -1,8 +1,12 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import {
   Loader2,
   RefreshCw,
@@ -12,6 +16,18 @@ import {
   AlertCircle,
   Download,
   Building2,
+  Star,
+  Sparkles,
+  ChevronDown,
+  ChevronUp,
+  Save,
+  Copy,
+  Check,
+  Plus,
+  Minus,
+  BookOpen,
+  Trash2,
+  X,
 } from "lucide-react";
 
 interface ResearchItem {
@@ -20,15 +36,46 @@ interface ResearchItem {
   source: string;
   date: string;
   file: string;
+  readCount?: string;
+  category?: string;
+  analyst?: string;
 }
 
 interface ResearchResponse {
+  popular: ResearchItem[];
+  strategy: ResearchItem[];
   research: ResearchItem[];
   updatedAt: string;
   total: number;
 }
 
+interface AiReport {
+  id: string;
+  analysis: string;
+  analyzedAt: string;
+  savedAt: string;
+  items: Array<{ title: string; source: string; date: string }>;
+}
+
 export default function ResearchList() {
+  const { toast } = useToast();
+  const { isAdmin } = useAuth();
+  const [checkedPopularItems, setCheckedPopularItems] = useState<Set<number>>(new Set());
+  const [checkedStrategyItems, setCheckedStrategyItems] = useState<Set<number>>(new Set());
+  const [checkedItems, setCheckedItems] = useState<Set<number>>(new Set()); // legacy compat
+  const [checkedKeyItems, setCheckedKeyItems] = useState<Set<number>>(new Set());
+  const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
+  const [aiAnalyzedAt, setAiAnalyzedAt] = useState<string | null>(null);
+  const [showAnalysis, setShowAnalysis] = useState(true);
+  const [analysisFontSize, setAnalysisFontSize] = useState(14);
+  const [copied, setCopied] = useState(false);
+  const [viewingReport, setViewingReport] = useState<AiReport | null>(null);
+  const [reportFontSize, setReportFontSize] = useState(14);
+  const [reportCopied, setReportCopied] = useState(false);
+  // AI 분석 시 사용된 항목 추적
+  const [lastAnalyzedItems, setLastAnalyzedItems] = useState<ResearchItem[]>([]);
+
+  // 전체 리서치 조회
   const {
     data,
     isLoading,
@@ -49,6 +96,221 @@ export default function ResearchList() {
     gcTime: 15 * 60 * 1000,
     refetchOnWindowFocus: false,
   });
+
+  // 주요 리서치 서버에서 조회 (모든 유저)
+  const {
+    data: keyResearchData,
+    refetch: refetchKeyResearch,
+  } = useQuery<{ items: ResearchItem[] }>({
+    queryKey: ["/api/research/key-research"],
+    queryFn: async () => {
+      const res = await fetch("/api/research/key-research", { credentials: "include" });
+      if (!res.ok) return { items: [] };
+      return res.json();
+    },
+    staleTime: 30 * 1000,
+    refetchOnWindowFocus: true,
+  });
+
+  const keyResearchItems = keyResearchData?.items || [];
+
+  // 주요 리서치 서버 저장 뮤테이션 (admin)
+  const saveKeyResearchMutation = useMutation({
+    mutationFn: async (items: ResearchItem[]) => {
+      const res = await fetch("/api/research/key-research", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ items }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "저장 실패");
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      refetchKeyResearch();
+      toast({ title: "주요 리서치 추가", description: `${data.added}건이 추가되었습니다.` });
+    },
+    onError: (error: Error) => {
+      toast({ title: "저장 실패", description: error.message, variant: "destructive" });
+    },
+  });
+
+  // 주요 리서치 전체 교체 뮤테이션 (삭제/초기화용)
+  const updateKeyResearchMutation = useMutation({
+    mutationFn: async (items: ResearchItem[]) => {
+      const res = await fetch("/api/research/key-research", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ items }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "업데이트 실패");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      refetchKeyResearch();
+    },
+    onError: (error: Error) => {
+      toast({ title: "업데이트 실패", description: error.message, variant: "destructive" });
+    },
+  });
+
+  // AI 분석 뮤테이션
+  const aiMutation = useMutation({
+    mutationFn: async (items: ResearchItem[]) => {
+      const res = await fetch("/api/research/ai-analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ items }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "AI 분석 실패");
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      setAiAnalysis(data.analysis);
+      setAiAnalyzedAt(data.analyzedAt);
+      setShowAnalysis(true);
+      toast({ title: "AI 분석 완료", description: "주요 리서치 분석이 생성되었습니다." });
+    },
+    onError: (error: Error) => {
+      toast({ title: "AI 분석 실패", description: error.message, variant: "destructive" });
+    },
+  });
+
+  // AI 보고서 조회 (모든 유저)
+  const {
+    data: reportsData,
+    refetch: refetchReports,
+  } = useQuery<{ reports: AiReport[] }>({
+    queryKey: ["/api/research/ai-reports"],
+    queryFn: async () => {
+      const res = await fetch("/api/research/ai-reports", { credentials: "include" });
+      if (!res.ok) return { reports: [] };
+      return res.json();
+    },
+    staleTime: 30 * 1000,
+    refetchOnWindowFocus: true,
+  });
+
+  const savedReports = reportsData?.reports || [];
+
+  // AI 보고서 저장 뮤테이션 (admin)
+  const saveReportMutation = useMutation({
+    mutationFn: async (payload: { analysis: string; analyzedAt: string; items: ResearchItem[] }) => {
+      const res = await fetch("/api/research/ai-reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "보고서 저장 실패");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      refetchReports();
+      toast({ title: "보고서 저장 완료", description: "AI 분석 보고서가 저장되었습니다." });
+    },
+    onError: (error: Error) => {
+      toast({ title: "저장 실패", description: error.message, variant: "destructive" });
+    },
+  });
+
+  // AI 보고서 삭제 뮤테이션 (admin)
+  const deleteReportMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/research/ai-reports/${id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("삭제 실패");
+      return res.json();
+    },
+    onSuccess: () => {
+      refetchReports();
+      toast({ title: "삭제 완료", description: "보고서가 삭제되었습니다." });
+    },
+    onError: (error: Error) => {
+      toast({ title: "삭제 실패", description: error.message, variant: "destructive" });
+    },
+  });
+
+  // 주요 리서치로 추가 (서버 저장) - 인기 리포트에서
+  const handleAddPopularToKeyResearch = () => {
+    const popularList = data?.popular || [];
+    if (checkedPopularItems.size === 0) return;
+    const newItems = Array.from(checkedPopularItems)
+      .map(idx => popularList[idx])
+      .filter(item => item && !keyResearchItems.some(k => k.title === item.title && k.source === item.source));
+    if (newItems.length === 0) {
+      toast({ title: "알림", description: "이미 추가된 항목입니다." });
+      return;
+    }
+    saveKeyResearchMutation.mutate(newItems);
+    setCheckedPopularItems(new Set());
+  };
+
+  // 주요 리서치로 추가 (서버 저장) - 투자전략에서
+  const handleAddStrategyToKeyResearch = () => {
+    const strategyList = data?.strategy || [];
+    if (checkedStrategyItems.size === 0) return;
+    const newItems = Array.from(checkedStrategyItems)
+      .map(idx => strategyList[idx])
+      .filter(item => item && !keyResearchItems.some(k => k.title === item.title && k.source === item.source));
+    if (newItems.length === 0) {
+      toast({ title: "알림", description: "이미 추가된 항목입니다." });
+      return;
+    }
+    saveKeyResearchMutation.mutate(newItems);
+    setCheckedStrategyItems(new Set());
+  };
+
+  // 주요 리서치에서 제거 (서버 업데이트)
+  const handleRemoveFromKeyResearch = (indices: number[]) => {
+    const remaining = keyResearchItems.filter((_, i) => !indices.includes(i));
+    updateKeyResearchMutation.mutate(remaining);
+    setCheckedKeyItems(new Set());
+  };
+
+  // 주요 리서치 전체 초기화 (서버 업데이트)
+  const handleClearKeyResearch = () => {
+    updateKeyResearchMutation.mutate([]);
+    setCheckedKeyItems(new Set());
+    setAiAnalysis(null);
+  };
+
+  // AI 분석 실행
+  const handleAiAnalyze = () => {
+    if (checkedKeyItems.size === 0) {
+      toast({ title: "알림", description: "분석할 리서치를 선택해주세요.", variant: "destructive" });
+      return;
+    }
+    const selectedItems = Array.from(checkedKeyItems).map(idx => keyResearchItems[idx]).filter(Boolean);
+    setLastAnalyzedItems(selectedItems);
+    aiMutation.mutate(selectedItems);
+  };
+
+  // AI 분석 보고서 저장
+  const handleSaveReport = () => {
+    if (!aiAnalysis || !aiAnalyzedAt) return;
+    saveReportMutation.mutate({
+      analysis: aiAnalysis,
+      analyzedAt: aiAnalyzedAt,
+      items: lastAnalyzedItems,
+    });
+  };
 
   if (isLoading && !data) {
     return (
@@ -73,16 +335,131 @@ export default function ResearchList() {
     );
   }
 
+  const popularList = data?.popular || [];
+  const strategyList = data?.strategy || [];
+
+  // 리서치 테이블 렌더링 헬퍼
+  const renderResearchTable = (
+    items: ResearchItem[],
+    checked: Set<number>,
+    setChecked: React.Dispatch<React.SetStateAction<Set<number>>>,
+    onSave: () => void,
+    bgColor: string = "bg-muted/50",
+    showCategory: boolean = false,
+    showReadCount: boolean = false,
+  ) => (
+    <CardContent className="p-0">
+      <div className="overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow className={bgColor}>
+              {isAdmin && (
+                <TableHead className="w-[40px] text-center">
+                  <Checkbox
+                    checked={items.length > 0 && items.every((_, i) => checked.has(i))}
+                    onCheckedChange={(ch) => {
+                      if (ch) setChecked(new Set(items.map((_, i) => i)));
+                      else setChecked(new Set());
+                    }}
+                    className="w-3.5 h-3.5"
+                  />
+                </TableHead>
+              )}
+              <TableHead className="text-xs">제목</TableHead>
+              {showCategory && <TableHead className="w-[80px] text-xs">카테고리</TableHead>}
+              <TableHead className="w-[100px] text-xs">증권사</TableHead>
+              <TableHead className="w-[85px] text-center text-xs">날짜</TableHead>
+              {showReadCount && <TableHead className="w-[60px] text-center text-xs">조회</TableHead>}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {items.map((item, index) => {
+              const isChecked = checked.has(index);
+              const isAlreadyKey = keyResearchItems.some(k => k.title === item.title && k.source === item.source);
+              return (
+                <TableRow
+                  key={index}
+                  className={`hover:bg-muted/30 group ${isChecked ? "bg-amber-50/50 dark:bg-amber-950/10" : ""} ${isAlreadyKey ? "opacity-60" : ""}`}
+                >
+                  {isAdmin && (
+                    <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        checked={isChecked}
+                        onCheckedChange={(ch) => {
+                          const s = new Set(checked);
+                          if (ch) s.add(index); else s.delete(index);
+                          setChecked(s);
+                        }}
+                        className="w-3.5 h-3.5"
+                      />
+                    </TableCell>
+                  )}
+                  <TableCell
+                    className="cursor-pointer"
+                    onClick={() => { if (item.link) window.open(item.link, "_blank", "noopener,noreferrer"); }}
+                  >
+                    <div className="flex items-center gap-2">
+                      {isAlreadyKey && <Star className="w-3 h-3 text-amber-500 fill-amber-500 flex-shrink-0" />}
+                      <span className="font-medium text-sm group-hover:text-primary transition-colors line-clamp-2">
+                        {item.title}
+                      </span>
+                      <ExternalLink className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </div>
+                  </TableCell>
+                  {showCategory && (
+                    <TableCell>
+                      <StatusBadge variant="outline" className="text-xs">
+                        {item.category || "-"}
+                      </StatusBadge>
+                    </TableCell>
+                  )}
+                  <TableCell>
+                    <StatusBadge variant="outline" className="text-xs">
+                      {item.source || "-"}
+                    </StatusBadge>
+                  </TableCell>
+                  <TableCell className="text-center text-xs text-muted-foreground">
+                    {item.date || "-"}
+                  </TableCell>
+                  {showReadCount && (
+                    <TableCell className="text-center text-xs text-muted-foreground">
+                      {item.readCount ? Number(item.readCount).toLocaleString() : "-"}
+                    </TableCell>
+                  )}
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </div>
+    </CardContent>
+  );
+
   return (
     <div className="space-y-6">
       {/* 헤더 */}
       <Card>
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Building2 className="w-5 h-5 text-indigo-500" />
-              증권사 투자전략 리서치
-            </CardTitle>
+            <div className="flex items-center gap-3">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Building2 className="w-5 h-5 text-indigo-500" />
+                증권사 리서치 리포트
+              </CardTitle>
+              {keyResearchItems.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs gap-1 border-amber-300 text-amber-700 hover:bg-amber-50"
+                  onClick={() => {
+                    document.getElementById("key-research-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }}
+                >
+                  <Star className="w-3 h-3 fill-amber-500 text-amber-500" />
+                  주요 리서치로 바로가기
+                </Button>
+              )}
+            </div>
             <div className="flex items-center gap-3">
               {data?.updatedAt && (
                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -107,69 +484,447 @@ export default function ResearchList() {
             </div>
           </div>
           <p className="text-xs text-muted-foreground mt-1">
-            네이버 금융 증권사 투자전략 리포트를 보여드립니다
+            네이버 증권 리서치 리포트 (stock.naver.com){isAdmin && <> | 체크 후 <span className="text-primary font-medium">💾 저장</span> 버튼으로 주요 리서치에 등록</>}
           </p>
         </CardHeader>
       </Card>
 
-      {/* 리서치 리스트 */}
-      {data?.research && data.research.length > 0 ? (
-        <Card>
+      {/* 섹션 1: 요즘 많이 보는 리포트 */}
+      <Card>
+        <CardHeader className="pb-2 pt-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-bold flex items-center gap-1.5">
+              🔥 요즘 많이 보는 리포트
+              <span className="text-xs font-normal text-muted-foreground">({popularList.length}건)</span>
+            </span>
+            {isAdmin && checkedPopularItems.size > 0 && (
+              <Button
+                variant="default"
+                size="sm"
+                className="h-7 text-xs gap-1 bg-amber-500 hover:bg-amber-600 text-white"
+                onClick={handleAddPopularToKeyResearch}
+              >
+                <Save className="w-3 h-3" />
+                저장 ({checkedPopularItems.size})
+              </Button>
+            )}
+          </div>
+        </CardHeader>
+        {popularList.length > 0 ? (
+          renderResearchTable(
+            popularList,
+            checkedPopularItems,
+            setCheckedPopularItems,
+            handleAddPopularToKeyResearch,
+            "bg-orange-50/50 dark:bg-orange-950/10",
+            true, // showCategory
+            true, // showReadCount
+          )
+        ) : (
+          <CardContent className="py-8 text-center">
+            <FileText className="w-8 h-8 mx-auto text-muted-foreground/30 mb-2" />
+            <p className="text-sm text-muted-foreground">인기 리포트를 불러올 수 없습니다.</p>
+          </CardContent>
+        )}
+      </Card>
+
+      {/* 섹션 2: 투자전략 최신 리포트 */}
+      <Card>
+        <CardHeader className="pb-2 pt-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-bold flex items-center gap-1.5">
+              📋 투자전략 최신 리포트
+              <span className="text-xs font-normal text-muted-foreground">({strategyList.length}건)</span>
+            </span>
+            {isAdmin && checkedStrategyItems.size > 0 && (
+              <Button
+                variant="default"
+                size="sm"
+                className="h-7 text-xs gap-1 bg-amber-500 hover:bg-amber-600 text-white"
+                onClick={handleAddStrategyToKeyResearch}
+              >
+                <Save className="w-3 h-3" />
+                저장 ({checkedStrategyItems.size})
+              </Button>
+            )}
+          </div>
+        </CardHeader>
+        {strategyList.length > 0 ? (
+          renderResearchTable(
+            strategyList,
+            checkedStrategyItems,
+            setCheckedStrategyItems,
+            handleAddStrategyToKeyResearch,
+            "bg-blue-50/50 dark:bg-blue-950/10",
+            false, // showCategory (all same)
+            true,  // showReadCount
+          )
+        ) : (
+          <CardContent className="py-8 text-center">
+            <FileText className="w-8 h-8 mx-auto text-muted-foreground/30 mb-2" />
+            <p className="text-sm text-muted-foreground">투자전략 리포트를 불러올 수 없습니다.</p>
+          </CardContent>
+        )}
+      </Card>
+
+      {/* ===== 주요 리서치 섹션 (리스트는 모두 보임, 관리 기능은 admin 전용) ===== */}
+      {keyResearchItems.length > 0 && (
+        <Card id="key-research-section" className="border-amber-300 dark:border-amber-700">
+          <CardHeader className="pb-2 pt-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Star className="w-4 h-4 text-amber-500 fill-amber-500" />
+                  주요 리서치
+                  <span className="text-xs font-normal text-muted-foreground">({keyResearchItems.length}건)</span>
+                </CardTitle>
+                {isAdmin && checkedKeyItems.size > 0 && (
+                  <>
+                    <Button
+                      variant="default"
+                      size="sm"
+                      className="h-7 text-xs gap-1 bg-indigo-500 hover:bg-indigo-600 text-white"
+                      onClick={handleAiAnalyze}
+                      disabled={aiMutation.isPending}
+                    >
+                      {aiMutation.isPending ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <Sparkles className="w-3 h-3" />
+                      )}
+                      AI 분석 ({checkedKeyItems.size})
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
+                      onClick={() => handleRemoveFromKeyResearch(Array.from(checkedKeyItems))}
+                    >
+                      제거 ({checkedKeyItems.size})
+                    </Button>
+                  </>
+                )}
+              </div>
+              {isAdmin && (
+                <div className="flex items-center gap-2">
+                  {checkedKeyItems.size > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 text-xs px-2"
+                      onClick={() => setCheckedKeyItems(new Set())}
+                    >
+                      선택해제
+                    </Button>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs text-muted-foreground"
+                    onClick={handleClearKeyResearch}
+                  >
+                    전체 초기화
+                  </Button>
+                </div>
+              )}
+            </div>
+          </CardHeader>
           <CardContent className="p-0">
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
-                  <TableRow className="bg-muted/50">
-                    <TableHead className="w-[50px] text-center">#</TableHead>
-                    <TableHead>제목</TableHead>
-                    <TableHead className="w-[120px]">증권사</TableHead>
-                    <TableHead className="w-[100px] text-center">날짜</TableHead>
-                    <TableHead className="w-[80px] text-center">PDF</TableHead>
+                  <TableRow className="bg-amber-50/50 dark:bg-amber-950/10">
+                    {isAdmin && (
+                      <TableHead className="w-[40px] text-center">
+                        <Checkbox
+                          checked={keyResearchItems.length > 0 && keyResearchItems.every((_, i) => checkedKeyItems.has(i))}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              setCheckedKeyItems(new Set(keyResearchItems.map((_, i) => i)));
+                            } else {
+                              setCheckedKeyItems(new Set());
+                            }
+                          }}
+                          className="w-3.5 h-3.5"
+                        />
+                      </TableHead>
+                    )}
+                    <TableHead className="text-xs">제목</TableHead>
+                    <TableHead className="w-[100px] text-xs">증권사</TableHead>
+                    <TableHead className="w-[85px] text-center text-xs">날짜</TableHead>
+                    <TableHead className="w-[65px] text-center text-xs">PDF</TableHead>
+                    <TableHead className="w-[90px] text-center text-xs">AI분석</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {data.research.map((item, index) => (
-                    <TableRow
-                      key={index}
-                      className="hover:bg-muted/30 cursor-pointer group"
-                      onClick={() => {
-                        if (item.link) window.open(item.link, "_blank", "noopener,noreferrer");
-                      }}
-                    >
-                      <TableCell className="text-center text-muted-foreground font-medium">
-                        {index + 1}
-                      </TableCell>
+                  {keyResearchItems.map((item, index) => {
+                    const isChecked = checkedKeyItems.has(index);
+                    // 해당 항목과 관련된 저장된 AI 보고서 찾기
+                    const matchedReport = savedReports.find(r =>
+                      r.items.some((ri: any) => ri.title === item.title && ri.source === item.source)
+                    );
+                    return (
+                      <TableRow
+                        key={index}
+                        className={`hover:bg-muted/30 group ${isChecked ? "bg-indigo-50/50 dark:bg-indigo-950/10" : ""}`}
+                      >
+                        {isAdmin && (
+                          <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
+                            <Checkbox
+                              checked={isChecked}
+                              onCheckedChange={(checked) => {
+                                const newSet = new Set(checkedKeyItems);
+                                if (checked) newSet.add(index);
+                                else newSet.delete(index);
+                                setCheckedKeyItems(newSet);
+                              }}
+                              className="w-3.5 h-3.5"
+                            />
+                          </TableCell>
+                        )}
+                        <TableCell
+                          className="cursor-pointer"
+                          onClick={() => {
+                            if (item.link) window.open(item.link, "_blank", "noopener,noreferrer");
+                          }}
+                        >
+                          <div className="flex items-center gap-2">
+                            <Star className="w-3 h-3 text-amber-500 fill-amber-500 flex-shrink-0" />
+                            <span className="font-medium text-sm group-hover:text-primary transition-colors line-clamp-2">
+                              {item.title}
+                            </span>
+                            <ExternalLink className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <StatusBadge variant="outline" className="text-xs">
+                            {item.source || "-"}
+                          </StatusBadge>
+                        </TableCell>
+                        <TableCell className="text-center text-xs text-muted-foreground">
+                          {item.date || "-"}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {item.file ? (
+                            <a
+                              href={item.file}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs bg-red-50 text-red-600 hover:bg-red-100 transition-colors"
+                            >
+                              <Download className="w-3 h-3" />
+                              PDF
+                            </a>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
+                          {matchedReport ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-6 text-xs gap-1 border-green-300 text-green-700 hover:bg-green-50 px-2"
+                              onClick={() => { setViewingReport(matchedReport); setReportFontSize(14); }}
+                            >
+                              <BookOpen className="w-3 h-3" />
+                              AI분석결과
+                            </Button>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ===== AI 분석 결과 (admin 전용) ===== */}
+      {isAdmin && aiAnalysis && (
+        <Card className="border-indigo-300 dark:border-indigo-700">
+          <CardHeader className="pb-2 pt-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-indigo-500" />
+                AI 분석 결과
+                {aiAnalyzedAt && (
+                  <span className="text-xs font-normal text-muted-foreground">({aiAnalyzedAt})</span>
+                )}
+              </CardTitle>
+              <div className="flex items-center gap-1.5">
+                {/* 폰트 크기 조절 */}
+                <div className="flex items-center gap-0.5 border rounded-md px-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 w-6 p-0"
+                    onClick={() => setAnalysisFontSize(prev => Math.max(10, prev - 2))}
+                    disabled={analysisFontSize <= 10}
+                    title="글자 축소"
+                  >
+                    <Minus className="w-3 h-3" />
+                  </Button>
+                  <span className="text-xs text-muted-foreground w-6 text-center">{analysisFontSize}</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 w-6 p-0"
+                    onClick={() => setAnalysisFontSize(prev => Math.min(24, prev + 2))}
+                    disabled={analysisFontSize >= 24}
+                    title="글자 확대"
+                  >
+                    <Plus className="w-3 h-3" />
+                  </Button>
+                </div>
+                {/* 저장 버튼 (admin) */}
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="h-7 text-xs gap-1 bg-green-600 hover:bg-green-700 text-white"
+                  onClick={handleSaveReport}
+                  disabled={saveReportMutation.isPending}
+                >
+                  {saveReportMutation.isPending ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <Save className="w-3 h-3" />
+                  )}
+                  저장
+                </Button>
+                {/* 복사 버튼 */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs gap-1"
+                  onClick={() => {
+                    navigator.clipboard.writeText(aiAnalysis).then(() => {
+                      setCopied(true);
+                      toast({ title: "복사 완료", description: "AI 분석 결과가 클립보드에 복사되었습니다." });
+                      setTimeout(() => setCopied(false), 2000);
+                    });
+                  }}
+                >
+                  {copied ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
+                  {copied ? "복사됨" : "복사"}
+                </Button>
+                {/* 접기/펼치기 */}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs gap-1"
+                  onClick={() => setShowAnalysis(!showAnalysis)}
+                >
+                  {showAnalysis ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                  {showAnalysis ? "접기" : "펼치기"}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs text-muted-foreground"
+                  onClick={() => { setAiAnalysis(null); setAiAnalyzedAt(null); }}
+                >
+                  닫기
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+          {showAnalysis && (
+            <CardContent className="pt-0">
+              <div
+                className="prose dark:prose-invert max-w-none bg-muted/20 rounded-lg p-4 leading-relaxed whitespace-pre-wrap"
+                style={{ fontSize: `${analysisFontSize}px` }}
+              >
+                {aiAnalysis}
+              </div>
+            </CardContent>
+          )}
+        </Card>
+      )}
+
+      {/* AI 분석 중 로딩 (admin 전용) */}
+      {isAdmin && aiMutation.isPending && (
+        <Card className="border-indigo-300 dark:border-indigo-700">
+          <CardContent className="py-8">
+            <div className="flex flex-col items-center gap-3">
+              <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
+              <p className="text-sm text-muted-foreground">주요 리서치를 AI로 분석하고 있습니다...</p>
+              <p className="text-xs text-muted-foreground">잠시만 기다려주세요 (30초~1분 소요)</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ===== 저장된 AI 보고서 리스트 (비활성화 - 주요 리서치 항목 옆 리포트 버튼으로 대체) ===== */}
+      {false && savedReports.length > 0 && (
+        <Card className="border-green-300 dark:border-green-700">
+          <CardHeader className="pb-2 pt-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <BookOpen className="w-4 h-4 text-green-600" />
+              AI 분석 보고서
+              <span className="text-xs font-normal text-muted-foreground">({savedReports.length}건)</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-green-50/50 dark:bg-green-950/10">
+                    <TableHead className="text-xs">분석 대상 리서치</TableHead>
+                    <TableHead className="w-[100px] text-center text-xs">분석일시</TableHead>
+                    <TableHead className="w-[100px] text-center text-xs">저장일시</TableHead>
+                    <TableHead className="w-[120px] text-center text-xs">보고서</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {savedReports.map((report) => (
+                    <TableRow key={report.id} className="hover:bg-muted/30 group">
                       <TableCell>
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium text-sm group-hover:text-primary transition-colors line-clamp-2">
-                            {item.title}
-                          </span>
-                          <ExternalLink className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        <div className="space-y-0.5">
+                          {report.items.slice(0, 3).map((item, i) => (
+                            <div key={i} className="text-xs text-muted-foreground truncate max-w-[400px]">
+                              <span className="text-foreground font-medium">[{item.source}]</span> {item.title}
+                            </div>
+                          ))}
+                          {report.items.length > 3 && (
+                            <span className="text-xs text-muted-foreground">외 {report.items.length - 3}건...</span>
+                          )}
                         </div>
                       </TableCell>
-                      <TableCell>
-                        <StatusBadge variant="outline" className="text-xs">
-                          {item.source || "-"}
-                        </StatusBadge>
+                      <TableCell className="text-center text-xs text-muted-foreground whitespace-nowrap">
+                        {report.analyzedAt}
                       </TableCell>
-                      <TableCell className="text-center text-xs text-muted-foreground">
-                        {item.date || "-"}
+                      <TableCell className="text-center text-xs text-muted-foreground whitespace-nowrap">
+                        {report.savedAt}
                       </TableCell>
                       <TableCell className="text-center">
-                        {item.file ? (
-                          <a
-                            href={item.file}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => e.stopPropagation()}
-                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs bg-red-50 text-red-600 hover:bg-red-100 transition-colors"
+                        <div className="flex items-center gap-1 justify-center">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 text-xs gap-1 border-green-300 text-green-700 hover:bg-green-50"
+                            onClick={() => { setViewingReport(report); setReportFontSize(14); }}
                           >
-                            <Download className="w-3 h-3" />
-                            PDF
-                          </a>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">-</span>
-                        )}
+                            <BookOpen className="w-3 h-3" />
+                            리포트
+                          </Button>
+                          {isAdmin && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                              onClick={() => deleteReportMutation.mutate(report.id)}
+                              title="삭제"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </Button>
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -178,20 +933,92 @@ export default function ResearchList() {
             </div>
           </CardContent>
         </Card>
-      ) : (
-        <Card>
-          <CardContent className="py-12 text-center">
-            <FileText className="w-12 h-12 mx-auto text-muted-foreground/30 mb-4" />
-            <h3 className="text-lg font-semibold">리서치 리포트가 없습니다</h3>
-            <p className="text-sm text-muted-foreground mt-1">잠시 후 다시 시도해주세요.</p>
+      )}
+
+      {/* ===== 리포트 보기 (팝업/인라인) ===== */}
+      {viewingReport && (
+        <Card className="border-green-400 dark:border-green-600 shadow-lg">
+          <CardHeader className="pb-2 pt-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <BookOpen className="w-4 h-4 text-green-600" />
+                AI 분석 보고서
+                <span className="text-xs font-normal text-muted-foreground">({viewingReport.analyzedAt})</span>
+              </CardTitle>
+              <div className="flex items-center gap-1.5">
+                {/* 폰트 크기 조절 */}
+                <div className="flex items-center gap-0.5 border rounded-md px-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 w-6 p-0"
+                    onClick={() => setReportFontSize(prev => Math.max(10, prev - 2))}
+                    disabled={reportFontSize <= 10}
+                  >
+                    <Minus className="w-3 h-3" />
+                  </Button>
+                  <span className="text-xs text-muted-foreground w-6 text-center">{reportFontSize}</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 w-6 p-0"
+                    onClick={() => setReportFontSize(prev => Math.min(24, prev + 2))}
+                    disabled={reportFontSize >= 24}
+                  >
+                    <Plus className="w-3 h-3" />
+                  </Button>
+                </div>
+                {/* 복사 버튼 */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs gap-1"
+                  onClick={() => {
+                    navigator.clipboard.writeText(viewingReport.analysis).then(() => {
+                      setReportCopied(true);
+                      toast({ title: "복사 완료", description: "보고서가 클립보드에 복사되었습니다." });
+                      setTimeout(() => setReportCopied(false), 2000);
+                    });
+                  }}
+                >
+                  {reportCopied ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
+                  {reportCopied ? "복사됨" : "복사"}
+                </Button>
+                {/* 닫기 */}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0"
+                  onClick={() => setViewingReport(null)}
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+            {/* 분석 대상 항목 */}
+            <div className="mt-2 p-2 bg-muted/30 rounded-md">
+              <p className="text-xs font-medium text-muted-foreground mb-1">📋 분석 대상 ({viewingReport.items.length}건)</p>
+              {viewingReport.items.map((item, i) => (
+                <p key={i} className="text-xs text-muted-foreground">
+                  {i + 1}. <span className="text-foreground">[{item.source}]</span> {item.title} <span className="text-muted-foreground">({item.date})</span>
+                </p>
+              ))}
+            </div>
+          </CardHeader>
+          <CardContent className="pt-2">
+            <div
+              className="prose dark:prose-invert max-w-none bg-muted/20 rounded-lg p-4 leading-relaxed whitespace-pre-wrap"
+              style={{ fontSize: `${reportFontSize}px` }}
+            >
+              {viewingReport.analysis}
+            </div>
           </CardContent>
         </Card>
       )}
 
       <p className="text-xs text-muted-foreground text-center py-2">
-        데이터 출처: 네이버 금융 (증권사 투자전략 리포트) | 리포트 원문은 해당 증권사에 저작권이 있습니다
+        데이터 출처: 네이버 증권 (stock.naver.com/research) | 리포트 원문은 해당 증권사에 저작권이 있습니다
       </p>
     </div>
   );
 }
-
