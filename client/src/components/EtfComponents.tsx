@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useCallback } from "react";
+import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
@@ -33,6 +34,12 @@ import {
   Send,
   Upload,
   Eye,
+  Zap,
+  BookOpen,
+  Save,
+  Copy,
+  Trash2,
+  Star,
 } from "lucide-react";
 
 type SortField = "weight" | "changePercent" | null;
@@ -87,6 +94,33 @@ interface TopGainerEtf {
   nav: number;
 }
 
+// 6자리 종목코드 → ISIN 코드 변환 (funetf.co.kr URL용)
+function getKrIsin(code: string): string {
+  const base = `KR7${code}00`;
+  // 문자 → 숫자 변환 (A=10, B=11, ..., Z=35)
+  let numStr = "";
+  for (const ch of base) {
+    if (ch >= "A" && ch <= "Z") {
+      numStr += (ch.charCodeAt(0) - 55).toString();
+    } else {
+      numStr += ch;
+    }
+  }
+  // Luhn 알고리즘으로 체크 디짓 계산
+  let sum = 0;
+  for (let i = numStr.length - 1; i >= 0; i--) {
+    const pos = numStr.length - i; // 1-indexed from right
+    let n = parseInt(numStr[i]);
+    if (pos % 2 === 1) {
+      n *= 2;
+      if (n > 9) n -= 9;
+    }
+    sum += n;
+  }
+  const checkDigit = (10 - (sum % 10)) % 10;
+  return base + checkDigit;
+}
+
 function getChangeColor(sign?: string): string {
   if (!sign) return "text-muted-foreground";
   if (sign === "1" || sign === "2") return "text-red-500";
@@ -114,9 +148,46 @@ interface CafeMenu {
   menuType: string;
 }
 
+// ===== 프롬프트 저장/불러오기 =====
+interface SavedPromptItem {
+  id: string;
+  label: string;
+  prompt: string;
+  createdAt: string;
+}
+
+const ETF_PROMPT_HISTORY_KEY = "etf_analysis_prompt_history";
+const MAX_ETF_PROMPT_HISTORY = 20;
+
+function getEtfPromptHistory(): SavedPromptItem[] {
+  try {
+    const raw = localStorage.getItem(ETF_PROMPT_HISTORY_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function saveEtfPromptToHistory(prompt: string) {
+  const history = getEtfPromptHistory();
+  const newItem: SavedPromptItem = {
+    id: Date.now().toString(),
+    label: prompt.substring(0, 60) + (prompt.length > 60 ? "..." : ""),
+    prompt,
+    createdAt: new Date().toLocaleString("ko-KR"),
+  };
+  const updated = [newItem, ...history].slice(0, MAX_ETF_PROMPT_HISTORY);
+  localStorage.setItem(ETF_PROMPT_HISTORY_KEY, JSON.stringify(updated));
+}
+
+function deleteEtfPromptFromHistory(id: string) {
+  const history = getEtfPromptHistory();
+  const updated = history.filter(item => item.id !== id);
+  localStorage.setItem(ETF_PROMPT_HISTORY_KEY, JSON.stringify(updated));
+}
+
 export default function EtfComponents() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, isLoggedIn } = useAuth();
   const { toast } = useToast();
+  const [, navigate] = useLocation();
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedEtfCode, setSelectedEtfCode] = useState("");
   const [searchMode, setSearchMode] = useState<"search" | "direct">("search");
@@ -148,6 +219,8 @@ export default function EtfComponents() {
   const [cafePostTitle, setCafePostTitle] = useState("");
   const [cafeComment, setCafeComment] = useState("");
   const analysisSectionRef = useRef<HTMLDivElement>(null);
+  const [showPromptHistory, setShowPromptHistory] = useState(false);
+  const [promptHistory, setPromptHistory] = useState<SavedPromptItem[]>(() => getEtfPromptHistory());
 
   // 카페 게시판 목록 (admin만)
   const { data: cafeMenusData } = useQuery<{ menus: CafeMenu[] }>({
@@ -200,6 +273,26 @@ export default function EtfComponents() {
     }, 100);
   }, []);
 
+  // 프롬프트 저장 핸들러
+  const handleSaveCurrentPrompt = useCallback(() => {
+    if (!analysisPrompt.trim()) return;
+    saveEtfPromptToHistory(analysisPrompt);
+    setPromptHistory(getEtfPromptHistory());
+    toast({ title: "프롬프트 저장 완료", description: "프롬프트 예시 목록에 저장되었습니다." });
+  }, [analysisPrompt, toast]);
+
+  const handleLoadPrompt = useCallback((item: SavedPromptItem) => {
+    setAnalysisPrompt(item.prompt);
+    setShowPromptHistory(false);
+    toast({ title: "프롬프트 로드 완료", description: "저장된 프롬프트가 적용되었습니다." });
+  }, [toast]);
+
+  const handleDeletePromptHistory = useCallback((id: string) => {
+    deleteEtfPromptFromHistory(id);
+    setPromptHistory(getEtfPromptHistory());
+    toast({ title: "프롬프트 삭제 완료" });
+  }, [toast]);
+
   // ETF 트렌드 AI 분석
   const analyzeMutation = useMutation({
     mutationFn: async (prompt: string) => {
@@ -218,6 +311,38 @@ export default function EtfComponents() {
     onSuccess: (data) => {
       setAnalysisResult(data);
       try { localStorage.setItem("etf_analysis_result", JSON.stringify(data)); } catch {}
+      // 투자전략 > 최근보고서 리스트에도 저장 (daily 기준)
+      try {
+        const STRATEGY_KEY = "strategy_ai_analysis_daily";
+        const MAX_SAVED = 5;
+        const existing = JSON.parse(localStorage.getItem(STRATEGY_KEY) || "[]");
+        const newEntry = {
+          id: Date.now().toString(),
+          createdAt: new Date().toLocaleString("ko-KR"),
+          prompt: analysisPrompt || "ETF 실시간 AI 트렌드 분석",
+          urls: [] as string[],
+          fileNames: [] as string[],
+          source: "etf-realtime" as const,
+          result: {
+            analysis: data.analysis,
+            analyzedAt: data.analyzedAt,
+            dataPoints: {
+              indicesCount: 0,
+              volumeCount: 0,
+              newsCount: data.dataPoints?.newsCount || 0,
+              urlCount: 0,
+              etfCount: (data.dataPoints?.risingCount || 0) + (data.dataPoints?.fallingCount || 0),
+            },
+          },
+        };
+        const updated = [newEntry, ...existing].slice(0, MAX_SAVED);
+        localStorage.setItem(STRATEGY_KEY, JSON.stringify(updated));
+      } catch {}
+      // 분석 실행 시 프롬프트 자동 저장
+      if (analysisPrompt.trim()) {
+        saveEtfPromptToHistory(analysisPrompt);
+        setPromptHistory(getEtfPromptHistory());
+      }
     },
   });
 
@@ -354,6 +479,23 @@ export default function EtfComponents() {
 
   const topGainers = topGainersData?.items || [];
 
+  // 관심(추천) ETF 실시간 시세
+  const { data: watchlistRealtimeData, isFetching: isLoadingWatchlist, refetch: refetchWatchlist } = useQuery<{
+    items: (TopGainerEtf & { sector?: string; memo?: string })[];
+    updatedAt: string;
+  }>({
+    queryKey: ["/api/watchlist-etfs/realtime"],
+    queryFn: async () => {
+      const res = await fetch("/api/watchlist-etfs/realtime", { credentials: "include" });
+      if (!res.ok) throw new Error("관심 ETF 실시간 시세 조회 실패");
+      return res.json();
+    },
+    staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
+  });
+
+  const watchlistItems = watchlistRealtimeData?.items || [];
+
   // 카페 전송 핸들러
   const handleCafePost = () => {
     const today = new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric" });
@@ -366,62 +508,56 @@ export default function EtfComponents() {
     setCafePostDialogOpen(true);
   };
 
-  // 카페 전송용 HTML 컨텐츠 생성 (네이버 카페 API는 inline style 거부 → 순수 HTML만 사용)
+  // 카페 전송용 컨텐츠 생성 (네이버 카페 API는 기본 태그만 허용)
   const buildCafeContent = () => {
     const now = new Date().toLocaleString("ko-KR");
-    let sections: string[] = [];
+    let lines: string[] = [];
 
+    // Comment
     if (cafeComment.trim()) {
-      sections.push(`<h3>[ Comment ]</h3>
-<p>${cafeComment.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br/>')}</p>
-<br/>`);
+      lines.push(`[Comment]`);
+      lines.push(cafeComment.replace(/</g, '&lt;').replace(/>/g, '&gt;'));
+      lines.push('');
     }
 
+    // 실시간 상승 ETF 리스트
     if (topGainers.length > 0) {
-      let etfRows = topGainers.map((etf, i) =>
-        `<tr>
-<td><b>${i + 1}</b></td>
-<td><b>${etf.name}</b> (${etf.code})</td>
-<td>${etf.nowVal.toLocaleString()}</td>
-<td><b>+${etf.changeRate.toFixed(2)}%</b></td>
-<td>${etf.quant.toLocaleString()}</td>
-</tr>`
-      ).join("");
-
-      sections.push(`<h3>[실시간 상승 ETF TOP ${topGainers.length}] (레버리지/인버스 제외)</h3>
-<p>기준시간: ${topGainersData?.updatedAt || now}</p>
-<table border="1" cellpadding="4" cellspacing="0">
-<tr>
-<th>#</th><th>ETF명</th><th>현재가</th><th>등락률</th><th>거래량</th>
-</tr>
-${etfRows}
-</table>
-<br/>`);
+      lines.push(`[실시간 상승 ETF TOP ${topGainers.length}] (레버리지/인버스 제외)`);
+      lines.push(`기준시간: ${topGainersData?.updatedAt || now}`);
+      lines.push('');
+      topGainers.forEach((etf, i) => {
+        lines.push(`${i + 1}. ${etf.name} (${etf.code}) | 현재가: ${etf.nowVal.toLocaleString()}원 | 등락률: +${etf.changeRate.toFixed(2)}% | 거래량: ${etf.quant.toLocaleString()}`);
+      });
+      lines.push('');
     }
 
+    // 선택된 ETF 차트 (URL만 제공)
     if (selectedEtfCode) {
       const chartUrl = `https://ssl.pstatic.net/imgfinance/chart/item/${chartType}/${chartPeriod}/${selectedEtfCode}.png`;
       const etfName = componentData?.etfName || selectedEtfCode;
-      sections.push(`<h3>[${etfName} 차트]</h3>
-<p><img src="${chartUrl}" alt="${etfName}" /></p>
-<br/>`);
+      lines.push(`[${etfName} 차트]`);
+      lines.push(chartUrl);
+      lines.push('');
     }
 
+    // AI 분석 결과
     if (analysisResult) {
-      const htmlAnalysis = analysisResult.analysis
-        .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
-        .replace(/\n/g, '<br/>');
-      sections.push(`<h3>[AI 트렌드 분석 보고서]</h3>
-<p>분석 시간: ${analysisResult.analyzedAt} | 상승 ${analysisResult.dataPoints?.risingCount || 0}개 | 하락 ${analysisResult.dataPoints?.fallingCount || 0}개 | 뉴스 ${analysisResult.dataPoints?.newsCount || 0}건 | ${analysisResult.dataPoints?.market || ""}</p>
-<p>${htmlAnalysis}</p>
-<br/>`);
+      lines.push(`[AI 트렌드 분석 보고서]`);
+      lines.push(`분석 시간: ${analysisResult.analyzedAt} | 상승 ${analysisResult.dataPoints?.risingCount || 0}개 | 하락 ${analysisResult.dataPoints?.fallingCount || 0}개 | 뉴스 ${analysisResult.dataPoints?.newsCount || 0}건 | ${analysisResult.dataPoints?.market || ""}`);
+      lines.push('');
+      // 마크다운 볼드를 제거하고 순수 텍스트로 변환
+      const plainAnalysis = analysisResult.analysis.replace(/\*\*(.*?)\*\*/g, '$1');
+      lines.push(plainAnalysis);
+      lines.push('');
     }
 
-    sections.push(`<br/>
-<p>* 본 보고서는 AI(Gemini)가 실시간 데이터를 기반으로 자동 생성한 내용을 포함하고 있습니다.</p>
-<p>데이터 출처: 네이버 금융, FnGuide, 한국투자증권 API</p>`);
+    // Footer
+    lines.push('---');
+    lines.push('* 본 보고서는 AI(Gemini)가 실시간 데이터를 기반으로 자동 생성한 내용을 포함하고 있습니다.');
+    lines.push('데이터 출처: 네이버 금융, FnGuide, 한국투자증권 API');
 
-    return sections.join("\n");
+    // 순수 텍스트를 <p> 태그로 감싸기 (줄바꿈 → <br/>)
+    return `<p>${lines.join('<br/>')}</p>`;
   };
 
   const handlePreview = () => {
@@ -440,6 +576,123 @@ ${etfRows}
 
   return (
     <div className="space-y-6">
+      {/* ===== 관심(추천) ETF 실시간 시세 ===== */}
+      {watchlistItems.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Star className="w-5 h-5 text-yellow-500" />
+                관심(추천) ETF 실시간 시세
+              </CardTitle>
+              <div className="flex items-center gap-2">
+                {watchlistRealtimeData?.updatedAt && (
+                  <span className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Clock className="w-3 h-3" />
+                    {watchlistRealtimeData.updatedAt}
+                  </span>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => refetchWatchlist()}
+                  disabled={isLoadingWatchlist}
+                  className="h-7 w-7 p-0"
+                >
+                  {isLoadingWatchlist ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-3.5 h-3.5" />
+                  )}
+                </Button>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              관심(추천) ETF에 등록된 종목의 실시간 시세 | <span className="text-blue-500">ETF명 클릭 → funetf 상세페이지</span> | <span className="text-muted-foreground">행 클릭 → 구성종목 시세</span>
+            </p>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-yellow-50/70 dark:bg-yellow-950/20">
+                    <TableHead className="w-[36px] text-center">#</TableHead>
+                    <TableHead>ETF명</TableHead>
+                    <TableHead className="text-right w-[90px]">현재가</TableHead>
+                    <TableHead className="text-right w-[80px]">등락률</TableHead>
+                    <TableHead className="text-right w-[80px]">전일대비</TableHead>
+                    <TableHead className="text-right w-[100px] hidden sm:table-cell">거래량</TableHead>
+                    <TableHead className="text-right w-[90px] hidden md:table-cell">시가총액(억)</TableHead>
+                    <TableHead className="text-right w-[80px] hidden md:table-cell">순자산(NAV)</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {watchlistItems.map((etf, index) => {
+                    const isUp = etf.changeRate > 0;
+                    const isDown = etf.changeRate < 0;
+                    const changeColor = isUp ? "text-red-500" : isDown ? "text-blue-500" : "text-muted-foreground";
+                    return (
+                      <TableRow
+                        key={etf.code}
+                        className={`cursor-pointer transition-colors hover:bg-primary/5 ${
+                          selectedEtfCode === etf.code ? "bg-primary/10 border-l-2 border-l-primary" : ""
+                        }`}
+                        onClick={() => handleSelectEtf(etf.code)}
+                      >
+                        <TableCell className="text-center font-bold text-sm">
+                          <span className="text-yellow-500">
+                            {index + 1}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <div
+                            className="flex items-center gap-2 min-w-[140px] cursor-pointer group/etfname"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const isin = getKrIsin(etf.code);
+                              window.open(`https://www.funetf.co.kr/product/etf/view/${isin}`, "_blank", "noopener,noreferrer");
+                            }}
+                          >
+                            <div>
+                              <div className="font-medium text-sm leading-tight group-hover/etfname:text-primary group-hover/etfname:underline flex items-center gap-1">
+                                {etf.name}
+                                <ExternalLink className="w-3 h-3 text-muted-foreground opacity-0 group-hover/etfname:opacity-100 transition-opacity" />
+                              </div>
+                              <div className="text-xs text-muted-foreground font-mono">{etf.code}</div>
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums font-semibold text-sm">
+                          {etf.nowVal.toLocaleString()}
+                        </TableCell>
+                        <TableCell className={`text-right tabular-nums font-medium text-sm ${changeColor}`}>
+                          <span className="flex items-center justify-end gap-0.5">
+                            {isUp ? <TrendingUp className="w-3 h-3" /> : isDown ? <TrendingDown className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
+                            {isUp ? "+" : ""}{etf.changeRate.toFixed(2)}%
+                          </span>
+                        </TableCell>
+                        <TableCell className={`text-right tabular-nums text-sm ${changeColor}`}>
+                          {isUp ? "+" : ""}{etf.changeVal.toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-sm text-muted-foreground hidden sm:table-cell">
+                          {etf.quant.toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-sm text-muted-foreground hidden md:table-cell">
+                          {(etf.marketCap ?? 0).toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-sm text-muted-foreground hidden md:table-cell">
+                          {(etf.nav ?? 0).toLocaleString()}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* ===== 실시간 상승 ETF TOP 15 ===== */}
       <Card>
         <CardHeader className="pb-3">
@@ -498,8 +751,8 @@ ${etfRows}
               </Button>
             </div>
           </div>
-          <p className="text-xs text-muted-foreground">
-            레버리지·인버스 제외 | <span className="text-blue-500">ETF명 클릭시 아래 구성종목 실시간 시세 Update됩니다.</span>
+          <p className="text-sm font-bold text-foreground">
+            레버리지·인버스 제외 | ETF명 클릭시 아래 <span className="text-red-500">구성종목 실시간 시세</span> Update됩니다.
           </p>
         </CardHeader>
         <CardContent className="p-0">
@@ -581,10 +834,25 @@ ${etfRows}
       {/* ===== 구성종목 실시간 시세 조회 ===== */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-lg flex items-center gap-2">
-            <PieChart className="w-5 h-5 text-primary" />
-            ETF 구성종목 실시간 시세
-          </CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-lg flex items-center gap-2">
+              <PieChart className="w-5 h-5 text-primary" />
+              ETF 구성종목 실시간 시세
+            </CardTitle>
+            {selectedEtfCode && componentData && (isAdmin || isLoggedIn) && (
+              <Button
+                variant="default"
+                size="sm"
+                className="gap-1.5 h-8 bg-amber-500 hover:bg-amber-600 text-white"
+                onClick={() => {
+                  navigate(`/trading?code=${encodeURIComponent(selectedEtfCode)}&name=${encodeURIComponent(componentData.etfName || selectedEtfCode)}`);
+                }}
+              >
+                <Zap className="w-3.5 h-3.5" />
+                매수
+              </Button>
+            )}
+          </div>
           <p className="text-xs text-muted-foreground mt-1">
             위 리스트에서 ETF를 클릭하거나, 직접 코드/이름을 검색하여 구성종목의 실시간 시세를 확인하세요
           </p>
@@ -1017,7 +1285,7 @@ ${etfRows}
                   <span className="flex items-center gap-1">📊 시장 지표</span>
                   <span className="text-muted-foreground/50">→ 자동 수집</span>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <Button
                     variant="outline"
                     size="sm"
@@ -1029,6 +1297,29 @@ ${etfRows}
                   >
                     <RefreshCw className="w-3 h-3 mr-1" />
                     기본 프롬프트
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleSaveCurrentPrompt}
+                    disabled={analyzeMutation.isPending || !analysisPrompt.trim()}
+                    className="h-8 text-xs"
+                  >
+                    <Save className="w-3 h-3 mr-1" />
+                    프롬프트 저장
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => { setPromptHistory(getEtfPromptHistory()); setShowPromptHistory(true); }}
+                    disabled={analyzeMutation.isPending}
+                    className="h-8 text-xs gap-1"
+                  >
+                    <BookOpen className="w-3 h-3" />
+                    프롬프트 예시보기
+                    {promptHistory.length > 0 && (
+                      <span className="ml-0.5 text-[10px] bg-primary/10 text-primary rounded-full px-1.5 py-0 font-bold">{promptHistory.length}</span>
+                    )}
                   </Button>
                   <Button
                     variant="outline"
@@ -1120,6 +1411,22 @@ ${etfRows}
                       <Clock className="w-3 h-3" />
                       {analysisResult.analyzedAt}
                     </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const text = analysisResult.analysis;
+                        navigator.clipboard.writeText(text).then(() => {
+                          toast({ title: "복사 완료", description: "분석 보고서가 클립보드에 복사되었습니다." });
+                        }).catch(() => {
+                          toast({ title: "복사 실패", description: "클립보드 접근이 거부되었습니다.", variant: "destructive" });
+                        });
+                      }}
+                      className="h-7 text-xs gap-1"
+                    >
+                      <Copy className="w-3 h-3" />
+                      복사
+                    </Button>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -1306,6 +1613,62 @@ ${etfRows}
                 </>
               )}
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ===== 프롬프트 예시보기 다이얼로그 ===== */}
+      <Dialog open={showPromptHistory} onOpenChange={setShowPromptHistory}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <BookOpen className="w-5 h-5 text-primary" />
+              프롬프트 예시 목록
+              <span className="text-xs text-muted-foreground font-normal ml-1">(최대 {MAX_ETF_PROMPT_HISTORY}개 저장)</span>
+            </DialogTitle>
+          </DialogHeader>
+
+          {promptHistory.length === 0 ? (
+            <div className="py-8 text-center text-muted-foreground">
+              <BookOpen className="w-10 h-10 mx-auto mb-3 opacity-20" />
+              <p className="text-sm">저장된 프롬프트가 없습니다.</p>
+              <p className="text-xs mt-1">"프롬프트 저장" 버튼으로 현재 프롬프트를 저장할 수 있습니다.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {promptHistory.map((item, idx) => (
+                <div key={item.id} className="group border rounded-lg p-3 hover:bg-muted/30 transition-colors">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0 cursor-pointer" onClick={() => handleLoadPrompt(item)}>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-xs font-bold text-muted-foreground">#{idx + 1}</span>
+                        <span className="text-sm font-medium truncate hover:text-primary transition-colors">{item.label}</span>
+                        {idx === 0 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-bold flex-shrink-0">최신</span>}
+                      </div>
+                      <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                        <Clock className="w-3 h-3" />
+                        <span>{item.createdAt}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Button variant="ghost" size="icon" className="h-7 w-7" title="이 프롬프트 사용" onClick={() => handleLoadPrompt(item)}>
+                        <Copy className="w-3.5 h-3.5" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" title="삭제" onClick={() => handleDeletePromptHistory(item.id)}>
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="mt-2 text-xs text-muted-foreground bg-muted/20 rounded px-2.5 py-2 whitespace-pre-wrap line-clamp-3 cursor-pointer hover:line-clamp-none transition-all" onClick={() => handleLoadPrompt(item)}>
+                    {item.prompt}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex justify-end pt-3 border-t">
+            <Button variant="outline" onClick={() => setShowPromptHistory(false)}>닫기</Button>
           </div>
         </DialogContent>
       </Dialog>

@@ -6,10 +6,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Plus, ExternalLink, TrendingUp, Globe, Loader2, Star, Newspaper, Youtube, FileText, Link as LinkIcon, Trash2, Pencil, Scale, Zap, ChevronDown, Calendar, Home as HomeIcon, Bot, Search, X, Eye, ChevronLeft, ChevronRight, PenSquare, Send, LogIn, LogOut, Bell, BellRing, MessageCircle, Heart, UserPlus, FileEdit } from "lucide-react";
+import { Plus, ExternalLink, TrendingUp, Globe, Loader2, Star, Newspaper, Youtube, FileText, Link as LinkIcon, Trash2, Pencil, Scale, Zap, ChevronDown, Calendar, Home as HomeIcon, Search, X, Eye, ChevronLeft, ChevronRight, PenSquare, Send, LogIn, LogOut, Bell, BellRing, MessageCircle, Heart, UserPlus, FileEdit } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { LoginDialog } from "@/components/LoginDialog";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -25,6 +25,9 @@ const MarketNews = lazy(() => import("@/components/MarketNews"));
 const ResearchList = lazy(() => import("@/components/ResearchList"));
 const BookmarksComp = lazy(() => import("@/components/Bookmarks"));
 const EtfComponents = lazy(() => import("@/components/EtfComponents"));
+const NewEtfComp = lazy(() => import("@/components/NewEtf"));
+const WatchlistEtfComp = lazy(() => import("@/components/WatchlistEtf"));
+const SteemReport = lazy(() => import("@/components/SteemReport"));
 
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -69,52 +72,17 @@ export default function Home() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-8">
-          <TabsList className="grid w-full grid-cols-7 max-w-5xl mx-auto">
+          <TabsList className="grid w-full grid-cols-6 max-w-5xl mx-auto bg-violet-100/70 dark:bg-violet-950/30">
             <TabsTrigger value="home" className="gap-2">
               <HomeIcon className="h-4 w-4" />
               홈
             </TabsTrigger>
-            {/* AI 드롭다운 메뉴 */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  className="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 gap-1 text-muted-foreground hover:text-foreground"
-                >
-                  <Bot className="h-3.5 w-3.5" />
-                  AI
-                  <ChevronDown className="h-3 w-3 opacity-60" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="center" className="min-w-[140px]">
-                <DropdownMenuItem
-                  onClick={() => window.open("https://gemini.google.com/", "_blank", "noopener,noreferrer")}
-                  className="gap-2 cursor-pointer"
-                >
-                  ✨ Gemini
-                  <ExternalLink className="w-3 h-3 ml-auto opacity-50" />
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => window.open("https://grok.com/", "_blank", "noopener,noreferrer")}
-                  className="gap-2 cursor-pointer"
-                >
-                  🤖 Grok
-                  <ExternalLink className="w-3 h-3 ml-auto opacity-50" />
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => window.open("https://openai.com/ko-KR/", "_blank", "noopener,noreferrer")}
-                  className="gap-2 cursor-pointer"
-                >
-                  🧠 Open AI
-                  <ExternalLink className="w-3 h-3 ml-auto opacity-50" />
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
             {/* ETF정보 드롭다운 메뉴 */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
                   className={`inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 gap-1 ${
-                    activeTab === "etf-components"
+                    activeTab === "etf-components" || activeTab === "new-etf" || activeTab === "watchlist-etf"
                       ? "bg-background text-foreground shadow-sm"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
@@ -130,6 +98,18 @@ export default function Home() {
                   className="gap-2 cursor-pointer"
                 >
                   📊 ETF실시간
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setActiveTab("new-etf")}
+                  className="gap-2 cursor-pointer"
+                >
+                  🆕 신규ETF
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setActiveTab("watchlist-etf")}
+                  className="gap-2 cursor-pointer"
+                >
+                  ⭐ 관심(추천)ETF
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => window.open("https://www.funetf.co.kr/product/etf/filter", "_blank", "noopener,noreferrer")}
@@ -162,12 +142,24 @@ export default function Home() {
                   <ChevronDown className="h-3 w-3 opacity-60" />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="center" className="min-w-[120px]">
+              <DropdownMenuContent align="center" className="min-w-[140px]">
+                <DropdownMenuItem onClick={() => setActiveTab("markets-domestic")} className="gap-2 cursor-pointer">
+                  🇰🇷 국내증시
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setActiveTab("markets-global")} className="gap-2 cursor-pointer">
+                  🌍 해외증시
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setActiveTab("markets-etc")} className="gap-2 cursor-pointer">
+                  💹 ETC
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setActiveTab("markets-news")} className="gap-2 cursor-pointer">
                   📰 주요뉴스
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setActiveTab("markets-research")} className="gap-2 cursor-pointer">
                   📊 리서치
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setActiveTab("markets-calendar")} className="gap-2 cursor-pointer">
+                  📅 증시캘린더
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -199,9 +191,11 @@ export default function Home() {
                 <DropdownMenuItem onClick={() => setActiveTab("strategy-yearly")} className="gap-2 cursor-pointer">
                   📉 연간 보고서
                 </DropdownMenuItem>
+                {isAdmin && (
                 <DropdownMenuItem onClick={() => setActiveTab("strategy-steam")} className="gap-2 cursor-pointer">
                   🔬 스팀보고서
                 </DropdownMenuItem>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
             <TabsTrigger value="etf-trends" className="gap-2">
@@ -228,6 +222,26 @@ export default function Home() {
             </Suspense>
           </TabsContent>
 
+          <TabsContent value="new-etf">
+            <Suspense fallback={
+              <div className="flex items-center justify-center py-20">
+                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+              </div>
+            }>
+              <NewEtfComp />
+            </Suspense>
+          </TabsContent>
+
+          <TabsContent value="watchlist-etf">
+            <Suspense fallback={
+              <div className="flex items-center justify-center py-20">
+                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+              </div>
+            }>
+              <WatchlistEtfComp />
+            </Suspense>
+          </TabsContent>
+
           <TabsContent value="markets-news">
             <Suspense fallback={
               <div className="flex items-center justify-center py-20">
@@ -248,6 +262,26 @@ export default function Home() {
             </Suspense>
           </TabsContent>
 
+          {/* 국내증시 */}
+          <TabsContent value="markets-domestic">
+            <MarketsView type="domestic" />
+          </TabsContent>
+
+          {/* 해외증시 */}
+          <TabsContent value="markets-global">
+            <MarketsView type="global" />
+          </TabsContent>
+
+          {/* ETC (Commodity, Forex, Crypto, Bond) */}
+          <TabsContent value="markets-etc">
+            <MarketsView type="etc" />
+          </TabsContent>
+
+          {/* 증시캘린더 */}
+          <TabsContent value="markets-calendar">
+            <MarketsView type="calendar" />
+          </TabsContent>
+
           {/* 투자전략 보고서 - 일일/주간/월간/연간 */}
           {(["daily", "weekly", "monthly", "yearly"] as const).map((period) => (
             <TabsContent key={period} value={`strategy-${period}`}>
@@ -256,24 +290,23 @@ export default function Home() {
                   <Loader2 className="w-8 h-8 animate-spin text-primary" />
               </div>
               }>
-                <DailyStrategy period={period} />
+                <DailyStrategy period={period} isAdmin={isAdmin} />
               </Suspense>
           </TabsContent>
           ))}
 
-          {/* 스팀보고서 */}
+          {/* 스팀보고서 (Admin 전용) */}
+          {isAdmin && (
           <TabsContent value="strategy-steam">
-            <Card>
-              <CardContent className="py-16 text-center">
-                <div className="text-5xl mb-4">🔬</div>
-                <h3 className="text-xl font-bold mb-2">스팀보고서</h3>
-                <p className="text-muted-foreground max-w-md mx-auto">
-                  스팀보고서 기능은 현재 준비 중입니다.<br />
-                  내용 설계가 완료되면 업데이트 예정입니다.
-                </p>
-              </CardContent>
-            </Card>
+            <Suspense fallback={
+              <div className="flex items-center justify-center py-20">
+                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+              </div>
+            }>
+              <SteemReport />
+            </Suspense>
           </TabsContent>
+          )}
 
           <TabsContent value="etf-trends">
             <EtfTrendsSection isAdmin={isAdmin} />
@@ -337,6 +370,631 @@ interface CafeNotification {
   detail?: string;
   articleId?: number;
   timestamp: number;
+}
+
+// ===== Markets 탭 컴포넌트 (국내증시, 해외증시, ETC) =====
+function MarketsView({ type }: { type: "domestic" | "global" | "etc" | "calendar" }) {
+  const [activeSubTab, setActiveSubTab] = useState<string>(() => {
+    if (type === "domestic") return "kospi";
+    if (type === "global") return "us";
+    if (type === "calendar") return "kr-calendar";
+    return "commodity";
+  });
+
+  const tabs: Record<string, { label: string; url: string }[]> = {
+    domestic: [
+      { label: "코스피", url: "https://stock.naver.com/market/stock/kr/KOSPI" },
+      { label: "코스닥", url: "https://stock.naver.com/market/stock/kr/KOSDAQ" },
+      { label: "업종별", url: "https://stock.naver.com/market/stock/kr/sectors" },
+      { label: "투자자별", url: "https://stock.naver.com/market/stock/kr/investors" },
+    ],
+    global: [
+      { label: "미국", url: "https://stock.naver.com/market/stock/us" },
+      { label: "일본", url: "https://stock.naver.com/market/stock/jp" },
+      { label: "중국", url: "https://stock.naver.com/market/stock/cn" },
+      { label: "유럽", url: "https://stock.naver.com/market/stock/eu" },
+      { label: "아시아", url: "https://stock.naver.com/market/stock/asia" },
+    ],
+    etc: [
+      { label: "원자재", url: "https://stock.naver.com/market/commodity" },
+      { label: "환율", url: "https://stock.naver.com/market/forex" },
+      { label: "암호화폐", url: "https://stock.naver.com/market/crypto" },
+      { label: "채권/금리", url: "https://stock.naver.com/market/bond" },
+    ],
+    calendar: [
+      { label: "국내 증시일정", url: "https://finance.naver.com/sise/investCalendar.naver" },
+      { label: "해외 경제지표", url: "https://kr.investing.com/economic-calendar/" },
+      { label: "IPO 일정", url: "https://www.38.co.kr/html/fund/index.htm?o=k" },
+      { label: "배당 일정", url: "https://finance.naver.com/sise/dividendCalendar.naver" },
+    ],
+  };
+
+  const currentTabs = tabs[type] || [];
+  const selectedTab = currentTabs.find((_, i) => {
+    const keys: Record<string, string[]> = {
+      domestic: ["kospi", "kosdaq", "sectors", "investors"],
+      global: ["us", "jp", "cn", "eu", "asia"],
+      etc: ["commodity", "forex", "crypto", "bond"],
+      calendar: ["kr-calendar", "global-indicators", "ipo", "dividend"],
+    };
+    return keys[type]?.[i] === activeSubTab;
+  });
+  const selectedUrl = selectedTab?.url || currentTabs[0]?.url || "";
+
+  const subTabKeys: Record<string, string[]> = {
+    domestic: ["kospi", "kosdaq", "sectors", "investors"],
+    global: ["us", "jp", "cn", "eu", "asia"],
+    etc: ["commodity", "forex", "crypto", "bond"],
+    calendar: ["kr-calendar", "global-indicators", "ipo", "dividend"],
+  };
+
+  const typeTitle: Record<string, string> = {
+    domestic: "🇰🇷 국내증시",
+    global: "🌍 해외증시",
+    etc: "💹 ETC (원자재·환율·암호화폐·채권)",
+    calendar: "📅 증시캘린더",
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-lg">{typeTitle[type]}</CardTitle>
+        <div className="flex flex-wrap gap-1.5 mt-2">
+          {currentTabs.map((tab, idx) => {
+            const key = subTabKeys[type]?.[idx] || String(idx);
+            return (
+              <Button
+                key={key}
+                variant={activeSubTab === key ? "default" : "outline"}
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => setActiveSubTab(key)}
+              >
+                {tab.label}
+              </Button>
+            );
+          })}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs ml-auto gap-1"
+            onClick={() => {
+              const idx = subTabKeys[type]?.indexOf(activeSubTab) ?? 0;
+              const url = currentTabs[idx]?.url;
+              if (url) window.open(url, "_blank", "noopener,noreferrer");
+            }}
+          >
+            <ExternalLink className="w-3 h-3" />
+            새 탭에서 열기
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="p-0">
+        <iframe
+          key={activeSubTab}
+          src={(() => {
+            const idx = subTabKeys[type]?.indexOf(activeSubTab) ?? 0;
+            return currentTabs[idx]?.url || "";
+          })()}
+          className="w-full border-0 rounded-b-lg"
+          style={{ height: "calc(100vh - 220px)", minHeight: "600px" }}
+          title={typeTitle[type]}
+          sandbox="allow-scripts allow-same-origin allow-popups"
+        />
+      </CardContent>
+    </Card>
+  );
+}
+
+// ===== 일반 유저용 공개 카페 글 목록 (검색 포함) =====
+function PublicCafeView() {
+  const [searchInput, setSearchInput] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isSearchMode, setIsSearchMode] = useState(false);
+  const [searchPage, setSearchPage] = useState(1);
+
+  const { data, isLoading } = useQuery<{
+    latestArticles: CafeArticle[];
+    noticeArticles: CafeArticle[];
+  }>({
+    queryKey: ["/api/cafe/public-articles"],
+    queryFn: async () => {
+      const res = await fetch("/api/cafe/public-articles");
+      if (!res.ok) throw new Error("카페 글 목록을 불러올 수 없습니다.");
+      return res.json();
+    },
+    staleTime: 3 * 60 * 1000,
+  });
+
+  // 검색 쿼리
+  const { data: searchData, isFetching: isSearching } = useQuery<{
+    articles: CafeArticle[];
+    totalArticles: number;
+  }>({
+    queryKey: ["/api/cafe/public-search", searchQuery, searchPage],
+    queryFn: async () => {
+      const params = new URLSearchParams({ q: searchQuery, page: String(searchPage), perPage: "20" });
+      const res = await fetch(`/api/cafe/public-search?${params}`);
+      if (!res.ok) throw new Error("검색에 실패했습니다.");
+      return res.json();
+    },
+    enabled: isSearchMode && searchQuery.length > 0,
+    staleTime: 60 * 1000,
+  });
+
+  const latestArticles = data?.latestArticles || [];
+  const noticeArticles = data?.noticeArticles || [];
+  const searchArticles = searchData?.articles || [];
+  const searchTotalArticles = searchData?.totalArticles || 0;
+  const searchTotalPages = Math.ceil(searchTotalArticles / 20);
+
+  const formatDate = (timestamp: number) => {
+    const date = new Date(timestamp);
+    const now = new Date();
+    const isToday = date.toDateString() === now.toDateString();
+    if (isToday) {
+      return date.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
+    }
+    return date.toLocaleDateString("ko-KR", { month: "2-digit", day: "2-digit" });
+  };
+
+  const handleSearch = () => {
+    const q = searchInput.trim();
+    if (q) {
+      setSearchQuery(q);
+      setIsSearchMode(true);
+      setSearchPage(1);
+    }
+  };
+
+  const clearSearch = () => {
+    setSearchInput("");
+    setSearchQuery("");
+    setIsSearchMode(false);
+    setSearchPage(1);
+  };
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardContent className="py-20 text-center">
+          <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-2" />
+          <p className="text-sm text-muted-foreground">카페 글 목록 로딩 중...</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* 헤더 */}
+      <Card className="overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3 border-b bg-muted/30">
+          <div className="flex items-center gap-2">
+            <img
+              src="https://ssl.pstatic.net/static/cafe/cafe_pc/default/cafe_logo_img.png"
+              alt="카페"
+              className="w-5 h-5"
+            />
+            <h3 className="font-semibold text-sm">Life Fitness 카페</h3>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => window.open(CAFE_URL, "_blank", "noopener,noreferrer")}
+            className="gap-1.5 text-xs h-7"
+          >
+            <ExternalLink className="w-3 h-3" />
+            카페 열기
+          </Button>
+        </div>
+
+        {/* 검색바 */}
+        <div className="px-4 py-2 border-b bg-muted/10">
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+              <Input
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                placeholder="카페 글 검색..."
+                className="h-8 pl-8 text-sm"
+              />
+              {searchInput && (
+                <button
+                  onClick={clearSearch}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+            <Button size="sm" onClick={handleSearch} disabled={!searchInput.trim()} className="h-8 text-xs gap-1">
+              <Search className="w-3 h-3" />
+              검색
+            </Button>
+          </div>
+        </div>
+
+        {/* 검색 모드 */}
+        {isSearchMode && (
+          <>
+            <div className="px-4 py-2 border-b bg-primary/5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">
+                  "{searchQuery}" 검색결과: {searchTotalArticles}건
+                  {isSearching && <Loader2 className="w-3 h-3 animate-spin inline ml-1" />}
+                </span>
+                <Button variant="ghost" size="sm" onClick={clearSearch} className="h-6 text-xs gap-1">
+                  <X className="w-3 h-3" />
+                  검색 해제
+                </Button>
+              </div>
+            </div>
+            <div className="divide-y">
+              {isSearching ? (
+                <div className="py-12 text-center">
+                  <Loader2 className="w-6 h-6 animate-spin text-primary mx-auto mb-2" />
+                  <p className="text-xs text-muted-foreground">검색 중...</p>
+                </div>
+              ) : searchArticles.length === 0 ? (
+                <div className="py-12 text-center text-muted-foreground text-sm">
+                  검색 결과가 없습니다.
+                </div>
+              ) : (
+                searchArticles.map((article) => (
+                  <a
+                    key={article.articleId}
+                    href={`${CAFE_URL}/${article.articleId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/30 transition-colors group"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium truncate group-hover:text-primary transition-colors">
+                          {article.subject}
+                        </span>
+                        {article.commentCount > 0 && (
+                          <span className="text-xs text-primary font-bold flex-shrink-0">[{article.commentCount}]</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-0.5">
+                        <span className="text-blue-500/70 font-medium">{article.menuName}</span>
+                        <span className="opacity-40">|</span>
+                        <span>{article.writerNickname}</span>
+                        <span className="opacity-40">|</span>
+                        <span>👁 {article.readCount}</span>
+                        {article.likeItCount > 0 && (
+                          <>
+                            <span className="opacity-40">|</span>
+                            <span>❤️ {article.likeItCount}</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <span className="text-xs text-muted-foreground flex-shrink-0 tabular-nums">
+                      {formatDate(article.writeDateTimestamp)}
+                    </span>
+                  </a>
+                ))
+              )}
+            </div>
+            {/* 검색 페이지네이션 */}
+            {searchTotalPages > 1 && (
+              <div className="flex items-center justify-center gap-1 py-3 border-t bg-muted/20">
+                <Button variant="ghost" size="sm" disabled={searchPage <= 1} onClick={() => setSearchPage(1)} className="h-8 w-8 p-0 text-xs">«</Button>
+                <Button variant="ghost" size="sm" disabled={searchPage <= 1} onClick={() => setSearchPage((p) => Math.max(1, p - 1))} className="h-8 w-8 p-0 text-xs">
+                  <ChevronLeft className="w-4 h-4" />
+                </Button>
+                {Array.from({ length: Math.min(5, searchTotalPages) }, (_, i) => {
+                  const startPage = Math.max(1, Math.min(searchPage - 2, searchTotalPages - 4));
+                  const p = startPage + i;
+                  if (p > searchTotalPages) return null;
+                  return (
+                    <Button key={p} variant={p === searchPage ? "default" : "ghost"} size="sm" onClick={() => setSearchPage(p)} className="h-8 w-8 p-0 text-xs">{p}</Button>
+                  );
+                })}
+                <Button variant="ghost" size="sm" disabled={searchPage >= searchTotalPages} onClick={() => setSearchPage((p) => Math.min(searchTotalPages, p + 1))} className="h-8 w-8 p-0 text-xs">
+                  <ChevronRight className="w-4 h-4" />
+                </Button>
+                <Button variant="ghost" size="sm" disabled={searchPage >= searchTotalPages} onClick={() => setSearchPage(searchTotalPages)} className="h-8 w-8 p-0 text-xs">»</Button>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* 최신글 10개 (검색 모드가 아닐 때만) */}
+        {!isSearchMode && (
+          <>
+            <div className="px-4 pt-3 pb-1">
+              <h4 className="text-sm font-semibold flex items-center gap-1.5 mb-2">
+                <FileText className="w-4 h-4 text-primary" />
+                최신글
+                <span className="text-xs text-muted-foreground font-normal">({latestArticles.length})</span>
+              </h4>
+            </div>
+            {latestArticles.length === 0 ? (
+              <CardContent className="py-8 text-center text-muted-foreground">
+                <p className="text-sm">글 목록을 불러올 수 없습니다.</p>
+              </CardContent>
+            ) : (
+              <div className="divide-y">
+                {latestArticles.map((article) => (
+                  <a
+                    key={article.articleId}
+                    href={`${CAFE_URL}/${article.articleId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/30 transition-colors group"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium truncate group-hover:text-primary transition-colors">
+                          {article.subject}
+                        </span>
+                        {article.newArticle && (
+                          <span className="text-[10px] px-1 py-0 rounded bg-red-500 text-white font-bold flex-shrink-0">N</span>
+                        )}
+                        {article.commentCount > 0 && (
+                          <span className="text-xs text-primary font-bold flex-shrink-0">[{article.commentCount}]</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-0.5">
+                        <span className="text-blue-500/70 font-medium">{article.menuName}</span>
+                        <span className="opacity-40">|</span>
+                        <span>{article.writerNickname}</span>
+                        <span className="opacity-40">|</span>
+                        <span>👁 {article.readCount}</span>
+                        {article.likeItCount > 0 && (
+                          <>
+                            <span className="opacity-40">|</span>
+                            <span>❤️ {article.likeItCount}</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <span className="text-xs text-muted-foreground flex-shrink-0 tabular-nums">
+                      {formatDate(article.writeDateTimestamp)}
+                    </span>
+                  </a>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </Card>
+
+      {/* 전체 공지글 (검색 모드가 아닐 때만) */}
+      {!isSearchMode && noticeArticles.length > 0 && (
+        <Card className="overflow-hidden border-amber-200/50">
+          <div className="px-4 pt-3 pb-1 bg-amber-50/50 border-b border-amber-200/30">
+            <h4 className="text-sm font-semibold flex items-center gap-1.5 mb-2">
+              <Newspaper className="w-4 h-4 text-amber-600" />
+              <span className="text-amber-700">전체공지</span>
+              <span className="text-xs text-muted-foreground font-normal">({noticeArticles.length})</span>
+            </h4>
+          </div>
+          <div className="divide-y">
+            {noticeArticles.map((article) => (
+              <a
+                key={article.articleId}
+                href={`${CAFE_URL}/${article.articleId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-3 px-4 py-2.5 hover:bg-amber-50/30 transition-colors group"
+              >
+                <span className="text-amber-500 text-xs font-bold flex-shrink-0">📌</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium truncate group-hover:text-amber-600 transition-colors">
+                      {article.subject}
+                    </span>
+                    {article.commentCount > 0 && (
+                      <span className="text-xs text-primary font-bold flex-shrink-0">[{article.commentCount}]</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-0.5">
+                    <span>{article.writerNickname}</span>
+                    <span className="opacity-40">|</span>
+                    <span>👁 {article.readCount}</span>
+                    {article.likeItCount > 0 && (
+                      <>
+                        <span className="opacity-40">|</span>
+                        <span>❤️ {article.likeItCount}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <span className="text-xs text-muted-foreground flex-shrink-0 tabular-nums">
+                  {formatDate(article.writeDateTimestamp)}
+                </span>
+              </a>
+            ))}
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+interface NoticeItem {
+  id: number;
+  content: string;
+  sortOrder: number | null;
+  isActive: boolean | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function NoticeBoard() {
+  const { isAdmin } = useAuth();
+  const { toast } = useToast();
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editContent, setEditContent] = useState("");
+  const [newContent, setNewContent] = useState("");
+
+  // 관리자: 전체 공지 (비활성 포함) / 일반: 활성 공지만
+  const { data: noticeList = [], refetch } = useQuery<NoticeItem[]>({
+    queryKey: [isAdmin ? "/api/notices/all" : "/api/notices"],
+    queryFn: async () => {
+      const url = isAdmin ? "/api/notices/all" : "/api/notices";
+      const res = await fetch(url, { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    staleTime: 60 * 1000,
+  });
+
+  // 공지 추가
+  const addMutation = useMutation({
+    mutationFn: async (content: string) => {
+      const res = await apiRequest("POST", "/api/notices", { content, sortOrder: 0, isActive: true });
+      return res.json();
+    },
+    onSuccess: () => {
+      refetch();
+      setNewContent("");
+      toast({ title: "공지 추가 완료" });
+    },
+  });
+
+  // 공지 수정
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, content }: { id: number; content: string }) => {
+      const res = await apiRequest("PUT", `/api/notices/${id}`, { content });
+      return res.json();
+    },
+    onSuccess: () => {
+      refetch();
+      setEditingId(null);
+      toast({ title: "공지 수정 완료" });
+    },
+  });
+
+  // 공지 활성/비활성 토글
+  const toggleMutation = useMutation({
+    mutationFn: async ({ id, isActive }: { id: number; isActive: boolean }) => {
+      const res = await apiRequest("PUT", `/api/notices/${id}`, { isActive });
+      return res.json();
+    },
+    onSuccess: () => refetch(),
+  });
+
+  // 공지 삭제
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => {
+      await apiRequest("DELETE", `/api/notices/${id}`);
+    },
+    onSuccess: () => {
+      refetch();
+      toast({ title: "공지 삭제 완료" });
+    },
+  });
+
+  // 일반 유저: 공지가 없으면 표시 안 함
+  if (!isAdmin && noticeList.length === 0) return null;
+
+  // ===== 일반 유저용 뷰 =====
+  if (!isAdmin) {
+    return (
+      <Card className="mb-4 border-yellow-300 dark:border-yellow-700">
+        <CardHeader className="pb-2 pt-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Bell className="w-4 h-4 text-yellow-600" />
+            공지사항
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="pb-3">
+          <div className="space-y-1">
+            {noticeList.map((n, idx) => (
+              <p key={n.id} className="text-sm font-bold text-foreground" dangerouslySetInnerHTML={{
+                __html: `공지${idx + 1}) ${n.content.replace(
+                  /(https?:\/\/[^\s)<]+)/g,
+                  '<a href="$1" target="_blank" rel="noopener noreferrer" class="text-blue-600 underline hover:text-blue-800 dark:text-blue-400">$1</a>'
+                )}`
+              }} />
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // ===== 관리자용 편집 뷰 =====
+  return (
+    <Card className="mb-4 border-yellow-300 dark:border-yellow-700">
+      <CardHeader className="pb-2 pt-3">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Bell className="w-4 h-4 text-yellow-600" />
+            공지사항 관리
+          </CardTitle>
+          <span className="text-xs text-muted-foreground">{noticeList.length}개 공지</span>
+        </div>
+      </CardHeader>
+      <CardContent className="pb-3 space-y-3">
+        {/* 공지 목록 */}
+        {noticeList.length > 0 && (
+          <div className="space-y-2">
+            {noticeList.map((n) => (
+              <div key={n.id} className={`flex items-start gap-2 p-2 rounded border ${n.isActive ? "bg-yellow-50 border-yellow-200 dark:bg-yellow-950/20 dark:border-yellow-800" : "bg-muted/30 border-dashed opacity-60"}`}>
+                {editingId === n.id ? (
+                  <div className="flex-1 space-y-2">
+                    <Textarea
+                      value={editContent}
+                      onChange={(e) => setEditContent(e.target.value)}
+                      className="text-sm min-h-[60px]"
+                      placeholder="공지 내용"
+                    />
+                    <div className="flex gap-1">
+                      <Button size="sm" variant="default" onClick={() => updateMutation.mutate({ id: n.id, content: editContent })} disabled={updateMutation.isPending || !editContent.trim()}>
+                        저장
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => setEditingId(null)}>
+                        취소
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <p className="flex-1 text-sm font-medium leading-relaxed whitespace-pre-wrap">{n.content}</p>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => toggleMutation.mutate({ id: n.id, isActive: !n.isActive })} title={n.isActive ? "비활성화" : "활성화"}>
+                        {n.isActive ? <Eye className="w-3.5 h-3.5 text-green-600" /> : <X className="w-3.5 h-3.5 text-muted-foreground" />}
+                      </Button>
+                      <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => { setEditingId(n.id); setEditContent(n.content); }}>
+                        <Pencil className="w-3.5 h-3.5" />
+                      </Button>
+                      <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-red-500 hover:text-red-700" onClick={() => { if (confirm("이 공지를 삭제하시겠습니까?")) deleteMutation.mutate(n.id); }}>
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* 새 공지 추가 */}
+        <div className="flex gap-2">
+          <Input
+            value={newContent}
+            onChange={(e) => setNewContent(e.target.value)}
+            placeholder="새 공지 내용을 입력하세요..."
+            className="text-sm"
+            onKeyDown={(e) => { if (e.key === "Enter" && newContent.trim()) addMutation.mutate(newContent); }}
+          />
+          <Button size="sm" onClick={() => addMutation.mutate(newContent)} disabled={addMutation.isPending || !newContent.trim()}>
+            <Plus className="w-4 h-4 mr-1" />
+            추가
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
 
 function HomeEmbed() {
@@ -566,26 +1224,13 @@ function HomeEmbed() {
     writeMutation.mutate({ subject: writeSubject, content: writeContent, menuId: writeMenuId });
   };
 
-  // admin 체크
+  // 일반 유저: 공개 카페 글 목록 (최신 10개 + 전체 공지글)
   if (!isAdmin) {
     return (
-      <Card>
-        <CardContent className="py-16 text-center">
-          <Globe className="w-16 h-16 mx-auto text-muted-foreground/20 mb-4" />
-          <h3 className="text-lg font-semibold">관리자 전용 기능입니다</h3>
-          <p className="text-sm text-muted-foreground mt-2">
-            카페 전체글보기는 관리자 로그인 후 이용 가능합니다.
-          </p>
-          <Button
-            variant="outline"
-            className="mt-4 gap-2"
-            onClick={() => window.open(CAFE_URL, "_blank", "noopener,noreferrer")}
-          >
-            <ExternalLink className="w-4 h-4" />
-            네이버 카페 직접 방문
-          </Button>
-        </CardContent>
-      </Card>
+      <>
+        <NoticeBoard />
+        <PublicCafeView />
+      </>
     );
   }
 
@@ -641,6 +1286,7 @@ function HomeEmbed() {
 
   return (
     <>
+      <NoticeBoard />
       <Card className="overflow-hidden">
         {/* 헤더 */}
         <div className="flex items-center justify-between px-4 py-3 border-b bg-muted/30">

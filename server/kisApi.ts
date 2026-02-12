@@ -571,7 +571,7 @@ async function resolveStockCode(stockName: string): Promise<string> {
 }
 
 // ===== 네이버 금융 실시간 시세 bulk 조회 (레이트리밋 없음, 20개씩 1회 요청) =====
-interface NaverRealtimePrice {
+export interface NaverRealtimePrice {
   stockCode: string;
   stockName: string;
   price: string;
@@ -584,7 +584,7 @@ interface NaverRealtimePrice {
   open: string;
 }
 
-async function fetchNaverBulkPrices(stockCodes: string[]): Promise<Map<string, NaverRealtimePrice>> {
+export async function fetchNaverBulkPrices(stockCodes: string[]): Promise<Map<string, NaverRealtimePrice>> {
   const result = new Map<string, NaverRealtimePrice>();
   if (stockCodes.length === 0) return result;
 

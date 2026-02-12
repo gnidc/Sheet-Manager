@@ -428,6 +428,22 @@ export async function registerRoutes(
     };
   }
 
+  // 헬퍼: userId로 직접 인증정보를 가져오는 함수 (손절 감시 등 백그라운드 작업용)
+  async function getUserCredentialsById(userId: number): Promise<{ userId: number; creds: kisApi.UserKisCredentials } | null> {
+    const config = await storage.getUserTradingConfig(userId);
+    if (!config) return null;
+    return {
+      userId,
+      creds: {
+        appKey: config.appKey,
+        appSecret: config.appSecret,
+        accountNo: config.accountNo,
+        accountProductCd: config.accountProductCd || "01",
+        mockTrading: config.mockTrading ?? true,
+      },
+    };
+  }
+
   // ---- 사용자 KIS 인증정보 관리 ----
 
   // 인증정보 조회 (마스킹됨)
@@ -874,6 +890,195 @@ export async function registerRoutes(
     }
   });
 
+  // ========== 손절/트레일링 스탑 감시 ==========
+
+  // 손절 감시 목록 조회
+  app.get("/api/trading/stop-loss", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId || undefined;
+      const orders = await storage.getStopLossOrders(userId);
+      res.json(orders);
+    } catch (error: any) {
+      console.error("Failed to get stop-loss orders:", error);
+      res.status(500).json({ message: error.message || "손절 감시 조회 실패" });
+    }
+  });
+
+  // 손절 감시 등록
+  app.post("/api/trading/stop-loss", requireUser, async (req, res) => {
+    try {
+      const { stockCode, stockName, buyPrice, quantity, stopLossPercent, stopType } = req.body;
+
+      if (!stockCode || !buyPrice || !quantity || !stopLossPercent) {
+        return res.status(400).json({ message: "종목코드, 매수가, 수량, 손절비율은 필수입니다" });
+      }
+
+      if (!["simple", "trailing"].includes(stopType || "simple")) {
+        return res.status(400).json({ message: "손절 유형은 simple 또는 trailing이어야 합니다" });
+      }
+
+      const bPrice = Number(buyPrice);
+      const slPercent = Number(stopLossPercent);
+      // 손절가 = 매수가 * (1 - 손절비율/100)
+      const stopPrice = Math.floor(bPrice * (1 - slPercent / 100));
+
+      const userId = req.session?.userId || null;
+      const order = await storage.createStopLossOrder({
+        userId,
+        stockCode,
+        stockName: stockName || stockCode,
+        buyPrice: String(bPrice),
+        quantity: Number(quantity),
+        stopLossPercent: String(slPercent),
+        stopType: stopType || "simple",
+        stopPrice: String(stopPrice),
+        highestPrice: stopType === "trailing" ? String(bPrice) : null,
+        status: "active",
+      });
+
+      console.log(`[StopLoss] Created: ${stockName || stockCode} buyPrice=${bPrice} stopPrice=${stopPrice} type=${stopType || "simple"} percent=${slPercent}%`);
+      res.status(201).json(order);
+    } catch (error: any) {
+      console.error("Failed to create stop-loss order:", error);
+      res.status(500).json({ message: error.message || "손절 감시 등록 실패" });
+    }
+  });
+
+  // 손절 감시 취소
+  app.delete("/api/trading/stop-loss/:id", requireUser, async (req, res) => {
+    try {
+      await storage.cancelStopLossOrder(Number(req.params.id));
+      console.log(`[StopLoss] Cancelled: id=${req.params.id}`);
+      res.status(204).send();
+    } catch (error: any) {
+      console.error("Failed to cancel stop-loss order:", error);
+      res.status(500).json({ message: error.message || "손절 감시 취소 실패" });
+    }
+  });
+
+  // 손절 감시 수동 실행 (체크) - 네이버 bulk API 사용
+  app.post("/api/trading/stop-loss/check", requireUser, async (req, res) => {
+    try {
+      const activeOrders = await storage.getActiveStopLossOrders();
+      if (activeOrders.length === 0) {
+        return res.json({ message: "활성화된 손절 감시가 없습니다", checked: 0, triggered: 0 });
+      }
+
+      // 1. 네이버 bulk API로 일괄 시세 조회
+      const stockCodes = Array.from(new Set(activeOrders.map(o => o.stockCode)));
+      const priceMap = await kisApi.fetchNaverBulkPrices(stockCodes);
+
+      const results: Array<{ id: number; stockCode: string; stockName: string; currentPrice: number; stopPrice: number; action: string; result: string }> = [];
+      let triggered = 0;
+
+      for (const sl of activeOrders) {
+        try {
+          const priceData = priceMap.get(sl.stockCode);
+          if (!priceData) {
+            results.push({ id: sl.id, stockCode: sl.stockCode, stockName: sl.stockName || sl.stockCode, currentPrice: 0, stopPrice: Number(sl.stopPrice), action: "skip", result: "가격 조회 실패" });
+            continue;
+          }
+
+          const currentPrice = Number(priceData.price);
+          let currentStopPrice = Number(sl.stopPrice);
+
+          // 가격 캐시 업데이트
+          stopLossLatestPrices.set(sl.stockCode, {
+            price: currentPrice,
+            changePercent: priceData.changePercent,
+            checkedAt: new Date(),
+          });
+
+          // 트레일링 스탑: 최고가 갱신 시 손절가도 갱신
+          if (sl.stopType === "trailing") {
+            const prevHighest = Number(sl.highestPrice || sl.buyPrice);
+            if (currentPrice > prevHighest) {
+              const newStopPrice = Math.floor(currentPrice * (1 - Number(sl.stopLossPercent) / 100));
+              await storage.updateStopLossOrder(sl.id, {
+                highestPrice: String(currentPrice),
+                stopPrice: String(newStopPrice),
+              });
+              currentStopPrice = newStopPrice;
+            }
+          }
+
+          // 손절 조건 확인: 현재가 <= 손절가
+          if (currentPrice <= currentStopPrice) {
+            const userCreds = sl.userId ? await getUserCredentialsById(sl.userId) : null;
+            let orderResult;
+            if (userCreds) {
+              orderResult = await kisApi.userPlaceOrder(userCreds.userId, userCreds.creds, {
+                stockCode: sl.stockCode,
+                orderType: "sell",
+                quantity: sl.quantity,
+                orderMethod: "market",
+              });
+            } else {
+              orderResult = await kisApi.placeOrder({
+                stockCode: sl.stockCode,
+                orderType: "sell",
+                quantity: sl.quantity,
+                orderMethod: "market",
+              });
+            }
+
+            await storage.createTradingOrder({
+              stockCode: sl.stockCode,
+              stockName: sl.stockName || sl.stockCode,
+              orderType: "sell",
+              orderMethod: "market",
+              quantity: sl.quantity,
+              price: String(currentPrice),
+              totalAmount: String(currentPrice * sl.quantity),
+              status: orderResult.success ? "filled" : "failed",
+              kisOrderNo: orderResult.orderNo || null,
+              errorMessage: orderResult.success ? null : orderResult.message,
+              executedAt: orderResult.success ? new Date() : null,
+              userId: sl.userId,
+            });
+
+            await storage.updateStopLossOrder(sl.id, {
+              status: orderResult.success ? "triggered" : "error",
+              kisOrderNo: orderResult.orderNo || null,
+              triggerPrice: String(currentPrice),
+              triggeredAt: new Date(),
+              errorMessage: orderResult.success ? null : orderResult.message,
+            });
+
+            triggered++;
+            results.push({
+              id: sl.id, stockCode: sl.stockCode, stockName: sl.stockName || sl.stockCode,
+              currentPrice, stopPrice: currentStopPrice,
+              action: `매도 ${sl.quantity}주 @ 시장가`,
+              result: orderResult.success ? "✅ 손절 매도 성공" : `❌ 실패: ${orderResult.message}`,
+            });
+          } else {
+            const gap = ((currentPrice - currentStopPrice) / currentStopPrice * 100).toFixed(1);
+            results.push({
+              id: sl.id, stockCode: sl.stockCode, stockName: sl.stockName || sl.stockCode,
+              currentPrice, stopPrice: currentStopPrice,
+              action: "대기",
+              result: `현재가 ${currentPrice.toLocaleString()}원 (손절가까지 +${gap}%)`,
+            });
+          }
+        } catch (checkError: any) {
+          results.push({
+            id: sl.id, stockCode: sl.stockCode, stockName: sl.stockName || sl.stockCode,
+            currentPrice: 0, stopPrice: Number(sl.stopPrice),
+            action: "오류",
+            result: checkError.message || "감시 중 오류",
+          });
+        }
+      }
+
+      stopLossLastCheckedAt = new Date();
+      res.json({ checked: activeOrders.length, triggered, results, isMarketOpen: isMarketOpen() });
+    } catch (error: any) {
+      console.error("Failed to check stop-loss orders:", error);
+      res.status(500).json({ message: error.message || "손절 감시 체크 실패" });
+    }
+  });
+
   // ========== 즐겨찾기 (북마크) ==========
   app.get("/api/bookmarks", requireUser, async (req, res) => {
     try {
@@ -888,12 +1093,12 @@ export async function registerRoutes(
 
   app.post("/api/bookmarks", requireUser, async (req, res) => {
     try {
-      const { title, url, sortOrder } = req.body;
+      const { title, url, sortOrder, section } = req.body;
       if (!title || !url) {
         return res.status(400).json({ message: "제목과 URL은 필수입니다." });
       }
       const userId = req.session?.userId || null;
-      const bookmark = await storage.createBookmark({ title, url, sortOrder: sortOrder || 0, userId });
+      const bookmark = await storage.createBookmark({ title, url, sortOrder: sortOrder || 0, userId, section: section || "기본" });
       res.json(bookmark);
     } catch (error: any) {
       console.error("Failed to create bookmark:", error);
@@ -913,8 +1118,8 @@ export async function registerRoutes(
       if (existing.userId !== sessionUserId) {
         return res.status(403).json({ message: "다른 사용자의 즐겨찾기는 수정할 수 없습니다" });
       }
-      const { title, url, sortOrder } = req.body;
-      const updated = await storage.updateBookmark(id, { title, url, sortOrder });
+      const { title, url, sortOrder, section } = req.body;
+      const updated = await storage.updateBookmark(id, { title, url, sortOrder, section });
       res.json(updated);
     } catch (error: any) {
       console.error("Failed to update bookmark:", error);
@@ -1270,6 +1475,44 @@ export async function registerRoutes(
     }
   });
 
+  // ===== 관심(추천) ETF 실시간 시세 (top-gainers와 동일 포맷) =====
+  app.get("/api/watchlist-etfs/realtime", async (req, res) => {
+    try {
+      const watchlist = await storage.getWatchlistEtfs();
+      if (watchlist.length === 0) return res.json({ items: [], updatedAt: new Date().toLocaleString("ko-KR") });
+
+      const allEtfs = await getEtfFullList();
+      const etfMap = new Map<string, EtfListItem>();
+      allEtfs.forEach((e) => etfMap.set(e.code, e));
+
+      const items = watchlist
+        .map((w) => {
+          const naver = etfMap.get(w.etfCode);
+          if (!naver) return null;
+          return {
+            code: naver.code,
+            name: naver.name,
+            nowVal: naver.nowVal,
+            changeVal: naver.changeVal,
+            changeRate: naver.changeRate,
+            risefall: naver.risefall,
+            quant: naver.quant,
+            amount: naver.amount,
+            marketCap: naver.marketCap,
+            nav: naver.nav,
+            sector: w.sector || "",
+            memo: w.memo || "",
+          };
+        })
+        .filter(Boolean);
+
+      res.json({ items, updatedAt: new Date().toLocaleString("ko-KR") });
+    } catch (error: any) {
+      console.error("[ETF] Failed to get watchlist realtime:", error.message);
+      res.status(500).json({ message: "관심 ETF 실시간 시세 조회 실패" });
+    }
+  });
+
   // ===== ETF 상승 트렌드 AI 분석 =====
   app.post("/api/etf/analyze-trend", async (req, res) => {
     try {
@@ -1457,6 +1700,101 @@ ${newsSummary}`;
       });
     } catch (error: any) {
       console.error("[Cafe] Failed to fetch articles:", error.message);
+      return res.status(500).json({ message: "카페 글 목록을 불러올 수 없습니다." });
+    }
+  });
+
+  // ===== 공개 카페 글 목록 (인증 불필요 - 일반 유저용) =====
+  // 전체공지(noticeType=N) 캐시 (5분)
+  let publicNoticeCache: { data: any[]; timestamp: number } = { data: [], timestamp: 0 };
+  const NOTICE_CACHE_TTL = 5 * 60 * 1000; // 5분
+
+  app.get("/api/cafe/public-articles", async (req, res) => {
+    try {
+      const mapArticle = (a: any) => ({
+        articleId: a.articleId,
+        subject: a.subject,
+        writerNickname: a.writerNickname,
+        menuId: a.menuId,
+        menuName: a.menuName,
+        readCount: a.readCount,
+        commentCount: a.commentCount,
+        likeItCount: a.likeItCount,
+        writeDateTimestamp: a.writeDateTimestamp,
+        newArticle: a.newArticle,
+      });
+
+      // 1) 최신 10개 글 가져오기
+      const latestRes = await axios.get(
+        "https://apis.naver.com/cafe-web/cafe2/ArticleListV2.json",
+        {
+          params: {
+            "search.clubid": CAFE_ID,
+            "search.boardtype": "L",
+            "search.page": 1,
+            "search.perPage": 10,
+          },
+          headers: CAFE_HEADERS,
+          timeout: 10000,
+        }
+      );
+      const latestResult = latestRes.data?.message?.result;
+      const latestArticles = (latestResult?.articleList || []).map(mapArticle);
+
+      // 2) 전체공지글 가져오기 (noticeType === "N" 필터링)
+      //    - 전체공지는 일반 글 목록 중 noticeType 필드가 있는 글을 스캔하여 추출
+      //    - 캐시 사용 (5분)
+      let noticeArticles: any[] = [];
+      const now = Date.now();
+      if (publicNoticeCache.data.length > 0 && (now - publicNoticeCache.timestamp) < NOTICE_CACHE_TTL) {
+        noticeArticles = publicNoticeCache.data;
+      } else {
+        try {
+          const noticeSet = new Map<number, any>();
+          // 여러 페이지를 순회하며 noticeType === "N" (전체공지) 글 수집
+          for (let page = 1; page <= 8; page++) {
+            const pageRes = await axios.get(
+              "https://apis.naver.com/cafe-web/cafe2/ArticleListV2.json",
+              {
+                params: {
+                  "search.clubid": CAFE_ID,
+                  "search.boardtype": "L",
+                  "search.page": page,
+                  "search.perPage": 50,
+                },
+                headers: CAFE_HEADERS,
+                timeout: 10000,
+              }
+            );
+            const pageArticles = pageRes.data?.message?.result?.articleList || [];
+            for (const a of pageArticles) {
+              if (a.noticeType === "N") {
+                noticeSet.set(a.articleId, mapArticle(a));
+              }
+            }
+            if (pageArticles.length < 50) break; // 마지막 페이지
+          }
+          noticeArticles = Array.from(noticeSet.values());
+          // 최신순 정렬
+          noticeArticles.sort((a: any, b: any) => b.writeDateTimestamp - a.writeDateTimestamp);
+          // 캐시 저장
+          publicNoticeCache = { data: noticeArticles, timestamp: now };
+          console.log(`[Cafe] Public notice cache updated: ${noticeArticles.length} articles`);
+        } catch (noticeErr: any) {
+          console.warn("[Cafe] Failed to fetch notice articles:", noticeErr.message);
+          // 캐시가 있으면 만료되어도 사용
+          if (publicNoticeCache.data.length > 0) {
+            noticeArticles = publicNoticeCache.data;
+          }
+        }
+      }
+
+      return res.json({
+        latestArticles,
+        noticeArticles,
+      });
+    } catch (error: any) {
+      console.error("[Cafe] Failed to fetch public articles:", error.message);
       return res.status(500).json({ message: "카페 글 목록을 불러올 수 없습니다." });
     }
   });
@@ -1704,6 +2042,51 @@ ${newsSummary}`;
       });
     } catch (error: any) {
       console.error("[Cafe] Failed to search articles:", error.message);
+      return res.status(500).json({ message: "카페 검색에 실패했습니다." });
+    }
+  });
+
+  // ===== 카페 공개 검색 (로그인 불필요) =====
+  app.get("/api/cafe/public-search", async (req, res) => {
+    try {
+      const query = (req.query.q as string || "").trim();
+      const page = parseInt(req.query.page as string) || 1;
+      const perPage = Math.min(parseInt(req.query.perPage as string) || 20, 50);
+
+      if (!query) {
+        return res.json({ articles: [], page: 1, perPage, totalArticles: 0, query: "" });
+      }
+
+      // 인덱스가 없거나 만료되었으면 구축
+      const now = Date.now();
+      if (cafeArticleIndex.articles.length === 0 || now - cafeArticleIndex.lastUpdated > ARTICLE_INDEX_TTL) {
+        await buildArticleIndex();
+      }
+
+      const lowerQuery = query.toLowerCase();
+      const keywords = lowerQuery.split(/\s+/).filter(Boolean);
+
+      const matched = cafeArticleIndex.articles.filter((a) => {
+        const searchTarget = `${a.subject} ${a.writerNickname} ${a.menuName}`.toLowerCase();
+        return keywords.every((kw) => searchTarget.includes(kw));
+      });
+
+      matched.sort((a, b) => (b.writeDateTimestamp || 0) - (a.writeDateTimestamp || 0));
+
+      const startIdx = (page - 1) * perPage;
+      const pagedArticles = matched.slice(startIdx, startIdx + perPage);
+
+      console.log(`[Cafe Public Search] query="${query}" matched=${matched.length}/${cafeArticleIndex.articles.length} indexed`);
+
+      return res.json({
+        articles: pagedArticles,
+        page,
+        perPage,
+        totalArticles: matched.length,
+        query: req.query.q,
+      });
+    } catch (error: any) {
+      console.error("[Cafe] Failed to public search articles:", error.message);
       return res.status(500).json({ message: "카페 검색에 실패했습니다." });
     }
   });
@@ -2060,62 +2443,91 @@ ${newsSummary}`;
         return res.status(401).json({ message: "네이버 로그인이 필요합니다.", requireNaverLogin: true });
       }
 
-      // 네이버 카페 API용 컨텐츠 정제
+      // 네이버 카페 API용 컨텐츠 정제: HTML 태그 완전 제거 → 순수 텍스트만
       let cleanContent = content
         .replace(/[^\u0000-\uFFFF]/g, '')           // 이모지 제거
-        .replace(/\s*style="[^"]*"/g, '')            // 모든 inline style 제거
-        .replace(/\s*class="[^"]*"/g, '');           // 모든 class 제거
+        .replace(/<br\s*\/?>/gi, '\n')               // <br>, <br/> → 줄바꿈
+        .replace(/<\/p>/gi, '\n')                    // </p> → 줄바꿈
+        .replace(/<[^>]+>/g, '')                     // 모든 HTML 태그 제거
+        .replace(/&lt;/g, '<')                       // HTML 엔티티 복원
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&')
+        .replace(/\n{3,}/g, '\n\n')                  // 3줄 이상 빈줄 → 2줄로
+        .trim();
 
-      // 컨텐츠 길이 제한 (네이버 API 최대 약 65000 바이트)
+      // 컨텐츠 길이 제한
       const contentBytes = Buffer.byteLength(cleanContent, 'utf8');
       if (contentBytes > 60000) {
         cleanContent = cleanContent.substring(0, Math.floor(cleanContent.length * (60000 / contentBytes)));
       }
 
       const apiUrl = `https://openapi.naver.com/v1/cafe/${CAFE_ID}/menu/${menuId}/articles`;
-      console.log(`[Cafe Write] Posting "${subject}" to menu ${menuId}, content: ${contentBytes} bytes`);
 
-      // x-www-form-urlencoded 방식 사용 (네이버 카페 API에서 검증됨)
-      const params = new URLSearchParams();
-      params.append("subject", subject);
-      params.append("content", cleanContent);
+      // 헬퍼: multipart/form-data로 전송
+      const tryPostMultipart = async (subj: string, cont: string, label: string) => {
+        const FormData = (await import("form-data")).default;
+        const fd = new FormData();
+        fd.append("subject", subj);
+        fd.append("content", cont);
+        console.log(`[Cafe Write] ${label}: subject="${subj.substring(0,30)}..." content(${Buffer.byteLength(cont)}b)="${cont.substring(0,80)}..."`);
+        const resp = await axios.post(apiUrl, fd, {
+          headers: {
+            Authorization: `Bearer ${naverToken}`,
+            ...fd.getHeaders(),
+          },
+          timeout: 30000,
+        });
+        console.log(`[Cafe Write] SUCCESS (${label})`);
+        return resp;
+      };
 
-      const response = await axios.post(apiUrl, params.toString(), {
-        headers: {
-          Authorization: `Bearer ${naverToken}`,
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        timeout: 30000,
-      });
+      // 단계별 시도 (multipart/form-data 사용)
+      const contentVariants = [
+        { label: "full-multipart", text: cleanContent },
+        { label: "2000chars-multipart", text: cleanContent.substring(0, 2000) },
+        { label: "500chars-multipart", text: cleanContent.substring(0, 500) },
+        { label: "korean-only-200", text: cleanContent.replace(/[^가-힣a-zA-Z0-9\s.,]/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 200) },
+        { label: "minimal", text: "ETF 실시간 상승 분석 보고서" },
+      ];
 
-      console.log(`[Cafe Write] Article posted successfully: "${subject}" to menu ${menuId}`);
-      return res.json({
-        message: "카페에 글이 등록되었습니다.",
-        result: response.data,
-        articleUrl: response.data?.message?.result?.articleUrl || null,
+      for (const variant of contentVariants) {
+        try {
+          const response = await tryPostMultipart(subject, variant.text, variant.label);
+          const wasTruncated = variant.label !== "full-multipart";
+          return res.json({
+            message: wasTruncated
+              ? `카페에 글이 등록되었습니다. (${variant.label} 모드)`
+              : "카페에 글이 등록되었습니다.",
+            result: response.data,
+            articleUrl: response.data?.message?.result?.articleUrl || null,
+            truncated: wasTruncated,
+            usedMode: variant.label,
+          });
+        } catch (err: any) {
+          const errStatus = err.response?.status;
+          const errCode = err.response?.data?.message?.error?.code;
+          const errMsg = err.response?.data?.message?.error?.msg || err.message;
+          console.warn(`[Cafe Write] ${variant.label} FAILED (HTTP ${errStatus}, code=${errCode}): ${errMsg}`);
+
+          if (errStatus === 401) {
+            const newToken = await refreshNaverToken(req);
+            if (newToken) {
+              return res.status(500).json({ message: "토큰을 갱신했습니다. 다시 시도해주세요." });
+            }
+            return res.status(401).json({ message: "네이버 토큰이 만료되었습니다. 다시 로그인해주세요.", requireNaverLogin: true });
+          }
+          continue;
+        }
+      }
+
+      // 모두 실패 → 스팸 필터 또는 API 제한일 가능성
+      return res.status(500).json({
+        message: "카페 글쓰기 실패. 짧은 시간 내 여러 번 시도하면 일시적으로 차단될 수 있습니다. 몇 분 후 다시 시도하거나, 홈 화면에서 네이버 로그아웃 후 다시 로그인해주세요.",
       });
     } catch (error: any) {
-      const errorData = error.response?.data;
-      const statusCode = error.response?.status;
-      const errorMsg = errorData?.message?.error?.msg || errorData?.message || error.message;
-      console.error(`[Cafe Write] Failed (HTTP ${statusCode}):`, errorMsg, JSON.stringify(errorData));
-
-      if (statusCode === 401) {
-        const newToken = await refreshNaverToken(req);
-        if (!newToken) {
-          return res.status(401).json({ message: "네이버 토큰이 만료되었습니다. 다시 로그인해주세요.", requireNaverLogin: true });
-        }
-        return res.status(500).json({ message: "토큰을 갱신했습니다. 다시 시도해주세요." });
-      }
-
-      if (statusCode === 403) {
-        return res.status(403).json({
-          message: `카페 글쓰기 실패. 네이버 개발자센터에서 카페 글쓰기(cafe_article_write) 권한을 확인하세요. (${errorMsg})`,
-        });
-      }
-
+      console.error(`[Cafe Write] Unexpected error:`, error.message);
       return res.status(500).json({
-        message: `글 등록 실패: ${errorMsg}`,
+        message: `글 등록 실패: ${error.message}`,
       });
     }
   });
@@ -2147,6 +2559,647 @@ ${newsSummary}`;
     } catch (error: any) {
       console.error("Failed to search ETFs:", error);
       res.status(500).json({ message: error.message || "ETF 검색 실패" });
+    }
+  });
+
+  // ========== 관심(추천) ETF 관리 ==========
+
+  // 관심 ETF 목록 조회 (모든 로그인 유저)
+  app.get("/api/watchlist-etfs", requireUser, async (req, res) => {
+    try {
+      const etfs = await storage.getWatchlistEtfs();
+      res.json(etfs);
+    } catch (error: any) {
+      console.error("Failed to get watchlist ETFs:", error);
+      res.status(500).json({ message: error.message || "관심 ETF 조회 실패" });
+    }
+  });
+
+  // 관심 ETF 추가 (Admin 전용)
+  app.post("/api/watchlist-etfs", requireAdmin, async (req, res) => {
+    try {
+      const { etfCode, etfName, sector, memo } = req.body;
+      if (!etfCode || !etfName) {
+        return res.status(400).json({ message: "ETF 코드와 이름은 필수입니다." });
+      }
+      const etf = await storage.createWatchlistEtf({ etfCode, etfName, sector: sector || "기본", memo: memo || null });
+      console.log(`[Watchlist] Added: ${etf.etfName} (${etf.etfCode}) - sector: ${etf.sector}`);
+      res.json(etf);
+    } catch (error: any) {
+      console.error("Failed to add watchlist ETF:", error);
+      res.status(500).json({ message: error.message || "관심 ETF 추가 실패" });
+    }
+  });
+
+  // 관심 ETF 수정 (Admin 전용)
+  app.put("/api/watchlist-etfs/:id", requireAdmin, async (req, res) => {
+    try {
+      const etf = await storage.updateWatchlistEtf(Number(req.params.id), req.body);
+      res.json(etf);
+    } catch (error: any) {
+      console.error("Failed to update watchlist ETF:", error);
+      res.status(500).json({ message: error.message || "관심 ETF 수정 실패" });
+    }
+  });
+
+  // 관심 ETF 삭제 (Admin 전용)
+  app.delete("/api/watchlist-etfs/:id", requireAdmin, async (req, res) => {
+    try {
+      await storage.deleteWatchlistEtf(Number(req.params.id));
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Failed to delete watchlist ETF:", error);
+      res.status(500).json({ message: error.message || "관심 ETF 삭제 실패" });
+    }
+  });
+
+  // 관심 ETF 실시간 시세 정보 조회 (시가총액, 현재가, 등락률 + 상장일, 총보수)
+  app.get("/api/watchlist-etfs/market-data", requireUser, async (req, res) => {
+    try {
+      const watchlist = await storage.getWatchlistEtfs();
+      if (watchlist.length === 0) return res.json({});
+
+      // 1) 네이버 ETF 전체 리스트에서 시가총액, 현재가, 등락률 가져오기
+      const allEtfs = await getEtfFullList();
+      const etfMap = new Map<string, EtfListItem>();
+      allEtfs.forEach((e) => etfMap.set(e.code, e));
+
+      // 2) WiseReport에서 상장일/총보수 가져오기 (병렬, 최대 20개)
+      const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
+      const wiseDataMap = new Map<string, { listingDate: string; expense: string }>();
+
+      const batchSize = 10;
+      for (let i = 0; i < watchlist.length; i += batchSize) {
+        const batch = watchlist.slice(i, i + batchSize);
+        await Promise.all(batch.map(async (w) => {
+          try {
+            const wrRes = await axios.get(
+              "https://navercomp.wisereport.co.kr/v2/ETF/Index.aspx",
+              { params: { cn: "", cmp_cd: w.etfCode, menuType: "block" }, headers: { "User-Agent": UA }, timeout: 8000 }
+            );
+            const html = typeof wrRes.data === "string" ? wrRes.data : "";
+            let listingDate = "", expense = "";
+
+            // summary_data 파싱
+            const summaryMatch = html.match(/var\s+summary_data\s*=\s*(\{[\s\S]*?\});/);
+            if (summaryMatch) {
+              try {
+                const sd = JSON.parse(summaryMatch[1].replace(/'/g, '"'));
+                if (sd.LIST_DT) listingDate = sd.LIST_DT;
+                if (sd.TOT_REPORT) expense = sd.TOT_REPORT;
+              } catch {}
+            }
+
+            // product_summary_data 파싱
+            const productMatch = html.match(/var\s+product_summary_data\s*=\s*(\{[\s\S]*?\});/);
+            if (productMatch) {
+              try {
+                const pd = JSON.parse(productMatch[1].replace(/'/g, '"'));
+                if (!listingDate && pd.LIST_DT) listingDate = pd.LIST_DT;
+                if (!expense && pd.TOT_REPORT) expense = pd.TOT_REPORT;
+              } catch {}
+            }
+
+            wiseDataMap.set(w.etfCode, { listingDate, expense });
+          } catch {
+            wiseDataMap.set(w.etfCode, { listingDate: "", expense: "" });
+          }
+        }));
+      }
+
+      // 3) 결과 조합
+      const result: Record<string, any> = {};
+      watchlist.forEach((w) => {
+        const naver = etfMap.get(w.etfCode);
+        const wise = wiseDataMap.get(w.etfCode);
+        result[w.etfCode] = {
+          currentPrice: naver ? naver.nowVal : 0,
+          changeVal: naver ? naver.changeVal : 0,
+          changeRate: naver ? naver.changeRate : 0,
+          marketCap: naver ? naver.marketCap : 0,
+          nav: naver ? naver.nav : 0,
+          listingDate: wise?.listingDate || "",
+          expense: wise?.expense || "",
+        };
+      });
+
+      res.json(result);
+    } catch (error: any) {
+      console.error("Failed to get watchlist market data:", error);
+      res.status(500).json({ message: error.message || "관심 ETF 시세 조회 실패" });
+    }
+  });
+
+  // ========== 공지사항 ==========
+
+  // 활성 공지 목록 (누구나 조회 가능)
+  app.get("/api/notices", async (_req, res) => {
+    try {
+      const items = await storage.getActiveNotices();
+      res.json(items);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "공지사항 조회 실패" });
+    }
+  });
+
+  // 전체 공지 목록 (관리자 전용 - 비활성 포함)
+  app.get("/api/notices/all", requireAdmin, async (_req, res) => {
+    try {
+      const items = await storage.getNotices();
+      res.json(items);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "공지사항 조회 실패" });
+    }
+  });
+
+  // 공지 추가 (관리자 전용)
+  app.post("/api/notices", requireAdmin, async (req, res) => {
+    try {
+      const { content, sortOrder, isActive } = req.body;
+      if (!content?.trim()) return res.status(400).json({ message: "공지 내용을 입력해주세요" });
+      const notice = await storage.createNotice({ content: content.trim(), sortOrder: sortOrder || 0, isActive: isActive !== false });
+      res.json(notice);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "공지 추가 실패" });
+    }
+  });
+
+  // 공지 수정 (관리자 전용)
+  app.put("/api/notices/:id", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { content, sortOrder, isActive } = req.body;
+      const updates: any = {};
+      if (content !== undefined) updates.content = content.trim();
+      if (sortOrder !== undefined) updates.sortOrder = sortOrder;
+      if (isActive !== undefined) updates.isActive = isActive;
+      const notice = await storage.updateNotice(id, updates);
+      res.json(notice);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "공지 수정 실패" });
+    }
+  });
+
+  // 공지 삭제 (관리자 전용)
+  app.delete("/api/notices/:id", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.deleteNotice(id);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "공지 삭제 실패" });
+    }
+  });
+
+  // ========== 스팀 포스팅 ==========
+
+  // 스팀 포스팅 이력 조회
+  app.get("/api/steem-posts", requireAdmin, async (_req, res) => {
+    try {
+      const posts = await storage.getSteemPosts(50);
+      res.json(posts);
+    } catch (error: any) {
+      console.error("[Steem] Failed to get posts:", error.message);
+      res.status(500).json({ message: "스팀 포스팅 이력 조회 실패" });
+    }
+  });
+
+  // 스팀 포스팅 단건 조회
+  app.get("/api/steem-posts/:id", requireAdmin, async (req, res) => {
+    try {
+      const post = await storage.getSteemPost(parseInt(req.params.id));
+      if (!post) return res.status(404).json({ message: "포스팅을 찾을 수 없습니다" });
+      res.json(post);
+    } catch (error: any) {
+      console.error("[Steem] Failed to get post:", error.message);
+      res.status(500).json({ message: "스팀 포스팅 조회 실패" });
+    }
+  });
+
+  // 스팀 포스팅 저장 (draft 또는 published)
+  app.post("/api/steem-posts", requireAdmin, async (req, res) => {
+    try {
+      const { author, permlink, title, body, tags, category, status, steemUrl, txId } = req.body;
+      if (!author || !title || !body) {
+        return res.status(400).json({ message: "author, title, body는 필수입니다" });
+      }
+      const newPost = await storage.createSteemPost({
+        author,
+        permlink: permlink || "",
+        title,
+        body,
+        tags: typeof tags === "string" ? tags : JSON.stringify(tags || []),
+        category: category || "kr",
+        status: status || "draft",
+        steemUrl: steemUrl || null,
+        txId: txId || null,
+        errorMessage: null,
+      });
+      res.status(201).json(newPost);
+    } catch (error: any) {
+      console.error("[Steem] Failed to create post:", error.message);
+      res.status(500).json({ message: "스팀 포스팅 저장 실패" });
+    }
+  });
+
+  // 스팀 포스팅 수정
+  app.put("/api/steem-posts/:id", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const updates = req.body;
+      if (updates.tags && typeof updates.tags !== "string") {
+        updates.tags = JSON.stringify(updates.tags);
+      }
+      const updated = await storage.updateSteemPost(id, updates);
+      if (!updated) return res.status(404).json({ message: "포스팅을 찾을 수 없습니다" });
+      res.json(updated);
+    } catch (error: any) {
+      console.error("[Steem] Failed to update post:", error.message);
+      res.status(500).json({ message: "스팀 포스팅 수정 실패" });
+    }
+  });
+
+  // 스팀 포스팅 삭제
+  app.delete("/api/steem-posts/:id", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.deleteSteemPost(id);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("[Steem] Failed to delete post:", error.message);
+      res.status(500).json({ message: "스팀 포스팅 삭제 실패" });
+    }
+  });
+
+  // ========== 신규ETF 관리 (저장된 ETF) ==========
+
+  // 저장된 ETF 목록 조회
+  app.get("/api/saved-etfs", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId || undefined;
+      const etfs = await storage.getSavedEtfs(userId);
+      res.json(etfs);
+    } catch (error: any) {
+      console.error("Failed to get saved ETFs:", error);
+      res.status(500).json({ message: error.message || "저장된 ETF 조회 실패" });
+    }
+  });
+
+  // 저장된 ETF 상세 조회
+  app.get("/api/saved-etfs/:id", requireUser, async (req, res) => {
+    try {
+      const etf = await storage.getSavedEtf(Number(req.params.id));
+      if (!etf) return res.status(404).json({ message: "ETF를 찾을 수 없습니다" });
+      res.json(etf);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "ETF 조회 실패" });
+    }
+  });
+
+  // ETF 신규 등록 (Admin 전용)
+  app.post("/api/saved-etfs", requireAdmin, async (req, res) => {
+    try {
+      const userId = req.session?.userId || null;
+      const etf = await storage.createSavedEtf({ ...req.body, userId });
+      console.log(`[SavedETF] Created: ${etf.etfName} (${etf.etfCode})`);
+      res.status(201).json(etf);
+    } catch (error: any) {
+      console.error("Failed to create saved ETF:", error);
+      res.status(500).json({ message: error.message || "ETF 등록 실패" });
+    }
+  });
+
+  // ETF 수정 (Admin 전용)
+  app.put("/api/saved-etfs/:id", requireAdmin, async (req, res) => {
+    try {
+      const etf = await storage.updateSavedEtf(Number(req.params.id), req.body);
+      console.log(`[SavedETF] Updated: ${etf.etfName} (${etf.etfCode})`);
+      res.json(etf);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "ETF 수정 실패" });
+    }
+  });
+
+  // ETF 삭제 (Admin 전용)
+  app.delete("/api/saved-etfs/:id", requireAdmin, async (req, res) => {
+    try {
+      await storage.deleteSavedEtf(Number(req.params.id));
+      console.log(`[SavedETF] Deleted: id=${req.params.id}`);
+      res.status(204).send();
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "ETF 삭제 실패" });
+    }
+  });
+
+  // ETF 상세 정보 수집 (네이버 + WiseReport에서 개요 정보 추출)
+  app.get("/api/etf/detail-info/:code", async (req, res) => {
+    try {
+      const etfCode = req.params.code;
+      if (!etfCode || !/^[0-9A-Za-z]{6}$/.test(etfCode)) {
+        return res.status(400).json({ message: "유효한 6자리 ETF 코드를 입력해주세요." });
+      }
+
+      const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+      let etfName = "", category = "", assetManager = "", listingDate = "";
+      let totalAsset = "", expense = "", benchmark = "";
+      let recentPrice = "", recentChange = "";
+
+      // 1. 네이버 금융에서 기본 시세 정보 + 2. WiseReport 개요 정보 (병렬 요청)
+      const [, , componentResult] = await Promise.all([
+        // 1-a. 네이버 시세
+        (async () => {
+          try {
+            const naverRes = await axios.get(
+              `https://polling.finance.naver.com/api/realtime/domestic/stock/${etfCode}`,
+              { headers: { "User-Agent": UA }, timeout: 8000 }
+            );
+            const datas = naverRes.data?.datas;
+            if (datas && datas.length > 0) {
+              const d = datas[0];
+              etfName = d.stockName || "";
+              recentPrice = d.closePrice?.toString().replace(/,/g, "") || "";
+              recentChange = d.fluctuationsRatio || "";
+            }
+          } catch (err: any) {
+            console.log(`[ETF Detail] Naver price failed: ${err.message}`);
+          }
+        })(),
+        // 1-b. WiseReport 개요
+        (async () => {
+          try {
+            const wrRes = await axios.get(
+              `https://navercomp.wisereport.co.kr/v2/ETF/Index.aspx`,
+              { params: { cn: "", cmp_cd: etfCode, menuType: "block" }, headers: { "User-Agent": UA }, timeout: 15000 }
+            );
+            const html = typeof wrRes.data === "string" ? wrRes.data : "";
+
+            // summary_data에서 개요 추출
+            const summaryMatch = html.match(/var\s+summary_data\s*=\s*(\{[^}]+\});/);
+            if (summaryMatch) {
+              try {
+                const summary = JSON.parse(summaryMatch[1]);
+                if (!etfName) etfName = summary.CMP_KOR || "";
+                assetManager = summary.ISSUE_NM_KOR || "";
+                category = summary.ETF_TYP_SVC_NM || "";
+                expense = summary.TOT_PAY ? summary.TOT_PAY + "%" : "";
+                benchmark = summary.BASE_IDX_NM_KOR || "";
+              } catch { /* ignore */ }
+            }
+
+            // product_summary_data에서 상장일 등 추가 정보 추출
+            const productMatch = html.match(/var\s+product_summary_data\s*=\s*(\{[^}]+\});/);
+            if (productMatch) {
+              try {
+                const product = JSON.parse(productMatch[1]);
+                if (!listingDate) listingDate = product.LIST_DT || product.FIRST_SETTLE_DT || "";
+                if (!assetManager) assetManager = product.ISSUE_NM_KOR || "";
+                if (!benchmark) benchmark = product.BASE_IDX_NM_KOR || "";
+              } catch { /* ignore */ }
+            }
+
+            // status_data에서 시가총액 추출
+            const statusMatch = html.match(/var\s+status_data\s*=\s*(\{[^}]+\});/);
+            if (statusMatch) {
+              try {
+                const status = JSON.parse(statusMatch[1]);
+                if (!totalAsset && status.MKT_VAL) totalAsset = status.MKT_VAL + "억원";
+              } catch { /* ignore */ }
+            }
+
+            // HTML 파싱으로 추가 정보 추출
+            const $ = cheerio.load(html);
+            if (!totalAsset) {
+              $("th:contains('순자산')").each((_, el) => {
+                const val = $(el).next("td").text().trim();
+                if (val) totalAsset = val;
+              });
+            }
+            if (!expense) {
+              $("th:contains('보수')").each((_, el) => {
+                const val = $(el).next("td").text().trim();
+                if (val) expense = val;
+              });
+            }
+          } catch (err: any) {
+            console.log(`[ETF Detail] WiseReport overview failed: ${err.message}`);
+          }
+
+          // Naver ETF 상세 페이지에서 추가 정보
+          try {
+            const naverDetailRes = await axios.get(
+              `https://finance.naver.com/item/main.naver?code=${etfCode}`,
+              { headers: { "User-Agent": UA }, timeout: 8000 }
+            );
+            const $ = cheerio.load(naverDetailRes.data);
+            if (!assetManager) {
+              $(".table_kwd_info th:contains('운용')").each((_, el) => {
+                const val = $(el).next("td").text().trim();
+                if (val) assetManager = val;
+              });
+            }
+            if (!totalAsset) {
+              $(".table_kwd_info th:contains('순자산')").each((_, el) => {
+                const val = $(el).next("td").text().trim();
+                if (val) totalAsset = val;
+              });
+            }
+            if (!benchmark) {
+              $(".table_kwd_info th:contains('기초지수'), .table_kwd_info th:contains('추적지수')").each((_, el) => {
+                const val = $(el).next("td").text().trim();
+                if (val) benchmark = val;
+              });
+            }
+          } catch { /* ignore */ }
+        })(),
+        // 2. getEtfComponents로 포트폴리오 구성 + 실시간 시세 (ETF실시간과 동일 로직)
+        (async () => {
+          try {
+            return await kisApi.getEtfComponents(etfCode);
+          } catch (err: any) {
+            console.log(`[ETF Detail] getEtfComponents failed: ${err.message}`);
+            return null;
+          }
+        })(),
+      ]);
+
+      // 포트폴리오 데이터를 EtfComponentStock 형태로 변환
+      const portfolioData = componentResult?.components?.map(c => ({
+        stockCode: c.stockCode || "",
+        name: c.stockName,
+        weight: c.weight,
+        quantity: c.quantity || 0,
+        price: c.price || "",
+        change: c.change || "",
+        changePercent: c.changePercent || "",
+        changeSign: c.changeSign || "",
+        volume: c.volume || "",
+      })) || [];
+
+      // getEtfComponents에서 ETF 이름을 가져온 경우 보완
+      if (!etfName && componentResult?.etfName) {
+        etfName = componentResult.etfName;
+      }
+
+      res.json({
+        etfCode,
+        etfName: etfName || `ETF ${etfCode}`,
+        category,
+        assetManager,
+        listingDate,
+        totalAsset,
+        expense,
+        benchmark,
+        recentPrice,
+        recentChange,
+        portfolioData,
+      });
+    } catch (error: any) {
+      console.error("Failed to get ETF detail info:", error);
+      res.status(500).json({ message: error.message || "ETF 상세 정보 조회 실패" });
+    }
+  });
+
+  // ========== AI 보고서 분석 (URL + 파일 첨부 지원) ==========
+  const multer = (await import("multer")).default;
+  const uploadStorage = multer.memoryStorage();
+  const upload = multer({ storage: uploadStorage, limits: { fileSize: 5 * 1024 * 1024 } }); // 5MB 제한
+
+  app.post("/api/report/ai-analyze", requireUser, upload.array("files", 5), async (req, res) => {
+    try {
+      const { prompt, urls } = req.body;
+      const files = (req as any).files as Express.Multer.File[] || [];
+      const parsedUrls: string[] = urls ? (typeof urls === "string" ? JSON.parse(urls) : urls) : [];
+
+      if (!prompt?.trim()) {
+        return res.status(400).json({ message: "프롬프트를 입력해주세요." });
+      }
+
+      // 1) URL 내용 크롤링
+      const urlContents: string[] = [];
+      for (const url of parsedUrls) {
+        if (!url.trim()) continue;
+        try {
+          console.log(`[AI Report] Fetching URL: ${url}`);
+          const urlRes = await axios.get(url.trim(), {
+            headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+            timeout: 10000,
+            responseType: "text",
+          });
+          const $ = cheerio.load(urlRes.data);
+          // 불필요한 태그 제거
+          $("script, style, nav, footer, header, .ad, .advertisement, iframe, noscript").remove();
+          // 핵심 텍스트 추출
+          const bodyText = $("article, main, .content, .article-body, #content, body")
+            .first()
+            .text()
+            .replace(/\s+/g, " ")
+            .trim();
+          const truncated = bodyText.substring(0, 5000); // URL당 최대 5000자
+          if (truncated) {
+            urlContents.push(`\n--- [URL: ${url}] ---\n${truncated}\n`);
+            console.log(`[AI Report] URL fetched: ${url} (${truncated.length} chars)`);
+          }
+        } catch (err: any) {
+          console.warn(`[AI Report] Failed to fetch URL ${url}: ${err.message}`);
+          urlContents.push(`\n--- [URL: ${url}] ---\n(불러오기 실패: ${err.message})\n`);
+        }
+      }
+
+      // 2) 첨부 파일 내용 읽기
+      const fileContents: string[] = [];
+      for (const file of files) {
+        try {
+          let content = "";
+          const ext = file.originalname.split(".").pop()?.toLowerCase();
+          
+          if (["txt", "csv", "json", "md", "log"].includes(ext || "")) {
+            content = file.buffer.toString("utf-8");
+          } else if (ext === "html" || ext === "htm") {
+            const $ = cheerio.load(file.buffer.toString("utf-8"));
+            $("script, style").remove();
+            content = $.text().replace(/\s+/g, " ").trim();
+          } else {
+            // 바이너리 파일은 이름만 기록
+            content = `(바이너리 파일 - 텍스트 추출 불가: ${file.originalname}, ${file.size} bytes)`;
+          }
+          
+          const truncated = content.substring(0, 5000); // 파일당 최대 5000자
+          fileContents.push(`\n--- [파일: ${file.originalname} (${(file.size / 1024).toFixed(1)}KB)] ---\n${truncated}\n`);
+          console.log(`[AI Report] File processed: ${file.originalname} (${truncated.length} chars)`);
+        } catch (err: any) {
+          console.warn(`[AI Report] Failed to process file ${file.originalname}: ${err.message}`);
+          fileContents.push(`\n--- [파일: ${file.originalname}] ---\n(처리 실패: ${err.message})\n`);
+        }
+      }
+
+      // 3) 시장 데이터 수집 (기존 로직 활용)
+      const [indices, volumeRanking, news] = await Promise.all([
+        kisApi.getMarketIndices().catch(() => []),
+        kisApi.getVolumeRanking().catch(() => []),
+        (async () => {
+          try {
+            const newsRes = await axios.get("https://finance.naver.com/news/mainnews.naver", {
+              headers: { "User-Agent": "Mozilla/5.0" }, timeout: 5000,
+            });
+            const $ = cheerio.load(newsRes.data);
+            const items: string[] = [];
+            $(".mainNewsList li, .news_list li").each((i, el) => {
+              if (i >= 10) return false;
+              const title = $(el).find("a").first().text().trim();
+              if (title) items.push(title);
+            });
+            return items;
+          } catch { return []; }
+        })(),
+      ]);
+
+      const today = new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric", weekday: "long" });
+      const marketContext = indices.length > 0
+        ? indices.map((idx: any) => `${idx.name}: ${parseFloat(idx.price).toLocaleString()} (${["1","2"].includes(idx.changeSign) ? "+" : idx.changeSign === "3" ? "" : "-"}${Math.abs(parseFloat(idx.changePercent)).toFixed(2)}%)`).join(", ")
+        : "시장 데이터 미수집";
+      
+      const volumeContext = volumeRanking.length > 0
+        ? volumeRanking.slice(0, 5).map((v: any, i: number) => `${i+1}. ${v.stockName}(${v.stockCode}) ${parseInt(v.price).toLocaleString()}원 ${["1","2"].includes(v.changeSign) ? "+" : v.changeSign === "3" ? "" : "-"}${Math.abs(parseFloat(v.changePercent)).toFixed(2)}%`).join("\n")
+        : "데이터 없음";
+
+      const newsContext = news.length > 0
+        ? news.map((n: string, i: number) => `${i+1}. ${n}`).join("\n")
+        : "뉴스 없음";
+
+      // 4) 최종 프롬프트 구성
+      const systemRole = `당신은 한국 금융시장 전문 애널리스트입니다. 제공된 모든 데이터(시장 데이터, 첨부 URL, 첨부 파일)를 종합적으로 분석하여 상세한 한국어 보고서를 작성해주세요. 반드시 30줄 이상으로 작성하세요.`;
+
+      let dataSection = `[자동 수집 데이터]\n📅 날짜: ${today}\n📊 시장 현황: ${marketContext}\n\n🔥 거래량 상위 종목:\n${volumeContext}\n\n📰 주요 뉴스:\n${newsContext}`;
+
+      if (urlContents.length > 0) {
+        dataSection += `\n\n[참고 URL 내용]\n${urlContents.join("")}`;
+      }
+      if (fileContents.length > 0) {
+        dataSection += `\n\n[첨부 파일 내용]\n${fileContents.join("")}`;
+      }
+
+      const finalPrompt = `${systemRole}\n\n${dataSection}\n\n[분석 요청]\n${prompt}`;
+
+      console.log(`[AI Report] Final prompt length: ${finalPrompt.length} chars (${urlContents.length} URLs, ${fileContents.length} files)`);
+
+      // 5) AI 호출
+      const analysis = await callAI(finalPrompt);
+
+      res.json({
+        analysis,
+        analyzedAt: new Date().toLocaleString("ko-KR"),
+        dataPoints: {
+          indicesCount: indices.length,
+          volumeCount: volumeRanking.length,
+          newsCount: news.length,
+          urlCount: parsedUrls.length,
+          fileCount: files.length,
+          market: marketContext,
+        },
+      });
+    } catch (error: any) {
+      console.error("[AI Report] Failed:", error.message);
+      res.status(500).json({ message: `AI 분석 실패: ${error.message}` });
     }
   });
 
@@ -2267,6 +3320,182 @@ ${newsSummary}`;
   // 404 핸들러는 registerRoutes 함수에서 제거
   // Vite/serveStatic 미들웨어가 먼저 처리한 후에 등록되어야 함
   // server/index.ts에서 별도로 처리됨
+
+  // ========== 손절 감시 백그라운드 루프 (개선판) ==========
+  // 개선 사항:
+  //  1. 네이버 bulk API로 일괄 시세 조회 (1회 요청으로 전종목 확인, KIS rate limit 회피)
+  //  2. 장중 10초 간격, 장외 시간 자동 비활성화
+  //  3. 트레일링 스탑 최고가 실시간 업데이트
+  //  4. 마지막 체크 시각/현재가 캐시 (프론트엔드에서 조회 가능)
+  const STOP_LOSS_CHECK_INTERVAL_MARKET = 10 * 1000;   // 장중 10초
+  const STOP_LOSS_CHECK_INTERVAL_IDLE = 60 * 1000;     // 장외 60초 (활성 주문 유무 확인용)
+  let stopLossLoopRunning = false;
+  // 마지막 체크 시각 & 현재가 캐시 (프론트엔드용)
+  const stopLossLatestPrices = new Map<string, { price: number; changePercent: string; checkedAt: Date }>();
+  let stopLossLastCheckedAt: Date | null = null;
+
+  function isMarketOpen(): boolean {
+    const now = new Date();
+    const kstHour = (now.getUTCHours() + 9) % 24;
+    const kstMinute = now.getUTCMinutes();
+    const kstTime = kstHour * 100 + kstMinute;
+    // 장 운영: 09:00 ~ 15:30 (15:30 정규장 종료)
+    return kstTime >= 900 && kstTime <= 1530;
+  }
+
+  async function stopLossMonitorLoop() {
+    if (stopLossLoopRunning) return;
+    stopLossLoopRunning = true;
+
+    try {
+      const activeOrders = await storage.getActiveStopLossOrders();
+      if (activeOrders.length === 0) return;
+
+      // 장 시간 외에는 가격 확인 스킵
+      if (!isMarketOpen()) return;
+
+      // 1. 네이버 bulk API로 모든 종목의 현재가를 한번에 조회
+      const stockCodes = Array.from(new Set(activeOrders.map(o => o.stockCode)));
+      const priceMap = await kisApi.fetchNaverBulkPrices(stockCodes);
+
+      if (priceMap.size === 0) {
+        console.log("[StopLoss] Bulk price fetch returned 0 results, skipping cycle");
+        return;
+      }
+
+      stopLossLastCheckedAt = new Date();
+      // 가격 캐시 업데이트
+      for (const [code, data] of Array.from(priceMap)) {
+        stopLossLatestPrices.set(code, {
+          price: Number(data.price),
+          changePercent: data.changePercent,
+          checkedAt: stopLossLastCheckedAt,
+        });
+      }
+
+      let triggeredCount = 0;
+      let trailingUpdated = 0;
+
+      // 2. 각 감시 주문에 대해 조건 확인
+      for (const sl of activeOrders) {
+        const priceData = priceMap.get(sl.stockCode);
+        if (!priceData) continue;
+
+        const currentPrice = Number(priceData.price);
+        if (currentPrice <= 0) continue;
+
+        let currentStopPrice = Number(sl.stopPrice);
+
+        // 트레일링 스탑: 최고가 갱신 시 손절가도 상향 조정
+        if (sl.stopType === "trailing") {
+          const prevHighest = Number(sl.highestPrice || sl.buyPrice);
+          if (currentPrice > prevHighest) {
+            const newStopPrice = Math.floor(currentPrice * (1 - Number(sl.stopLossPercent) / 100));
+            await storage.updateStopLossOrder(sl.id, {
+              highestPrice: String(currentPrice),
+              stopPrice: String(newStopPrice),
+            });
+            currentStopPrice = newStopPrice;
+            trailingUpdated++;
+          }
+        }
+
+        // 손절 조건 확인: 현재가 <= 손절가
+        if (currentPrice <= currentStopPrice) {
+          console.log(`[StopLoss] ⚡ TRIGGER: ${sl.stockName}(${sl.stockCode}) 현재가=${currentPrice} <= 손절가=${currentStopPrice}`);
+
+          const userCreds = sl.userId ? await getUserCredentialsById(sl.userId) : null;
+          let orderResult;
+          if (userCreds) {
+            orderResult = await kisApi.userPlaceOrder(userCreds.userId, userCreds.creds, {
+              stockCode: sl.stockCode,
+              orderType: "sell",
+              quantity: sl.quantity,
+              orderMethod: "market",
+            });
+          } else {
+            orderResult = await kisApi.placeOrder({
+              stockCode: sl.stockCode,
+              orderType: "sell",
+              quantity: sl.quantity,
+              orderMethod: "market",
+            });
+          }
+
+          // 주문 기록 저장
+          await storage.createTradingOrder({
+            stockCode: sl.stockCode,
+            stockName: sl.stockName || sl.stockCode,
+            orderType: "sell",
+            orderMethod: "market",
+            quantity: sl.quantity,
+            price: String(currentPrice),
+            totalAmount: String(currentPrice * sl.quantity),
+            status: orderResult.success ? "filled" : "failed",
+            kisOrderNo: orderResult.orderNo || null,
+            errorMessage: orderResult.success ? null : orderResult.message,
+            executedAt: orderResult.success ? new Date() : null,
+            userId: sl.userId,
+          });
+
+          // 감시 상태 업데이트
+          await storage.updateStopLossOrder(sl.id, {
+            status: orderResult.success ? "triggered" : "error",
+            kisOrderNo: orderResult.orderNo || null,
+            triggerPrice: String(currentPrice),
+            triggeredAt: new Date(),
+            errorMessage: orderResult.success ? null : orderResult.message,
+          });
+
+          triggeredCount++;
+          console.log(`[StopLoss] ${orderResult.success ? "✅ 매도 성공" : "❌ 매도 실패"}: ${sl.stockName} ${sl.quantity}주 @ 시장가 (발동가: ${currentPrice}원)`);
+        }
+      }
+
+      // 간결한 로그 (매 10초마다 모든 종목 상세는 불필요)
+      if (triggeredCount > 0 || trailingUpdated > 0) {
+        console.log(`[StopLoss] 감시 ${activeOrders.length}건 | 발동 ${triggeredCount}건 | 트레일링갱신 ${trailingUpdated}건`);
+      }
+    } catch (err: any) {
+      console.error("[StopLoss] Monitor error:", err.message);
+    } finally {
+      stopLossLoopRunning = false;
+    }
+  }
+
+  // 스마트 인터벌: 장중이면 10초, 장외면 60초
+  let stopLossTimer: ReturnType<typeof setTimeout> | null = null;
+  function scheduleNextStopLossCheck() {
+    const interval = isMarketOpen() ? STOP_LOSS_CHECK_INTERVAL_MARKET : STOP_LOSS_CHECK_INTERVAL_IDLE;
+    stopLossTimer = setTimeout(async () => {
+      await stopLossMonitorLoop();
+      scheduleNextStopLossCheck();
+    }, interval);
+  }
+  scheduleNextStopLossCheck();
+  console.log("[StopLoss Monitor] Background monitoring started (10s market / 60s idle)");
+
+  // 손절 감시 실시간 현재가 조회 API (프론트엔드용)
+  app.get("/api/trading/stop-loss/prices", requireUser, async (_req, res) => {
+    try {
+      const prices: Record<string, { price: number; changePercent: string; checkedAt: string }> = {};
+      for (const [code, data] of Array.from(stopLossLatestPrices)) {
+        prices[code] = {
+          price: data.price,
+          changePercent: data.changePercent,
+          checkedAt: data.checkedAt.toISOString(),
+        };
+      }
+      res.json({
+        prices,
+        lastCheckedAt: stopLossLastCheckedAt?.toISOString() || null,
+        isMarketOpen: isMarketOpen(),
+        interval: isMarketOpen() ? "10s" : "60s",
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
 
   return httpServer;
 }

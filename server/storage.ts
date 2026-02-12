@@ -6,6 +6,11 @@ import {
   bookmarks,
   users,
   userTradingConfigs,
+  stopLossOrders,
+  savedEtfs,
+  watchlistEtfs,
+  notices,
+  steemPosts,
   type EtfTrend,
   type InsertEtfTrend,
   type AutoTradeRule,
@@ -18,6 +23,16 @@ import {
   type InsertUser,
   type UserTradingConfig,
   type InsertUserTradingConfig,
+  type StopLossOrder,
+  type InsertStopLossOrder,
+  type SavedEtf,
+  type InsertSavedEtf,
+  type WatchlistEtf,
+  type InsertWatchlistEtf,
+  type Notice,
+  type InsertNotice,
+  type SteemPost,
+  type InsertSteemPost,
 } from "../shared/schema.js";
 import { eq, and, desc, isNull } from "drizzle-orm";
 
@@ -58,6 +73,33 @@ export interface IStorage {
   getUserTradingConfig(userId: number): Promise<UserTradingConfig | undefined>;
   upsertUserTradingConfig(config: InsertUserTradingConfig): Promise<UserTradingConfig>;
   deleteUserTradingConfig(userId: number): Promise<void>;
+
+  // Stop Loss Orders
+  getStopLossOrders(userId?: number): Promise<StopLossOrder[]>;
+  getActiveStopLossOrders(): Promise<StopLossOrder[]>;
+  createStopLossOrder(order: InsertStopLossOrder): Promise<StopLossOrder>;
+  updateStopLossOrder(id: number, updates: Partial<InsertStopLossOrder>): Promise<StopLossOrder>;
+  cancelStopLossOrder(id: number): Promise<void>;
+
+  // Watchlist ETFs (관심/추천 ETF)
+  getWatchlistEtfs(): Promise<WatchlistEtf[]>;
+  createWatchlistEtf(data: InsertWatchlistEtf): Promise<WatchlistEtf>;
+  updateWatchlistEtf(id: number, updates: Partial<InsertWatchlistEtf>): Promise<WatchlistEtf>;
+  deleteWatchlistEtf(id: number): Promise<void>;
+
+  // Notices (공지사항)
+  getNotices(): Promise<Notice[]>;
+  getActiveNotices(): Promise<Notice[]>;
+  createNotice(data: InsertNotice): Promise<Notice>;
+  updateNotice(id: number, updates: Partial<InsertNotice>): Promise<Notice>;
+  deleteNotice(id: number): Promise<void>;
+
+  // Steem Posts (스팀 포스팅)
+  getSteemPosts(limit?: number): Promise<SteemPost[]>;
+  getSteemPost(id: number): Promise<SteemPost | undefined>;
+  createSteemPost(data: InsertSteemPost): Promise<SteemPost>;
+  updateSteemPost(id: number, updates: Partial<InsertSteemPost>): Promise<SteemPost>;
+  deleteSteemPost(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -383,6 +425,303 @@ export class DatabaseStorage implements IStorage {
       });
     }
     await db.delete(userTradingConfigs).where(eq(userTradingConfigs.userId, userId));
+  }
+
+  // ========== Stop Loss Orders ==========
+
+  async getStopLossOrders(userId?: number): Promise<StopLossOrder[]> {
+    const condition = userId ? eq(stopLossOrders.userId, userId) : undefined;
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const query = db.select().from(stopLossOrders);
+        if (condition) return await query.where(condition).orderBy(desc(stopLossOrders.createdAt));
+        return await query.orderBy(desc(stopLossOrders.createdAt));
+      });
+    }
+    const query = db.select().from(stopLossOrders);
+    if (condition) return await query.where(condition).orderBy(desc(stopLossOrders.createdAt));
+    return await query.orderBy(desc(stopLossOrders.createdAt));
+  }
+
+  async getActiveStopLossOrders(): Promise<StopLossOrder[]> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(stopLossOrders)
+          .where(eq(stopLossOrders.status, "active"));
+      });
+    }
+    return await db.select().from(stopLossOrders)
+      .where(eq(stopLossOrders.status, "active"));
+  }
+
+  async createStopLossOrder(order: InsertStopLossOrder): Promise<StopLossOrder> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [newOrder] = await db.insert(stopLossOrders).values(order).returning();
+        return newOrder;
+      });
+    }
+    const [newOrder] = await db.insert(stopLossOrders).values(order).returning();
+    return newOrder;
+  }
+
+  async updateStopLossOrder(id: number, updates: Partial<InsertStopLossOrder>): Promise<StopLossOrder> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [updated] = await db.update(stopLossOrders)
+          .set(updates)
+          .where(eq(stopLossOrders.id, id))
+          .returning();
+        return updated;
+      });
+    }
+    const [updated] = await db.update(stopLossOrders)
+      .set(updates)
+      .where(eq(stopLossOrders.id, id))
+      .returning();
+    return updated;
+  }
+
+  async cancelStopLossOrder(id: number): Promise<void> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        await db.update(stopLossOrders)
+          .set({ status: "cancelled" })
+          .where(eq(stopLossOrders.id, id));
+      });
+    }
+    await db.update(stopLossOrders)
+      .set({ status: "cancelled" })
+      .where(eq(stopLossOrders.id, id));
+  }
+
+  // ========== Saved ETFs (신규ETF 관리) ==========
+
+  async getSavedEtfs(userId?: number): Promise<SavedEtf[]> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        if (userId) {
+          return await db.select().from(savedEtfs).where(eq(savedEtfs.userId, userId)).orderBy(desc(savedEtfs.updatedAt));
+        }
+        return await db.select().from(savedEtfs).orderBy(desc(savedEtfs.updatedAt));
+      });
+    }
+    if (userId) {
+      return await db.select().from(savedEtfs).where(eq(savedEtfs.userId, userId)).orderBy(desc(savedEtfs.updatedAt));
+    }
+    return await db.select().from(savedEtfs).orderBy(desc(savedEtfs.updatedAt));
+  }
+
+  async getSavedEtf(id: number): Promise<SavedEtf | undefined> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [etf] = await db.select().from(savedEtfs).where(eq(savedEtfs.id, id));
+        return etf;
+      });
+    }
+    const [etf] = await db.select().from(savedEtfs).where(eq(savedEtfs.id, id));
+    return etf;
+  }
+
+  async createSavedEtf(data: InsertSavedEtf): Promise<SavedEtf> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [newEtf] = await db.insert(savedEtfs).values(data).returning();
+        return newEtf;
+      });
+    }
+    const [newEtf] = await db.insert(savedEtfs).values(data).returning();
+    return newEtf;
+  }
+
+  async updateSavedEtf(id: number, updates: Partial<InsertSavedEtf>): Promise<SavedEtf> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [updated] = await db.update(savedEtfs)
+          .set({ ...updates, updatedAt: new Date() })
+          .where(eq(savedEtfs.id, id))
+          .returning();
+        return updated;
+      });
+    }
+    const [updated] = await db.update(savedEtfs)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(savedEtfs.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteSavedEtf(id: number): Promise<void> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        await db.delete(savedEtfs).where(eq(savedEtfs.id, id));
+      });
+    }
+    await db.delete(savedEtfs).where(eq(savedEtfs.id, id));
+  }
+
+  // ========== Watchlist ETFs (관심/추천 ETF) ==========
+
+  async getWatchlistEtfs(): Promise<WatchlistEtf[]> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(watchlistEtfs).orderBy(desc(watchlistEtfs.createdAt));
+      });
+    }
+    return await db.select().from(watchlistEtfs).orderBy(desc(watchlistEtfs.createdAt));
+  }
+
+  async createWatchlistEtf(data: InsertWatchlistEtf): Promise<WatchlistEtf> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [newEtf] = await db.insert(watchlistEtfs).values(data).returning();
+        return newEtf;
+      });
+    }
+    const [newEtf] = await db.insert(watchlistEtfs).values(data).returning();
+    return newEtf;
+  }
+
+  async updateWatchlistEtf(id: number, updates: Partial<InsertWatchlistEtf>): Promise<WatchlistEtf> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [updated] = await db.update(watchlistEtfs)
+          .set(updates)
+          .where(eq(watchlistEtfs.id, id))
+          .returning();
+        return updated;
+      });
+    }
+    const [updated] = await db.update(watchlistEtfs)
+      .set(updates)
+      .where(eq(watchlistEtfs.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteWatchlistEtf(id: number): Promise<void> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        await db.delete(watchlistEtfs).where(eq(watchlistEtfs.id, id));
+      });
+    }
+    await db.delete(watchlistEtfs).where(eq(watchlistEtfs.id, id));
+  }
+
+  // ========== Notices (공지사항) ==========
+
+  async getNotices(): Promise<Notice[]> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(notices).orderBy(notices.sortOrder, desc(notices.createdAt));
+      });
+    }
+    return await db.select().from(notices).orderBy(notices.sortOrder, desc(notices.createdAt));
+  }
+
+  async getActiveNotices(): Promise<Notice[]> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(notices).where(eq(notices.isActive, true)).orderBy(notices.sortOrder, desc(notices.createdAt));
+      });
+    }
+    return await db.select().from(notices).where(eq(notices.isActive, true)).orderBy(notices.sortOrder, desc(notices.createdAt));
+  }
+
+  async createNotice(data: InsertNotice): Promise<Notice> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [newNotice] = await db.insert(notices).values(data).returning();
+        return newNotice;
+      });
+    }
+    const [newNotice] = await db.insert(notices).values(data).returning();
+    return newNotice;
+  }
+
+  async updateNotice(id: number, updates: Partial<InsertNotice>): Promise<Notice> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [updated] = await db.update(notices)
+          .set({ ...updates, updatedAt: new Date() })
+          .where(eq(notices.id, id))
+          .returning();
+        return updated;
+      });
+    }
+    const [updated] = await db.update(notices)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(notices.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteNotice(id: number): Promise<void> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        await db.delete(notices).where(eq(notices.id, id));
+      });
+    }
+    await db.delete(notices).where(eq(notices.id, id));
+  }
+
+  // ========== Steem Posts (스팀 포스팅) ==========
+
+  async getSteemPosts(limit: number = 50): Promise<SteemPost[]> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(steemPosts).orderBy(desc(steemPosts.createdAt)).limit(limit);
+      });
+    }
+    return await db.select().from(steemPosts).orderBy(desc(steemPosts.createdAt)).limit(limit);
+  }
+
+  async getSteemPost(id: number): Promise<SteemPost | undefined> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [post] = await db.select().from(steemPosts).where(eq(steemPosts.id, id));
+        return post;
+      });
+    }
+    const [post] = await db.select().from(steemPosts).where(eq(steemPosts.id, id));
+    return post;
+  }
+
+  async createSteemPost(data: InsertSteemPost): Promise<SteemPost> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [newPost] = await db.insert(steemPosts).values(data).returning();
+        return newPost;
+      });
+    }
+    const [newPost] = await db.insert(steemPosts).values(data).returning();
+    return newPost;
+  }
+
+  async updateSteemPost(id: number, updates: Partial<InsertSteemPost>): Promise<SteemPost> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [updated] = await db.update(steemPosts)
+          .set(updates)
+          .where(eq(steemPosts.id, id))
+          .returning();
+        return updated;
+      });
+    }
+    const [updated] = await db.update(steemPosts)
+      .set(updates)
+      .where(eq(steemPosts.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteSteemPost(id: number): Promise<void> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        await db.delete(steemPosts).where(eq(steemPosts.id, id));
+      });
+    }
+    await db.delete(steemPosts).where(eq(steemPosts.id, id));
   }
 }
 

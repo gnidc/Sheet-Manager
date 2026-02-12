@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from "react";
-import { Link } from "wouter";
+import React, { useState, useMemo, useEffect } from "react";
+import { Link, useSearch } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -166,6 +166,12 @@ export default function Trading() {
   const { isAdmin, isLoggedIn, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
   const canAccess = isAdmin || isLoggedIn;
+  
+  // URL 쿼리 파라미터에서 종목 코드/이름 추출
+  const searchString = useSearch();
+  const urlParams = new URLSearchParams(searchString);
+  const urlCode = urlParams.get("code") || "";
+  const urlName = urlParams.get("name") || "";
 
   // KIS API 상태
   const { data: status, isLoading: statusLoading, refetch: refetchStatus } = useQuery<TradingStatus>({
@@ -260,8 +266,8 @@ export default function Trading() {
         ) : !status?.tradingConfigured && !statusLoading ? (
           isAdmin ? <AdminSetupGuide status={status} /> : <UserSetupGuide onComplete={() => { refetchConfig(); refetchStatus(); }} />
         ) : (
-          <Tabs defaultValue="account" className="space-y-8">
-            <TabsList className="grid w-full grid-cols-4 max-w-2xl mx-auto">
+          <Tabs defaultValue={urlCode ? "order" : "account"} className="space-y-8">
+            <TabsList className="grid w-full grid-cols-5 max-w-3xl mx-auto">
               <TabsTrigger value="account" className="gap-2">
                 <Wallet className="h-4 w-4" />
                 계좌
@@ -269,6 +275,10 @@ export default function Trading() {
               <TabsTrigger value="order" className="gap-2">
                 <TrendingUp className="h-4 w-4" />
                 주문
+              </TabsTrigger>
+              <TabsTrigger value="stoploss" className="gap-2">
+                <ShieldAlert className="h-4 w-4" />
+                손절감시
               </TabsTrigger>
               <TabsTrigger value="auto" className="gap-2">
                 <Zap className="h-4 w-4" />
@@ -284,7 +294,10 @@ export default function Trading() {
               <AccountSection />
             </TabsContent>
             <TabsContent value="order">
-              <OrderSection />
+              <OrderSection initialCode={urlCode} initialName={urlName} />
+            </TabsContent>
+            <TabsContent value="stoploss">
+              <StopLossSection />
             </TabsContent>
             <TabsContent value="auto">
               <AutoTradeSection />
@@ -756,16 +769,23 @@ function AccountSection() {
 }
 
 // ========== Order Section ==========
-function OrderSection() {
+function OrderSection({ initialCode, initialName }: { initialCode?: string; initialName?: string }) {
   const { toast } = useToast();
-  const [searchTerm, setSearchTerm] = useState("");
-  const [selectedStock, setSelectedStock] = useState<{ code: string; name: string } | null>(null);
+  const [searchTerm, setSearchTerm] = useState(initialName || initialCode || "");
+  const [selectedStock, setSelectedStock] = useState<{ code: string; name: string } | null>(
+    initialCode ? { code: initialCode, name: initialName || initialCode } : null
+  );
   const [orderType, setOrderType] = useState<"buy" | "sell">("buy");
   const [orderMethod, setOrderMethod] = useState<"limit" | "market">("limit");
   const [quantity, setQuantity] = useState("");
   const [price, setPrice] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [codeSearching, setCodeSearching] = useState(false);
+
+  // 손절 설정 상태
+  const [enableStopLoss, setEnableStopLoss] = useState(false);
+  const [stopLossPercent, setStopLossPercent] = useState("3");
+  const [stopType, setStopType] = useState<"simple" | "trailing">("simple");
 
   // 현재가 조회 (REST)
   const { data: priceData, isLoading: priceLoading, refetch: refetchPrice } = useQuery({
@@ -792,6 +812,14 @@ function OrderSection() {
     }
   }, [priceData?.stockName, priceData?.price]);
 
+  // 손절 감시 등록 mutation
+  const stopLossMutation = useMutation({
+    mutationFn: async (params: { stockCode: string; stockName: string; buyPrice: number; quantity: number; stopLossPercent: number; stopType: string }) => {
+      const res = await apiRequest("POST", "/api/trading/stop-loss", params);
+      return res.json();
+    },
+  });
+
   const orderMutation = useMutation({
     mutationFn: async () => {
       const res = await apiRequest("POST", "/api/trading/order", {
@@ -804,9 +832,33 @@ function OrderSection() {
       });
       return res.json();
     },
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
       if (data.success) {
         toast({ title: "주문 성공", description: `${selectedStock!.name || selectedStock!.code} ${orderType === "buy" ? "매수" : "매도"} 주문이 체결되었습니다.` });
+
+        // 매수 주문 성공 + 손절 설정 활성화 시 → 자동으로 손절 감시 등록
+        if (orderType === "buy" && enableStopLoss && Number(stopLossPercent) > 0) {
+          const buyPx = orderMethod === "limit" ? Number(price) : Number(priceData?.price || 0);
+          try {
+            await stopLossMutation.mutateAsync({
+              stockCode: selectedStock!.code,
+              stockName: selectedStock!.name || priceData?.stockName || selectedStock!.code,
+              buyPrice: buyPx,
+              quantity: Number(quantity),
+              stopLossPercent: Number(stopLossPercent),
+              stopType,
+            });
+            const stopPx = Math.floor(buyPx * (1 - Number(stopLossPercent) / 100));
+            toast({
+              title: "손절 감시 등록",
+              description: `${stopType === "trailing" ? "트레일링 스탑" : "손절가"} ${stopLossPercent}% (${stopPx.toLocaleString()}원) 감시가 활성화되었습니다.`,
+            });
+            queryClient.invalidateQueries({ queryKey: ["/api/trading/stop-loss"] });
+          } catch (slErr: any) {
+            toast({ title: "손절 감시 등록 실패", description: slErr.message, variant: "destructive" });
+          }
+        }
+
         setQuantity("");
         setPrice("");
         queryClient.invalidateQueries({ queryKey: ["/api/trading/orders"] });
@@ -1044,6 +1096,123 @@ function OrderSection() {
               </div>
             )}
 
+            {/* 손절가 설정 (매수 주문 시에만 표시) */}
+            {orderType === "buy" && (
+              <div className="space-y-3 border rounded-lg p-3 bg-orange-50/50 dark:bg-orange-950/20">
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm font-medium flex items-center gap-1.5">
+                    <ShieldAlert className="w-4 h-4 text-orange-500" />
+                    손절가 설정
+                  </Label>
+                  <Switch
+                    checked={enableStopLoss}
+                    onCheckedChange={setEnableStopLoss}
+                  />
+                </div>
+
+                {enableStopLoss && (
+                  <div className="space-y-3 animate-in slide-in-from-top-2 duration-200">
+                    {/* 손절 유형 선택 */}
+                    <div className="space-y-1.5">
+                      <Label className="text-xs text-muted-foreground">손절 유형</Label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button
+                          type="button"
+                          variant={stopType === "simple" ? "default" : "outline"}
+                          size="sm"
+                          className={`text-xs ${stopType === "simple" ? "bg-orange-500 hover:bg-orange-600 text-white" : ""}`}
+                          onClick={() => setStopType("simple")}
+                        >
+                          <ShieldCheck className="w-3.5 h-3.5 mr-1" />
+                          단순 손절가
+                        </Button>
+                        <Button
+                          type="button"
+                          variant={stopType === "trailing" ? "default" : "outline"}
+                          size="sm"
+                          className={`text-xs ${stopType === "trailing" ? "bg-purple-500 hover:bg-purple-600 text-white" : ""}`}
+                          onClick={() => setStopType("trailing")}
+                        >
+                          <TrendingUp className="w-3.5 h-3.5 mr-1" />
+                          트레일링 스탑
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* 손절 비율 입력 */}
+                    <div className="space-y-1.5">
+                      <Label className="text-xs text-muted-foreground">
+                        손절 비율 (%)
+                      </Label>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="number"
+                          placeholder="3"
+                          value={stopLossPercent}
+                          onChange={(e) => setStopLossPercent(e.target.value)}
+                          min="0.5"
+                          max="50"
+                          step="0.5"
+                          className="flex-1"
+                        />
+                        <span className="text-sm text-muted-foreground font-medium">%</span>
+                      </div>
+                      {/* 빠른 선택 버튼 */}
+                      <div className="flex gap-1.5 flex-wrap">
+                        {["1", "2", "3", "5", "7", "10"].map((pct) => (
+                          <Button
+                            key={pct}
+                            type="button"
+                            variant={stopLossPercent === pct ? "default" : "outline"}
+                            size="sm"
+                            className="h-6 text-xs px-2"
+                            onClick={() => setStopLossPercent(pct)}
+                          >
+                            {pct}%
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* 손절가 미리보기 */}
+                    {(() => {
+                      const buyPx = orderMethod === "limit" && price ? Number(price) : Number(priceData?.price || 0);
+                      const slPct = Number(stopLossPercent || 0);
+                      if (buyPx > 0 && slPct > 0) {
+                        const stopPx = Math.floor(buyPx * (1 - slPct / 100));
+                        return (
+                          <div className="bg-orange-100/60 dark:bg-orange-900/30 rounded-md p-2.5 text-xs space-y-1">
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">기준가(매수가)</span>
+                              <span className="font-medium">{buyPx.toLocaleString()}원</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">
+                                {stopType === "trailing" ? "트레일링 손절가" : "손절가"} (-{slPct}%)
+                              </span>
+                              <span className="font-bold text-red-500">{stopPx.toLocaleString()}원</span>
+                            </div>
+                            {stopType === "trailing" && (
+                              <div className="text-[11px] text-muted-foreground mt-1 leading-relaxed">
+                                💡 주가 상승 시 최고가를 추적하여 손절가가 자동으로 상향됩니다.
+                                <br />최고가 대비 {slPct}% 하락 시 시장가 매도됩니다.
+                              </div>
+                            )}
+                            {stopType === "simple" && (
+                              <div className="text-[11px] text-muted-foreground mt-1 leading-relaxed">
+                                💡 현재가가 {stopPx.toLocaleString()}원 이하로 하락 시 시장가 매도됩니다.
+                              </div>
+                            )}
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* 예상 금액 */}
             {totalAmount > 0 && (
               <div className="bg-muted/50 rounded-lg p-3">
@@ -1091,6 +1260,27 @@ function OrderSection() {
                     )}
                     <span className="text-muted-foreground">예상 금액</span>
                     <span className="font-bold">{totalAmount.toLocaleString()}원</span>
+                    {orderType === "buy" && enableStopLoss && Number(stopLossPercent) > 0 && (
+                      <>
+                        <span className="text-muted-foreground col-span-2 border-t pt-2 mt-1 flex items-center gap-1">
+                          <ShieldAlert className="w-3.5 h-3.5 text-orange-500" />
+                          손절 설정
+                        </span>
+                        <span className="text-muted-foreground">손절 유형</span>
+                        <span className={stopType === "trailing" ? "text-purple-500 font-medium" : "text-orange-500 font-medium"}>
+                          {stopType === "trailing" ? "트레일링 스탑" : "단순 손절가"}
+                        </span>
+                        <span className="text-muted-foreground">손절 비율</span>
+                        <span className="font-medium">{stopLossPercent}%</span>
+                        <span className="text-muted-foreground">손절가</span>
+                        <span className="font-bold text-red-500">
+                          {(() => {
+                            const buyPx = orderMethod === "limit" ? Number(price) : Number(priceData?.price || 0);
+                            return Math.floor(buyPx * (1 - Number(stopLossPercent) / 100)).toLocaleString();
+                          })()}원
+                        </span>
+                      </>
+                    )}
                   </div>
                 </div>
                 <DialogFooter>
@@ -1171,6 +1361,342 @@ function OrderSection() {
           </CardContent>
         </Card>
       </div>
+    </div>
+  );
+}
+
+// ========== Stop Loss Section ==========
+interface StopLossItem {
+  id: number;
+  userId: number | null;
+  stockCode: string;
+  stockName: string | null;
+  buyPrice: string;
+  quantity: number;
+  stopLossPercent: string;
+  stopType: string;
+  stopPrice: string;
+  highestPrice: string | null;
+  status: string | null;
+  kisOrderNo: string | null;
+  triggerPrice: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  triggeredAt: string | null;
+}
+
+interface StopLossPricesResponse {
+  prices: Record<string, { price: number; changePercent: string; checkedAt: string }>;
+  lastCheckedAt: string | null;
+  isMarketOpen: boolean;
+  interval: string;
+}
+
+function StopLossSection() {
+  const { toast } = useToast();
+
+  // 감시 목록 조회 (10초 자동 새로고침)
+  const { data: stopLossOrders, isLoading, refetch } = useQuery<StopLossItem[]>({
+    queryKey: ["/api/trading/stop-loss"],
+    refetchInterval: 10000,
+  });
+
+  // 실시간 현재가 조회 (10초 자동 새로고침)
+  const { data: pricesData } = useQuery<StopLossPricesResponse>({
+    queryKey: ["/api/trading/stop-loss/prices"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/trading/stop-loss/prices");
+      return res.json();
+    },
+    refetchInterval: 10000,
+    enabled: (stopLossOrders?.filter(o => o.status === "active")?.length ?? 0) > 0,
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: async (id: number) => {
+      await apiRequest("DELETE", `/api/trading/stop-loss/${id}`);
+    },
+    onSuccess: () => {
+      toast({ title: "취소 완료", description: "손절 감시가 취소되었습니다." });
+      queryClient.invalidateQueries({ queryKey: ["/api/trading/stop-loss"] });
+    },
+    onError: (error: Error) => {
+      toast({ title: "취소 실패", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const checkMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/trading/stop-loss/check");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "감시 체크 완료",
+        description: `${data.checked}건 확인, ${data.triggered}건 발동`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/trading/stop-loss"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/trading/stop-loss/prices"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/trading/orders"] });
+    },
+    onError: (error: Error) => {
+      toast({ title: "감시 체크 실패", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const getStatusBadge = (status: string | null) => {
+    switch (status) {
+      case "active": return <StatusBadge variant="outline">감시중</StatusBadge>;
+      case "triggered": return <StatusBadge variant="destructive">발동(매도)</StatusBadge>;
+      case "cancelled": return <StatusBadge variant="secondary">취소</StatusBadge>;
+      case "error": return <StatusBadge variant="destructive">오류</StatusBadge>;
+      default: return <StatusBadge variant="outline">{status}</StatusBadge>;
+    }
+  };
+
+  const activeOrders = stopLossOrders?.filter(o => o.status === "active") || [];
+  const historyOrders = stopLossOrders?.filter(o => o.status !== "active") || [];
+
+  // 현재가로 손익률 계산 헬퍼
+  const getCurrentPriceInfo = (stockCode: string) => {
+    return pricesData?.prices?.[stockCode] || null;
+  };
+
+  const calcProfitRate = (buyPrice: number, currentPrice: number) => {
+    if (buyPrice <= 0) return 0;
+    return ((currentPrice - buyPrice) / buyPrice) * 100;
+  };
+
+  const calcGapToStop = (currentPrice: number, stopPrice: number) => {
+    if (stopPrice <= 0) return 0;
+    return ((currentPrice - stopPrice) / stopPrice) * 100;
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-bold flex items-center gap-2">
+          <ShieldAlert className="w-5 h-5 text-orange-500" />
+          손절/트레일링 스탑 감시
+        </h2>
+        <div className="flex items-center gap-2">
+          {/* 장 운영 상태 표시 */}
+          <span className={`text-xs px-2 py-1 rounded-full flex items-center gap-1 ${
+            pricesData?.isMarketOpen
+              ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300"
+              : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+          }`}>
+            <div className={`w-1.5 h-1.5 rounded-full ${pricesData?.isMarketOpen ? "bg-green-500 animate-pulse" : "bg-gray-400"}`} />
+            {pricesData?.isMarketOpen ? `장중 (${pricesData.interval})` : "장외"}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => checkMutation.mutate()}
+            disabled={checkMutation.isPending || activeOrders.length === 0}
+          >
+            {checkMutation.isPending ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <Play className="w-4 h-4 mr-2" />
+            )}
+            수동 체크
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isLoading}>
+            <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
+          </Button>
+        </div>
+      </div>
+
+      {/* 안내 */}
+      <Card className="bg-blue-50/50 dark:bg-blue-950/20 border-blue-200/50">
+        <CardContent className="p-4 text-sm text-muted-foreground space-y-1">
+          <p>💡 <strong>손절 감시</strong>는 매수 주문 시 손절가를 설정하면 자동으로 등록됩니다.</p>
+          <p>📊 서버에서 장중 <strong>10초 간격</strong>으로 현재가를 확인하고, 손절 조건 충족 시 <strong>시장가 매도</strong>를 자동 실행합니다.</p>
+          <p>📈 <strong>트레일링 스탑</strong>은 주가 상승 시 최고가를 추적하여 손절가가 자동으로 올라갑니다.</p>
+          <p>⏰ 장 운영 시간 (09:00~15:30) 동안만 감시가 활성화되며, 장외 시간에는 자동 비활성화됩니다.</p>
+          {pricesData?.lastCheckedAt && (
+            <p className="text-xs text-muted-foreground/70">
+              마지막 체크: {new Date(pricesData.lastCheckedAt).toLocaleString("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <Loader2 className="w-8 h-8 animate-spin" />
+        </div>
+      ) : activeOrders.length === 0 && historyOrders.length === 0 ? (
+        <Card>
+          <CardContent className="p-12 text-center">
+            <ShieldCheck className="w-12 h-12 mx-auto text-muted-foreground/30 mb-4" />
+            <h3 className="text-lg font-semibold">등록된 손절 감시 없음</h3>
+            <p className="text-muted-foreground mt-1">주문 탭에서 매수 시 손절가를 설정하면 자동 등록됩니다.</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-6">
+          {/* 활성 감시 */}
+          {activeOrders.length > 0 && (
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold text-orange-600 flex items-center gap-1.5">
+                <div className="w-2 h-2 rounded-full bg-orange-500 animate-pulse" />
+                활성 감시 ({activeOrders.length}건)
+              </h3>
+              {activeOrders.map((sl) => {
+                const buyPx = Number(sl.buyPrice);
+                const stopPx = Number(sl.stopPrice);
+                const highPx = sl.highestPrice ? Number(sl.highestPrice) : buyPx;
+                const slPct = Number(sl.stopLossPercent);
+                const priceInfo = getCurrentPriceInfo(sl.stockCode);
+                const currentPx = priceInfo?.price || 0;
+                const profitRate = currentPx > 0 ? calcProfitRate(buyPx, currentPx) : null;
+                const gapToStop = currentPx > 0 ? calcGapToStop(currentPx, stopPx) : null;
+
+                return (
+                  <Card key={sl.id} className="border-orange-200/50 dark:border-orange-800/30">
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <h4 className="font-bold text-sm">{sl.stockName || sl.stockCode}</h4>
+                            <span className="text-xs text-muted-foreground">({sl.stockCode})</span>
+                            <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${
+                              sl.stopType === "trailing"
+                                ? "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300"
+                                : "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300"
+                            }`}>
+                              {sl.stopType === "trailing" ? "트레일링" : "단순손절"}
+                            </span>
+                            {getStatusBadge(sl.status)}
+                          </div>
+
+                          {/* 현재가 & 손익 표시 (실시간) */}
+                          {currentPx > 0 && (
+                            <div className="flex items-center gap-3 bg-gray-50 dark:bg-gray-800/50 rounded-md px-3 py-1.5">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs text-muted-foreground">현재가</span>
+                                <span className="font-bold text-sm">{currentPx.toLocaleString()}원</span>
+                              </div>
+                              {profitRate !== null && (
+                                <div className={`flex items-center gap-0.5 text-xs font-bold ${profitRate >= 0 ? "text-red-500" : "text-blue-500"}`}>
+                                  {profitRate >= 0 ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                                  {profitRate >= 0 ? "+" : ""}{profitRate.toFixed(2)}%
+                                </div>
+                              )}
+                              {gapToStop !== null && (
+                                <div className="text-xs">
+                                  <span className="text-muted-foreground">손절까지 </span>
+                                  <span className={`font-semibold ${gapToStop < 2 ? "text-red-500 animate-pulse" : gapToStop < 5 ? "text-orange-500" : "text-green-600"}`}>
+                                    {gapToStop.toFixed(1)}%
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                            <div>
+                              <span className="text-muted-foreground">매수가</span>
+                              <div className="font-medium">{buyPx.toLocaleString()}원</div>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">손절가 (-{slPct}%)</span>
+                              <div className="font-bold text-red-500">{stopPx.toLocaleString()}원</div>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">수량</span>
+                              <div className="font-medium">{sl.quantity.toLocaleString()}주</div>
+                            </div>
+                            {sl.stopType === "trailing" && (
+                              <div>
+                                <span className="text-muted-foreground">최고가</span>
+                                <div className="font-medium text-green-600">{highPx.toLocaleString()}원</div>
+                              </div>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground">
+                            등록: {new Date(sl.createdAt).toLocaleString("ko-KR")}
+                          </div>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => cancelMutation.mutate(sl.id)}
+                          disabled={cancelMutation.isPending}
+                          className="text-destructive hover:text-destructive"
+                        >
+                          <XCircle className="w-5 h-5" />
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+
+          {/* 발동/취소 이력 */}
+          {historyOrders.length > 0 && (
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold text-muted-foreground">이력 ({historyOrders.length}건)</h3>
+              <Card>
+                <CardContent className="p-0">
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>종목</TableHead>
+                          <TableHead>유형</TableHead>
+                          <TableHead className="text-right">매수가</TableHead>
+                          <TableHead className="text-right">손절가</TableHead>
+                          <TableHead className="text-right">발동가</TableHead>
+                          <TableHead className="text-right">수량</TableHead>
+                          <TableHead>상태</TableHead>
+                          <TableHead>시간</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {historyOrders.map((sl) => (
+                          <TableRow key={sl.id}>
+                            <TableCell>
+                              <div className="font-medium text-sm">{sl.stockName || sl.stockCode}</div>
+                              <div className="text-xs text-muted-foreground">{sl.stockCode}</div>
+                            </TableCell>
+                            <TableCell>
+                              <span className={`text-xs font-medium ${sl.stopType === "trailing" ? "text-purple-500" : "text-orange-500"}`}>
+                                {sl.stopType === "trailing" ? "트레일링" : "단순손절"}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-right text-sm">
+                              {Number(sl.buyPrice).toLocaleString()}
+                            </TableCell>
+                            <TableCell className="text-right text-sm text-red-500">
+                              {Number(sl.stopPrice).toLocaleString()}
+                            </TableCell>
+                            <TableCell className="text-right text-sm">
+                              {sl.triggerPrice ? Number(sl.triggerPrice).toLocaleString() : "-"}
+                            </TableCell>
+                            <TableCell className="text-right">{sl.quantity.toLocaleString()}</TableCell>
+                            <TableCell>{getStatusBadge(sl.status)}</TableCell>
+                            <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                              {sl.triggeredAt
+                                ? new Date(sl.triggeredAt).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+                                : new Date(sl.createdAt).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+                              }
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

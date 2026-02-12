@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
-import { LogIn, LogOut, Shield, UserPlus, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
+import { LogIn, LogOut, Shield, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
 
 // Google Identity Services 타입 선언
 declare global {
@@ -44,7 +44,6 @@ function GoogleLogo({ className }: { className?: string }) {
 
 export function LoginDialog() {
   const [loginOpen, setLoginOpen] = useState(false);
-  const [signupOpen, setSignupOpen] = useState(false);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
@@ -97,7 +96,6 @@ export function LoginDialog() {
       try {
         await googleLogin({ credential: response.credential, rememberMe: remember });
         setLoginOpen(false);
-        setSignupOpen(false);
         toast({
           title: "로그인 성공",
           description: remember
@@ -180,7 +178,6 @@ export function LoginDialog() {
                         });
                         if (res.ok) {
                           setLoginOpen(false);
-                          setSignupOpen(false);
                           toast({
                             title: "로그인 성공",
                             description: remember
@@ -426,68 +423,6 @@ export function LoginDialog() {
         </DialogContent>
       </Dialog>
 
-      {/* 계정생성 버튼 */}
-      <Dialog open={signupOpen} onOpenChange={setSignupOpen}>
-        <Button
-          variant="default"
-          size="sm"
-          className="gap-1.5"
-          onClick={() => setSignupOpen(true)}
-          data-testid="button-signup"
-        >
-          <UserPlus className="w-4 h-4" />
-          계정생성
-        </Button>
-        <DialogContent className="sm:max-w-[380px]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <UserPlus className="w-5 h-5" />
-              계정 생성
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <p className="text-sm text-muted-foreground text-center">
-              Google 계정으로 간편하게 가입하세요
-            </p>
-
-            {GOOGLE_CLIENT_ID ? (
-              <div className="flex flex-col items-center gap-3">
-                <GoogleLoginButton label="Google 계정으로 시작하기" />
-                {!googleReady && (
-                  <p className="text-xs text-muted-foreground">Google SDK 로딩 중...</p>
-                )}
-              </div>
-            ) : (
-              <div className="text-center text-sm text-muted-foreground p-4 bg-muted/30 rounded-lg">
-                Google OAuth가 설정되지 않았습니다.
-                <br />
-                <span className="text-xs">VITE_GOOGLE_CLIENT_ID 환경변수를 설정하세요.</span>
-              </div>
-            )}
-
-            {/* 로그인 유지 체크박스 */}
-            <div className="flex items-center space-x-2 justify-center">
-              <Checkbox
-                id="rememberMe-signup"
-                checked={rememberMe}
-                onCheckedChange={(checked) => setRememberMe(checked === true)}
-              />
-              <Label
-                htmlFor="rememberMe-signup"
-                className="text-sm font-normal cursor-pointer select-none"
-              >
-                로그인 유지 (24시간)
-              </Label>
-            </div>
-
-            <p className="text-xs text-muted-foreground text-center">
-              Google 계정이 있으면 자동으로 로그인됩니다.
-              <br />
-              처음이면 계정이 자동 생성됩니다.
-            </p>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
