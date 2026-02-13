@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Plus, ExternalLink, TrendingUp, Globe, Loader2, Star, Newspaper, Youtube, FileText, Link as LinkIcon, Trash2, Pencil, Scale, Zap, ChevronDown, Calendar, Home as HomeIcon, Search, X, Eye, ChevronLeft, ChevronRight, PenSquare, Send, LogIn, LogOut, Bell, BellRing, MessageCircle, Heart, UserPlus, FileEdit } from "lucide-react";
+import { Plus, ExternalLink, TrendingUp, Globe, Loader2, Star, Newspaper, Youtube, FileText, Link as LinkIcon, Trash2, Pencil, Scale, Zap, ChevronDown, Calendar, Home as HomeIcon, Search, X, Eye, ChevronLeft, ChevronRight, PenSquare, Send, LogIn, LogOut, Bell, BellRing, MessageCircle, Heart, UserPlus, FileEdit, BarChart3 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,6 +30,9 @@ const WatchlistEtfComp = lazy(() => import("@/components/WatchlistEtf"));
 const SteemReport = lazy(() => import("@/components/SteemReport"));
 const SteemReader = lazy(() => import("@/components/SteemReader"));
 const DomesticMarket = lazy(() => import("@/components/DomesticMarket"));
+const GlobalMarket = lazy(() => import("@/components/GlobalMarket"));
+const DomesticStocks = lazy(() => import("@/components/DomesticStocks"));
+const OverseasStocks = lazy(() => import("@/components/OverseasStocks"));
 
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -167,6 +170,31 @@ export default function Home() {
               </DropdownMenuContent>
             </DropdownMenu>
 
+              {/* 주식정보 드롭다운 */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                    className={`flex items-center gap-2 w-full rounded-md px-3 py-2 text-sm font-medium transition-all text-left ${
+                    activeTab.startsWith("stocks-")
+                      ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground hover:bg-background/50"
+                  }`}
+                >
+                    <BarChart3 className="h-4 w-4 shrink-0" />
+                  주식정보
+                    <ChevronDown className="h-3 w-3 opacity-60 ml-auto" />
+                </button>
+              </DropdownMenuTrigger>
+                <DropdownMenuContent side="right" align="start" className="min-w-[140px]">
+                <DropdownMenuItem onClick={() => setActiveTab("stocks-domestic")} className="gap-2 cursor-pointer">
+                  🇰🇷 국내주식
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setActiveTab("stocks-overseas")} className="gap-2 cursor-pointer">
+                  🌐 해외주식
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
               {/* 투자전략 드롭다운 */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -296,6 +324,19 @@ export default function Home() {
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button className={`inline-flex items-center gap-1 shrink-0 px-2 py-1.5 text-xs font-medium rounded-sm transition-all ${
+                    activeTab.startsWith("stocks-") ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"
+                  }`}>
+                    <BarChart3 className="h-3.5 w-3.5" /> 주식 <ChevronDown className="h-2.5 w-2.5" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="center" className="min-w-[120px]">
+                  <DropdownMenuItem onClick={() => setActiveTab("stocks-domestic")} className="gap-2 cursor-pointer text-xs">🇰🇷 국내주식</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setActiveTab("stocks-overseas")} className="gap-2 cursor-pointer text-xs">🌐 해외주식</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className={`inline-flex items-center gap-1 shrink-0 px-2 py-1.5 text-xs font-medium rounded-sm transition-all ${
                     activeTab.startsWith("strategy-") ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"
                   }`}>
                     <Calendar className="h-3.5 w-3.5" /> 전략 <ChevronDown className="h-2.5 w-2.5" />
@@ -412,7 +453,23 @@ export default function Home() {
 
           {/* 해외증시 */}
           <TabsContent value="markets-global">
-            <MarketsView type="global" />
+            <Suspense fallback={<div className="flex items-center justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>}>
+              <GlobalMarket />
+            </Suspense>
+          </TabsContent>
+
+          {/* 국내주식 */}
+          <TabsContent value="stocks-domestic">
+            <Suspense fallback={<div className="flex items-center justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>}>
+              <DomesticStocks />
+            </Suspense>
+          </TabsContent>
+
+          {/* 해외주식 */}
+          <TabsContent value="stocks-overseas">
+            <Suspense fallback={<div className="flex items-center justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>}>
+              <OverseasStocks />
+            </Suspense>
           </TabsContent>
 
           {/* ETC (Commodity, Forex, Crypto, Bond) */}

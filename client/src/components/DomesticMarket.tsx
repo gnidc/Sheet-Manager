@@ -691,7 +691,7 @@ export default function DomesticMarket() {
                         <TableCell className={`text-right text-xs tabular-nums ${changeColor}`}>
                           {isUp ? "+" : ""}{stock.changeVal.toLocaleString()}
                         </TableCell>
-                        <TableCell className={`text-right text-xs font-medium tabular-nums ${changeColor}`}>
+                        <TableCell className={`text-right text-xs font-semibold tabular-nums ${changeColor}`}>
                           <span className="flex items-center justify-end gap-0.5">
                             {isUp ? <TrendingUp className="w-3 h-3" /> : isDown ? <TrendingDown className="w-3 h-3" /> : null}
                             {isUp ? "+" : ""}{stock.changeRate.toFixed(2)}%

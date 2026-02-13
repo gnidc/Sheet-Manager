@@ -172,6 +172,8 @@ export const satelliteEtfs = pgTable("satellite_etfs", {
   etfName: text("etf_name").notNull(),
   sector: text("sector").default("기본"),
   memo: text("memo"),
+  listType: text("list_type").default("common"), // 'common' (공통관심) | 'personal' (개인관심)
+  userId: integer("user_id"),                     // 개인관심일 때 사용자 ID (null이면 공통)
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
@@ -230,6 +232,112 @@ export const insertAiReportSchema = createInsertSchema(aiReports).omit({ id: tru
 
 export type AiReport = typeof aiReports.$inferSelect;
 export type InsertAiReport = z.infer<typeof insertAiReportSchema>;
+
+// ========== 시가급등 추세추종 전략 ==========
+
+// 전략 설정
+export const gapStrategy = pgTable("gap_strategy", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  name: text("name").notNull().default("시가급등 추세추종"),
+  isActive: boolean("is_active").default(false),
+  // 매수 조건
+  universeType: text("universe_type").default("both"),           // 'kospi200' | 'kosdaq150' | 'both'
+  minGapPercent: numeric("min_gap_percent").default("3"),
+  maxGapPercent: numeric("max_gap_percent").default("7"),
+  maAligned: boolean("ma_aligned").default(true),
+  priceAboveMa5: boolean("price_above_ma5").default(true),
+  // 분할매수 설정
+  firstBuyRatio: integer("first_buy_ratio").default(30),
+  addBuyRatio: integer("add_buy_ratio").default(20),
+  addBuyTriggerPercent: numeric("add_buy_trigger_percent").default("1"),
+  // 매도 조건
+  sellMaPeriod: integer("sell_ma_period").default(5),
+  // 리스크 관리
+  maxPositionRatio: integer("max_position_ratio").default(50),
+  maxStocksCount: integer("max_stocks_count").default(5),
+  // 스캔 후보 캐시
+  candidates: text("candidates"),                                // JSON string of stock codes
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const insertGapStrategySchema = createInsertSchema(gapStrategy).omit({ id: true, createdAt: true, updatedAt: true });
+
+export type GapStrategy = typeof gapStrategy.$inferSelect;
+export type InsertGapStrategy = z.infer<typeof insertGapStrategySchema>;
+
+// 전략 포지션 (종목별 매매 상태 추적)
+export const gapStrategyPositions = pgTable("gap_strategy_positions", {
+  id: serial("id").primaryKey(),
+  strategyId: integer("strategy_id").notNull(),
+  userId: integer("user_id").notNull(),
+  stockCode: text("stock_code").notNull(),
+  stockName: text("stock_name").notNull(),
+  status: text("status").default("scanning"),
+  // 'scanning' | 'gap_detected' | 'buying' | 'holding' | 'selling' | 'closed'
+  prevClose: numeric("prev_close"),
+  openPrice: numeric("open_price"),
+  gapPercent: numeric("gap_percent"),
+  targetAmount: numeric("target_amount"),
+  totalBuyQty: integer("total_buy_qty").default(0),
+  totalBuyAmount: numeric("total_buy_amount").default("0"),
+  avgBuyPrice: numeric("avg_buy_price"),
+  buyPhase: integer("buy_phase").default(0),
+  lastBuyPrice: numeric("last_buy_price"),
+  sellPrice: numeric("sell_price"),
+  sellQty: integer("sell_qty"),
+  sellAmount: numeric("sell_amount"),
+  profitLoss: numeric("profit_loss"),
+  profitRate: numeric("profit_rate"),
+  ma5: numeric("ma5"),
+  ma10: numeric("ma10"),
+  ma20: numeric("ma20"),
+  ma60: numeric("ma60"),
+  openedAt: timestamp("opened_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  closedAt: timestamp("closed_at"),
+});
+
+export const insertGapStrategyPositionSchema = createInsertSchema(gapStrategyPositions).omit({ id: true, openedAt: true });
+
+export type GapStrategyPosition = typeof gapStrategyPositions.$inferSelect;
+export type InsertGapStrategyPosition = z.infer<typeof insertGapStrategyPositionSchema>;
+
+// 전략 실행 로그
+export const gapStrategyLogs = pgTable("gap_strategy_logs", {
+  id: serial("id").primaryKey(),
+  strategyId: integer("strategy_id").notNull(),
+  positionId: integer("position_id"),
+  action: text("action").notNull(),
+  stockCode: text("stock_code"),
+  stockName: text("stock_name"),
+  detail: text("detail"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const insertGapStrategyLogSchema = createInsertSchema(gapStrategyLogs).omit({ id: true, createdAt: true });
+
+export type GapStrategyLog = typeof gapStrategyLogs.$inferSelect;
+export type InsertGapStrategyLog = z.infer<typeof insertGapStrategyLogSchema>;
+
+// ========== 관심종목 (주식정보) ==========
+export const watchlistStocks = pgTable("watchlist_stocks", {
+  id: serial("id").primaryKey(),
+  stockCode: text("stock_code").notNull(),
+  stockName: text("stock_name").notNull(),
+  market: text("market").default("domestic"), // 'domestic' | 'overseas'
+  exchange: text("exchange"),                 // KOSPI, KOSDAQ, NYSE, NASDAQ 등
+  sector: text("sector").default("기본"),
+  memo: text("memo"),
+  listType: text("list_type").default("common"), // 'common' (공통관심) | 'personal' (개인관심)
+  userId: integer("user_id"),                     // 개인관심일 때 사용자 ID (null이면 공통)
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const insertWatchlistStockSchema = createInsertSchema(watchlistStocks).omit({ id: true, createdAt: true });
+
+export type WatchlistStock = typeof watchlistStocks.$inferSelect;
+export type InsertWatchlistStock = z.infer<typeof insertWatchlistStockSchema>;
 
 // ========== 즐겨찾기 (북마크) ==========
 export const bookmarks = pgTable("bookmarks", {

@@ -193,6 +193,9 @@ export default function EtfComponents() {
   const [searchMode, setSearchMode] = useState<"search" | "direct">("search");
   const [sortField, setSortField] = useState<SortField>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+  // Core/Satellite 등락률 정렬
+  const [coreSortDir, setCoreSortDir] = useState<"none" | "desc" | "asc">("none");
+  const [satSortDir, setSatSortDir] = useState<"none" | "desc" | "asc">("none");
   const [chartPeriod, setChartPeriod] = useState<"day" | "week" | "month" | "year">("day");
   const [chartType, setChartType] = useState<"candle" | "area">("candle");
   // localStorage에서 이전 분석 결과 복원
@@ -494,7 +497,13 @@ export default function EtfComponents() {
     refetchInterval: 60 * 1000,
   });
 
-  const watchlistItems = watchlistRealtimeData?.items || [];
+  const watchlistItemsRaw = watchlistRealtimeData?.items || [];
+  const watchlistItems = useMemo(() => {
+    if (coreSortDir === "none") return watchlistItemsRaw;
+    return [...watchlistItemsRaw].sort((a, b) =>
+      coreSortDir === "desc" ? b.changeRate - a.changeRate : a.changeRate - b.changeRate
+    );
+  }, [watchlistItemsRaw, coreSortDir]);
 
   // 관심ETF(Satellite) 실시간 시세
   const { data: satelliteRealtimeData, isFetching: isLoadingSatellite, refetch: refetchSatellite } = useQuery<{
@@ -511,7 +520,13 @@ export default function EtfComponents() {
     refetchInterval: 60 * 1000,
   });
 
-  const satelliteItems = satelliteRealtimeData?.items || [];
+  const satelliteItemsRaw = satelliteRealtimeData?.items || [];
+  const satelliteItems = useMemo(() => {
+    if (satSortDir === "none") return satelliteItemsRaw;
+    return [...satelliteItemsRaw].sort((a, b) =>
+      satSortDir === "desc" ? b.changeRate - a.changeRate : a.changeRate - b.changeRate
+    );
+  }, [satelliteItemsRaw, satSortDir]);
 
   // 카페 전송 핸들러
   const handleCafePost = () => {
@@ -650,11 +665,22 @@ export default function EtfComponents() {
                     <TableHead className="w-[36px] text-center">#</TableHead>
                     <TableHead>ETF명</TableHead>
                     <TableHead className="text-right w-[90px]">현재가</TableHead>
-                    <TableHead className="text-right w-[80px]">등락률</TableHead>
+                    <TableHead className="text-right w-[80px]">
+                      <span
+                        className={`inline-flex items-center gap-1 cursor-pointer select-none hover:text-primary transition-colors ${coreSortDir !== "none" ? "text-primary font-semibold" : ""}`}
+                        onClick={() => setCoreSortDir(prev => prev === "none" ? "desc" : prev === "desc" ? "asc" : "none")}
+                      >
+                        등락률
+                        {coreSortDir === "none" ? <ArrowUpDown className="w-3 h-3 text-muted-foreground/50" /> :
+                         coreSortDir === "desc" ? <ArrowDown className="w-3 h-3 text-primary" /> :
+                         <ArrowUp className="w-3 h-3 text-primary" />}
+                      </span>
+                    </TableHead>
                     <TableHead className="text-right w-[80px]">전일대비</TableHead>
                     <TableHead className="text-right w-[100px] hidden sm:table-cell">거래량</TableHead>
                     <TableHead className="text-right w-[90px] hidden md:table-cell">시가총액(억)</TableHead>
                     <TableHead className="text-right w-[80px] hidden md:table-cell">순자산(NAV)</TableHead>
+                    <TableHead className="text-right w-[80px] hidden sm:table-cell">배당수익률</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -713,6 +739,15 @@ export default function EtfComponents() {
                         </TableCell>
                         <TableCell className="text-right tabular-nums text-sm text-muted-foreground hidden md:table-cell">
                           {(etf.nav ?? 0).toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-sm hidden sm:table-cell">
+                          {(etf as any).dividendYield != null ? (
+                            <span className={`font-medium ${(etf as any).dividendYield > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}>
+                              {((etf as any).dividendYield as number).toFixed(2)}%
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
                         </TableCell>
                       </TableRow>
                     );
@@ -781,7 +816,17 @@ export default function EtfComponents() {
                     <TableHead className="w-[36px] text-center">#</TableHead>
                     <TableHead>ETF명</TableHead>
                     <TableHead className="text-right w-[90px]">현재가</TableHead>
-                    <TableHead className="text-right w-[80px]">등락률</TableHead>
+                    <TableHead className="text-right w-[80px]">
+                      <span
+                        className={`inline-flex items-center gap-1 cursor-pointer select-none hover:text-primary transition-colors ${satSortDir !== "none" ? "text-primary font-semibold" : ""}`}
+                        onClick={() => setSatSortDir(prev => prev === "none" ? "desc" : prev === "desc" ? "asc" : "none")}
+                      >
+                        등락률
+                        {satSortDir === "none" ? <ArrowUpDown className="w-3 h-3 text-muted-foreground/50" /> :
+                         satSortDir === "desc" ? <ArrowDown className="w-3 h-3 text-primary" /> :
+                         <ArrowUp className="w-3 h-3 text-primary" />}
+                      </span>
+                    </TableHead>
                     <TableHead className="text-right w-[80px]">전일대비</TableHead>
                     <TableHead className="text-right w-[100px] hidden sm:table-cell">거래량</TableHead>
                     <TableHead className="text-right w-[90px] hidden md:table-cell">시가총액(억)</TableHead>

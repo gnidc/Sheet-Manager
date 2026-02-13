@@ -39,8 +39,20 @@ import {
   type InsertSteemPost,
   type AiReport,
   type InsertAiReport,
+  watchlistStocks,
+  type WatchlistStock,
+  type InsertWatchlistStock,
+  gapStrategy,
+  gapStrategyPositions,
+  gapStrategyLogs,
+  type GapStrategy,
+  type InsertGapStrategy,
+  type GapStrategyPosition,
+  type InsertGapStrategyPosition,
+  type GapStrategyLog,
+  type InsertGapStrategyLog,
 } from "../shared/schema.js";
-import { eq, and, desc, isNull } from "drizzle-orm";
+import { eq, and, or, desc, isNull, inArray, sql } from "drizzle-orm";
 
 export interface IStorage {
   // ETF Trends
@@ -94,7 +106,7 @@ export interface IStorage {
   deleteWatchlistEtf(id: number): Promise<void>;
 
   // Satellite ETFs
-  getSatelliteEtfs(): Promise<SatelliteEtf[]>;
+  getSatelliteEtfs(listType?: string, userId?: number): Promise<SatelliteEtf[]>;
   createSatelliteEtf(data: InsertSatelliteEtf): Promise<SatelliteEtf>;
   updateSatelliteEtf(id: number, updates: Partial<InsertSatelliteEtf>): Promise<SatelliteEtf>;
   deleteSatelliteEtf(id: number): Promise<void>;
@@ -118,6 +130,31 @@ export interface IStorage {
   getAiReport(id: number): Promise<AiReport | undefined>;
   createAiReport(data: InsertAiReport): Promise<AiReport>;
   deleteAiReport(id: number): Promise<void>;
+
+  // Watchlist Stocks (관심종목)
+  getWatchlistStocks(market?: string, listType?: string, userId?: number): Promise<WatchlistStock[]>;
+  getWatchlistStock(id: number): Promise<WatchlistStock | undefined>;
+  createWatchlistStock(data: InsertWatchlistStock): Promise<WatchlistStock>;
+  updateWatchlistStock(id: number, updates: Partial<InsertWatchlistStock>): Promise<WatchlistStock>;
+  deleteWatchlistStock(id: number): Promise<void>;
+
+  // Gap Strategy (시가급등 추세추종)
+  getGapStrategy(userId: number): Promise<GapStrategy | undefined>;
+  upsertGapStrategy(data: InsertGapStrategy): Promise<GapStrategy>;
+  updateGapStrategy(id: number, updates: Partial<InsertGapStrategy>): Promise<GapStrategy>;
+  deleteGapStrategy(id: number): Promise<void>;
+  getAllActiveGapStrategies(): Promise<GapStrategy[]>;
+
+  // Gap Strategy Positions
+  getGapPositions(strategyId: number): Promise<GapStrategyPosition[]>;
+  getActiveGapPositions(strategyId: number): Promise<GapStrategyPosition[]>;
+  getGapPosition(id: number): Promise<GapStrategyPosition | undefined>;
+  createGapPosition(data: InsertGapStrategyPosition): Promise<GapStrategyPosition>;
+  updateGapPosition(id: number, updates: Partial<InsertGapStrategyPosition>): Promise<GapStrategyPosition>;
+
+  // Gap Strategy Logs
+  getGapLogs(strategyId: number, limit?: number): Promise<GapStrategyLog[]>;
+  createGapLog(data: InsertGapStrategyLog): Promise<GapStrategyLog>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -628,11 +665,24 @@ export class DatabaseStorage implements IStorage {
 
   // ========== Satellite ETFs (관심ETF Satellite) ==========
 
-  async getSatelliteEtfs(): Promise<SatelliteEtf[]> {
+  async getSatelliteEtfs(listType?: string, userId?: number): Promise<SatelliteEtf[]> {
+    let whereClause;
+    if (listType === "common") {
+      whereClause = or(eq(satelliteEtfs.listType, "common"), isNull(satelliteEtfs.listType));
+    } else if (listType === "personal" && userId != null) {
+      whereClause = and(eq(satelliteEtfs.listType, "personal"), eq(satelliteEtfs.userId, userId));
+    }
+
     if (process.env.VERCEL) {
       return await executeWithClient(async (db) => {
+        if (whereClause) {
+          return await db.select().from(satelliteEtfs).where(whereClause).orderBy(desc(satelliteEtfs.createdAt));
+        }
         return await db.select().from(satelliteEtfs).orderBy(desc(satelliteEtfs.createdAt));
       });
+    }
+    if (whereClause) {
+      return await db.select().from(satelliteEtfs).where(whereClause).orderBy(desc(satelliteEtfs.createdAt));
     }
     return await db.select().from(satelliteEtfs).orderBy(desc(satelliteEtfs.createdAt));
   }
@@ -830,6 +880,220 @@ export class DatabaseStorage implements IStorage {
       });
     }
     await db.delete(aiReports).where(eq(aiReports.id, id));
+  }
+
+  // ========== Gap Strategy (시가급등 추세추종) ==========
+
+  async getGapStrategy(userId: number): Promise<GapStrategy | undefined> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [s] = await db.select().from(gapStrategy).where(eq(gapStrategy.userId, userId));
+        return s;
+      });
+    }
+    const [s] = await db.select().from(gapStrategy).where(eq(gapStrategy.userId, userId));
+    return s;
+  }
+
+  async upsertGapStrategy(data: InsertGapStrategy): Promise<GapStrategy> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const existing = await db.select().from(gapStrategy).where(eq(gapStrategy.userId, data.userId));
+        if (existing.length > 0) {
+          const [updated] = await db.update(gapStrategy).set({ ...data, updatedAt: new Date() }).where(eq(gapStrategy.id, existing[0].id)).returning();
+          return updated;
+        }
+        const [created] = await db.insert(gapStrategy).values(data).returning();
+        return created;
+      });
+    }
+    const existing = await db.select().from(gapStrategy).where(eq(gapStrategy.userId, data.userId));
+    if (existing.length > 0) {
+      const [updated] = await db.update(gapStrategy).set({ ...data, updatedAt: new Date() }).where(eq(gapStrategy.id, existing[0].id)).returning();
+      return updated;
+    }
+    const [created] = await db.insert(gapStrategy).values(data).returning();
+    return created;
+  }
+
+  async updateGapStrategy(id: number, updates: Partial<InsertGapStrategy>): Promise<GapStrategy> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [updated] = await db.update(gapStrategy).set({ ...updates, updatedAt: new Date() }).where(eq(gapStrategy.id, id)).returning();
+        return updated;
+      });
+    }
+    const [updated] = await db.update(gapStrategy).set({ ...updates, updatedAt: new Date() }).where(eq(gapStrategy.id, id)).returning();
+    return updated;
+  }
+
+  async deleteGapStrategy(id: number): Promise<void> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        await db.delete(gapStrategy).where(eq(gapStrategy.id, id));
+      });
+    }
+    await db.delete(gapStrategy).where(eq(gapStrategy.id, id));
+  }
+
+  async getAllActiveGapStrategies(): Promise<GapStrategy[]> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(gapStrategy).where(eq(gapStrategy.isActive, true));
+      });
+    }
+    return await db.select().from(gapStrategy).where(eq(gapStrategy.isActive, true));
+  }
+
+  // ========== Gap Strategy Positions ==========
+
+  async getGapPositions(strategyId: number): Promise<GapStrategyPosition[]> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(gapStrategyPositions).where(eq(gapStrategyPositions.strategyId, strategyId)).orderBy(desc(gapStrategyPositions.openedAt));
+      });
+    }
+    return await db.select().from(gapStrategyPositions).where(eq(gapStrategyPositions.strategyId, strategyId)).orderBy(desc(gapStrategyPositions.openedAt));
+  }
+
+  async getActiveGapPositions(strategyId: number): Promise<GapStrategyPosition[]> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(gapStrategyPositions)
+          .where(and(
+            eq(gapStrategyPositions.strategyId, strategyId),
+            inArray(gapStrategyPositions.status, ["gap_detected", "buying", "holding"])
+          ))
+          .orderBy(desc(gapStrategyPositions.openedAt));
+      });
+    }
+    return await db.select().from(gapStrategyPositions)
+      .where(and(
+        eq(gapStrategyPositions.strategyId, strategyId),
+        inArray(gapStrategyPositions.status, ["gap_detected", "buying", "holding"])
+      ))
+      .orderBy(desc(gapStrategyPositions.openedAt));
+  }
+
+  async getGapPosition(id: number): Promise<GapStrategyPosition | undefined> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [pos] = await db.select().from(gapStrategyPositions).where(eq(gapStrategyPositions.id, id));
+        return pos;
+      });
+    }
+    const [pos] = await db.select().from(gapStrategyPositions).where(eq(gapStrategyPositions.id, id));
+    return pos;
+  }
+
+  async createGapPosition(data: InsertGapStrategyPosition): Promise<GapStrategyPosition> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [created] = await db.insert(gapStrategyPositions).values(data).returning();
+        return created;
+      });
+    }
+    const [created] = await db.insert(gapStrategyPositions).values(data).returning();
+    return created;
+  }
+
+  async updateGapPosition(id: number, updates: Partial<InsertGapStrategyPosition>): Promise<GapStrategyPosition> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [updated] = await db.update(gapStrategyPositions).set(updates).where(eq(gapStrategyPositions.id, id)).returning();
+        return updated;
+      });
+    }
+    const [updated] = await db.update(gapStrategyPositions).set(updates).where(eq(gapStrategyPositions.id, id)).returning();
+    return updated;
+  }
+
+  // ========== Gap Strategy Logs ==========
+
+  async getGapLogs(strategyId: number, limit: number = 50): Promise<GapStrategyLog[]> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(gapStrategyLogs).where(eq(gapStrategyLogs.strategyId, strategyId)).orderBy(desc(gapStrategyLogs.createdAt)).limit(limit);
+      });
+    }
+    return await db.select().from(gapStrategyLogs).where(eq(gapStrategyLogs.strategyId, strategyId)).orderBy(desc(gapStrategyLogs.createdAt)).limit(limit);
+  }
+
+  async createGapLog(data: InsertGapStrategyLog): Promise<GapStrategyLog> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [created] = await db.insert(gapStrategyLogs).values(data).returning();
+        return created;
+      });
+    }
+    const [created] = await db.insert(gapStrategyLogs).values(data).returning();
+    return created;
+  }
+
+  // ========== Watchlist Stocks (관심종목) ==========
+
+  async getWatchlistStocks(market?: string, listType?: string, userId?: number): Promise<WatchlistStock[]> {
+    const conditions: any[] = [];
+    if (market) conditions.push(eq(watchlistStocks.market, market));
+    if (listType) conditions.push(eq(watchlistStocks.listType, listType));
+    if (listType === "personal" && userId) conditions.push(eq(watchlistStocks.userId, userId));
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        if (whereClause) {
+          return await db.select().from(watchlistStocks).where(whereClause).orderBy(desc(watchlistStocks.createdAt));
+        }
+        return await db.select().from(watchlistStocks).orderBy(desc(watchlistStocks.createdAt));
+      });
+    }
+    if (whereClause) {
+      return await db.select().from(watchlistStocks).where(whereClause).orderBy(desc(watchlistStocks.createdAt));
+    }
+    return await db.select().from(watchlistStocks).orderBy(desc(watchlistStocks.createdAt));
+  }
+
+  async getWatchlistStock(id: number): Promise<WatchlistStock | undefined> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [stock] = await db.select().from(watchlistStocks).where(eq(watchlistStocks.id, id));
+        return stock;
+      });
+    }
+    const [stock] = await db.select().from(watchlistStocks).where(eq(watchlistStocks.id, id));
+    return stock;
+  }
+
+  async createWatchlistStock(data: InsertWatchlistStock): Promise<WatchlistStock> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [created] = await db.insert(watchlistStocks).values(data).returning();
+        return created;
+      });
+    }
+    const [created] = await db.insert(watchlistStocks).values(data).returning();
+    return created;
+  }
+
+  async updateWatchlistStock(id: number, updates: Partial<InsertWatchlistStock>): Promise<WatchlistStock> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [updated] = await db.update(watchlistStocks).set(updates).where(eq(watchlistStocks.id, id)).returning();
+        return updated;
+      });
+    }
+    const [updated] = await db.update(watchlistStocks).set(updates).where(eq(watchlistStocks.id, id)).returning();
+    return updated;
+  }
+
+  async deleteWatchlistStock(id: number): Promise<void> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        await db.delete(watchlistStocks).where(eq(watchlistStocks.id, id));
+      });
+    }
+    await db.delete(watchlistStocks).where(eq(watchlistStocks.id, id));
   }
 }
 

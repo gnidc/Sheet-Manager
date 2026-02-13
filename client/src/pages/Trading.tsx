@@ -85,8 +85,9 @@ import { Label } from "@/components/ui/label";
 import {
   ArrowLeft, TrendingUp, Wallet, BarChart3, Plus, Trash2, Play, Pause,
   RefreshCw, Loader2, AlertTriangle, CheckCircle2, XCircle, Search,
-  ArrowUpRight, ArrowDownRight, Zap, Clock, Settings, ShieldCheck, ShieldAlert,
+  ArrowUpRight, ArrowDownRight, Zap, Clock, Settings, ShieldCheck, ShieldAlert, Rocket,
 } from "lucide-react";
+import GapStrategyPanel from "@/components/GapStrategyPanel";
 
 // ========== Types ==========
 interface TradingStatus {
@@ -276,24 +277,28 @@ export default function Trading() {
           isAdmin ? <AdminSetupGuide status={status} /> : <UserSetupGuide onComplete={() => { refetchConfig(); refetchStatus(); }} />
         ) : (
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-8">
-            <TabsList className="grid w-full grid-cols-5 max-w-3xl mx-auto">
-              <TabsTrigger value="account" className="gap-2">
+            <TabsList className="grid w-full grid-cols-6 max-w-4xl mx-auto">
+              <TabsTrigger value="account" className="gap-1 text-xs sm:text-sm">
                 <Wallet className="h-4 w-4" />
                 계좌
               </TabsTrigger>
-              <TabsTrigger value="order" className="gap-2">
+              <TabsTrigger value="order" className="gap-1 text-xs sm:text-sm">
                 <TrendingUp className="h-4 w-4" />
                 주문
               </TabsTrigger>
-              <TabsTrigger value="stoploss" className="gap-2">
+              <TabsTrigger value="stoploss" className="gap-1 text-xs sm:text-sm">
                 <ShieldAlert className="h-4 w-4" />
                 손절감시
               </TabsTrigger>
-              <TabsTrigger value="auto" className="gap-2">
+              <TabsTrigger value="auto" className="gap-1 text-xs sm:text-sm">
                 <Zap className="h-4 w-4" />
                 자동매매
               </TabsTrigger>
-              <TabsTrigger value="history" className="gap-2">
+              <TabsTrigger value="gap-strategy" className="gap-1 text-xs sm:text-sm">
+                <Rocket className="h-4 w-4" />
+                시가급등
+              </TabsTrigger>
+              <TabsTrigger value="history" className="gap-1 text-xs sm:text-sm">
                 <Clock className="h-4 w-4" />
                 주문내역
               </TabsTrigger>
@@ -313,6 +318,9 @@ export default function Trading() {
             </TabsContent>
             <TabsContent value="auto">
               <AutoTradeSection />
+            </TabsContent>
+            <TabsContent value="gap-strategy">
+              <GapStrategyPanel />
             </TabsContent>
             <TabsContent value="history">
               <OrderHistorySection />

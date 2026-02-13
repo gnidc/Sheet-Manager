@@ -160,6 +160,7 @@ const DEFAULT_PROMPTS: Record<ReportPeriod, string> = {
 const MAX_SAVED_REPORTS = 5;
 const MAX_SAVED_ANALYSES = 5;
 const MAX_PROMPT_HISTORY = 10;
+const REPORT_RETENTION_DAYS = 7; // 일주일 보관
 
 // localStorage key helpers
 const SAVED_REPORTS_BASE = "strategy_saved_reports_";
@@ -171,15 +172,33 @@ function storageKey(base: string, period: ReportPeriod) {
   return `${base}${period}`;
 }
 
+// 일주일 이전 항목 필터링 (id가 Date.now() 타임스탬프 기반)
+function filterByRetention<T extends { id: string }>(items: T[]): T[] {
+  const cutoff = Date.now() - REPORT_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  return items.filter((item) => {
+    const ts = Number(item.id);
+    // id가 숫자가 아닌 경우 보관 (안전장치)
+    if (isNaN(ts)) return true;
+    return ts >= cutoff;
+  });
+}
+
 // localStorage CRUD
 function getSavedReports(period: ReportPeriod): SavedReport[] {
   try {
     const raw = localStorage.getItem(storageKey(SAVED_REPORTS_BASE, period));
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) return [];
+    const all: SavedReport[] = JSON.parse(raw);
+    const filtered = filterByRetention(all);
+    // 만료된 항목이 있으면 localStorage도 정리
+    if (filtered.length !== all.length) {
+      localStorage.setItem(storageKey(SAVED_REPORTS_BASE, period), JSON.stringify(filtered));
+    }
+    return filtered;
   } catch { return []; }
 }
 function setSavedReportsLS(period: ReportPeriod, reports: SavedReport[]) {
-  localStorage.setItem(storageKey(SAVED_REPORTS_BASE, period), JSON.stringify(reports));
+  localStorage.setItem(storageKey(SAVED_REPORTS_BASE, period), JSON.stringify(filterByRetention(reports)));
 }
 function getSavedPrompt(period: ReportPeriod): { prompt: string; urls: string[] } | null {
   try {
@@ -193,11 +212,18 @@ function setSavedPrompt(period: ReportPeriod, prompt: string, urls: string[]) {
 function getSavedAnalyses(period: ReportPeriod): SavedAnalysis[] {
   try {
     const raw = localStorage.getItem(storageKey(AI_ANALYSIS_BASE, period));
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) return [];
+    const all: SavedAnalysis[] = JSON.parse(raw);
+    const filtered = filterByRetention(all);
+    // 만료된 항목이 있으면 localStorage도 정리
+    if (filtered.length !== all.length) {
+      localStorage.setItem(storageKey(AI_ANALYSIS_BASE, period), JSON.stringify(filtered));
+    }
+    return filtered;
   } catch { return []; }
 }
 function setSavedAnalysesLS(period: ReportPeriod, analyses: SavedAnalysis[]) {
-  localStorage.setItem(storageKey(AI_ANALYSIS_BASE, period), JSON.stringify(analyses));
+  localStorage.setItem(storageKey(AI_ANALYSIS_BASE, period), JSON.stringify(filterByRetention(analyses)));
 }
 function getPromptHistory(period: ReportPeriod): SavedPromptItem[] {
   try {
@@ -963,6 +989,15 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
                 <span className="text-xs text-muted-foreground flex items-center gap-1">
                   <Clock className="w-3 h-3" /> {aiAnalysis.analyzedAt}
                 </span>
+                <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => {
+                  navigator.clipboard.writeText(aiAnalysis.analysis).then(() => {
+                    toast({ title: "복사 완료", description: "AI 분석 결과가 클립보드에 복사되었습니다." });
+                  }).catch(() => {
+                    toast({ title: "복사 실패", description: "클립보드 복사에 실패했습니다.", variant: "destructive" });
+                  });
+                }}>
+                  <Copy className="w-3 h-3" /> 복사
+                </Button>
                 <Button variant="ghost" size="sm" onClick={() => setAiAnalysis(null)} className="h-7 text-xs">닫기</Button>
               </div>
             </div>
@@ -1493,14 +1528,26 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
           <div className="flex justify-end gap-2 pt-3 border-t">
             <Button variant="outline" onClick={() => setViewingAnalysis(null)}>닫기</Button>
             {viewingAnalysis && (
-              <Button onClick={() => {
-                setAiAnalysis(viewingAnalysis.result);
-                setViewingAnalysis(null);
-                toast({ title: "분석 결과 로드", description: "이전 AI 분석 결과가 로드되었습니다." });
-              }} className="gap-1.5">
-                <BrainCircuit className="w-4 h-4" />
-                이 분석 결과 사용
-              </Button>
+              <>
+                <Button variant="outline" className="gap-1.5" onClick={() => {
+                  navigator.clipboard.writeText(viewingAnalysis.result.analysis).then(() => {
+                    toast({ title: "복사 완료", description: "AI 분석 결과가 클립보드에 복사되었습니다." });
+                  }).catch(() => {
+                    toast({ title: "복사 실패", description: "클립보드 복사에 실패했습니다.", variant: "destructive" });
+                  });
+                }}>
+                  <Copy className="w-4 h-4" />
+                  복사
+                </Button>
+                <Button onClick={() => {
+                  setAiAnalysis(viewingAnalysis.result);
+                  setViewingAnalysis(null);
+                  toast({ title: "분석 결과 로드", description: "이전 AI 분석 결과가 로드되었습니다." });
+                }} className="gap-1.5">
+                  <BrainCircuit className="w-4 h-4" />
+                  이 분석 결과 사용
+                </Button>
+              </>
             )}
           </div>
         </DialogContent>

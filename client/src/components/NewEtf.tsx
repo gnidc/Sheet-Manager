@@ -81,6 +81,7 @@ export default function NewEtf() {
   const [selectedEtf, setSelectedEtf] = useState<SavedEtf | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [commentEtf, setCommentEtf] = useState<SavedEtf | null>(null);
 
   // 저장된 ETF 목록 조회
   const { data: savedEtfs, isLoading } = useQuery<SavedEtf[]>({
@@ -226,11 +227,12 @@ export default function NewEtf() {
                     <TableHead>ETF코드</TableHead>
                     <TableHead>ETF명</TableHead>
                     <TableHead>카테고리</TableHead>
-                    <TableHead>운용사</TableHead>
+                    <TableHead className="text-right">시가총액</TableHead>
+                    <TableHead className="text-right">총보수</TableHead>
                     <TableHead className="text-right">현재가</TableHead>
                     <TableHead className="text-right">등락률</TableHead>
-                    <TableHead>코멘트</TableHead>
-                    <TableHead>등록일</TableHead>
+                    <TableHead className="text-center">코멘트</TableHead>
+                    <TableHead>상장일</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -255,18 +257,31 @@ export default function NewEtf() {
                         <TableCell className="font-mono text-sm">{etf.etfCode}</TableCell>
                         <TableCell className="font-medium">{etf.etfName}</TableCell>
                         <TableCell className="text-sm text-muted-foreground">{etf.category || "-"}</TableCell>
-                        <TableCell className="text-sm text-muted-foreground">{etf.assetManager || "-"}</TableCell>
+                        <TableCell className="text-right text-sm text-muted-foreground whitespace-nowrap">{etf.totalAsset || "-"}</TableCell>
+                        <TableCell className="text-right text-sm text-muted-foreground whitespace-nowrap">{etf.expense || "-"}</TableCell>
                         <TableCell className="text-right font-medium">
                           {etf.recentPrice ? Number(etf.recentPrice).toLocaleString() : "-"}
                         </TableCell>
                         <TableCell className={`text-right font-bold text-sm ${change > 0 ? "text-red-500" : change < 0 ? "text-blue-500" : "text-gray-500"}`}>
                           {change > 0 ? "+" : ""}{change ? change.toFixed(2) + "%" : "-"}
                         </TableCell>
-                        <TableCell className="text-sm text-muted-foreground max-w-[200px] truncate">
-                          {etf.comment || "-"}
+                        <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
+                          {etf.comment ? (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 px-2 text-xs text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+                              onClick={() => setCommentEtf(etf)}
+                            >
+                              <FileText className="h-3 w-3 mr-1" />
+                              보기
+                            </Button>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">-</span>
+                          )}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                          {new Date(etf.createdAt).toLocaleDateString("ko-KR")}
+                          {etf.listingDate || "-"}
                         </TableCell>
                       </TableRow>
                     );
@@ -277,6 +292,21 @@ export default function NewEtf() {
           </CardContent>
         </Card>
       )}
+
+      {/* 코멘트 보기 다이얼로그 */}
+      <Dialog open={!!commentEtf} onOpenChange={() => setCommentEtf(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <FileText className="h-4 w-4" />
+              {commentEtf?.etfName} 코멘트
+            </DialogTitle>
+          </DialogHeader>
+          <div className="text-sm whitespace-pre-wrap leading-relaxed max-h-[400px] overflow-y-auto p-1">
+            {commentEtf?.comment || "코멘트가 없습니다."}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* 신규등록 팝업 */}
       <RegisterDialog
