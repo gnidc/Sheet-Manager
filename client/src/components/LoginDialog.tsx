@@ -117,96 +117,137 @@ export function LoginDialog() {
 
   // Google Initialize + prompt 트리거
   const triggerGoogleLogin = useCallback(() => {
-    if (!window.google || !GOOGLE_CLIENT_ID) return;
+    if (!GOOGLE_CLIENT_ID) return;
 
-    // 매 클릭마다 initialize (콜백이 항상 최신이 되도록)
-    window.google.accounts.id.initialize({
-      client_id: GOOGLE_CLIENT_ID,
-      callback: handleGoogleCallback,
-      auto_select: false,
-      cancel_on_tap_outside: false,
-    });
+    // 팝업 차단 방지: 사용자 클릭 이벤트 내에서 즉시 팝업을 열어야 함
+    // prompt() 콜백 내에서 window.open()을 호출하면 브라우저가 팝업을 차단함
+    const width = 500;
+    const height = 600;
+    const left = window.screenX + (window.outerWidth - width) / 2;
+    const top = window.screenY + (window.outerHeight - height) / 2;
+    
+    // 1. 먼저 빈 팝업을 즉시 열고 (사용자 클릭 컨텍스트에서)
+    const popup = window.open(
+      "about:blank",
+      "google-login",
+      `width=${width},height=${height},left=${left},top=${top}`
+    );
+    
+    if (!popup) {
+      // 팝업이 차단된 경우
+      toast({
+        title: "팝업 차단됨",
+        description: "팝업 차단을 해제해주세요.",
+        variant: "destructive",
+      });
+      return;
+    }
 
-    window.google.accounts.id.prompt((notification: any) => {
-      // prompt가 표시되지 않을 경우 (이미 dismiss 등) 팝업 방식 fallback
-      if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
-        // FedCM/One Tap이 차단된 경우 - popup 방식 사용
-        const width = 500;
-        const height = 600;
-        const left = window.screenX + (window.outerWidth - width) / 2;
-        const top = window.screenY + (window.outerHeight - height) / 2;
-        const popup = window.open(
-          `https://accounts.google.com/o/oauth2/v2/auth?client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(window.location.origin)}&response_type=token&scope=openid%20email%20profile&prompt=select_account`,
-          "google-login",
-          `width=${width},height=${height},left=${left},top=${top}`
-        );
+    // 2. Google One Tap 시도 (SDK가 로드된 경우만)
+    if (window.google) {
+      window.google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: (response: any) => {
+          // One Tap 성공 시 팝업 닫고 credential 사용
+          popup.close();
+          handleGoogleCallback(response);
+        },
+        auto_select: false,
+        cancel_on_tap_outside: false,
+      });
 
-        // 팝업에서 redirect 감지
-        if (popup) {
-          const checkInterval = setInterval(() => {
-            try {
-              if (popup.closed) {
-                clearInterval(checkInterval);
-                return;
-              }
-              const url = popup.location.href;
-              if (url.startsWith(window.location.origin)) {
-                clearInterval(checkInterval);
-                const hash = popup.location.hash;
-                const params = new URLSearchParams(hash.substring(1));
-                const accessToken = params.get("access_token");
-                popup.close();
-                
-                if (accessToken) {
-                  // access_token으로 사용자 정보 가져오기
-                  fetch(`https://www.googleapis.com/oauth2/v3/userinfo?access_token=${accessToken}`)
-                    .then(res => res.json())
-                    .then(async (userInfo) => {
-                      // ID token 대신 access_token + userinfo 방식으로 서버에 전달
-                      const remember = rememberMeRef.current;
-                      setGoogleLoading(true);
-                      try {
-                        const res = await fetch("/api/auth/google", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ 
-                            accessToken, 
-                            userInfo,
-                            rememberMe: remember 
-                          }),
-                          credentials: "include",
-                        });
-                        if (res.ok) {
-                          setLoginOpen(false);
-                          toast({
-                            title: "로그인 성공",
-                            description: remember
-                              ? "Google 계정으로 로그인되었습니다 (24시간 유지)"
-                              : "Google 계정으로 로그인되었습니다",
-                          });
-                          // auth 상태 갱신
-                          const { queryClient } = await import("@/lib/queryClient");
-                          queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
-                        }
-                      } catch {
-                        toast({
-                          title: "로그인 실패",
-                          description: "Google 인증에 실패했습니다",
-                          variant: "destructive",
-                        });
-                      } finally {
-                        setGoogleLoading(false);
-                      }
-                    });
-                }
-              }
-            } catch {
-              // cross-origin 에러 무시 (팝업이 google 도메인에 있을 때)
-            }
-          }, 500);
+      // prompt 시도 - 성공하면 One Tap UI 표시, 실패하면 팝업으로 진행
+      let oneTapShown = false;
+      window.google.accounts.id.prompt((notification: any) => {
+        if (!notification.isNotDisplayed() && !notification.isSkippedMoment()) {
+          oneTapShown = true;
+          // One Tap이 표시되면 팝업은 닫기
+          popup.close();
         }
+        if (!oneTapShown && (notification.isNotDisplayed() || notification.isSkippedMoment())) {
+          // One Tap 실패 → 이미 열린 팝업을 Google OAuth URL로 리다이렉트
+          popup.location.href = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(window.location.origin)}&response_type=token&scope=openid%20email%20profile&prompt=select_account`;
+        }
+      });
+    } else {
+      // Google SDK 미로드 시 바로 OAuth 팝업으로 진행
+      popup.location.href = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(window.location.origin)}&response_type=token&scope=openid%20email%20profile&prompt=select_account`;
+    }
+
+    // 3. 팝업에서 redirect 감지 (One Tap 실패 시 OAuth 팝업 flow)
+    const checkInterval = setInterval(() => {
+      try {
+        if (popup.closed) {
+          clearInterval(checkInterval);
+          return;
+        }
+        const url = popup.location.href;
+        if (url && url.startsWith(window.location.origin)) {
+          clearInterval(checkInterval);
+          const hash = popup.location.hash;
+          const params = new URLSearchParams(hash.substring(1));
+          const accessToken = params.get("access_token");
+          popup.close();
+          
+          if (accessToken) {
+            // access_token으로 사용자 정보 가져오기
+            setGoogleLoading(true);
+            fetch(`https://www.googleapis.com/oauth2/v3/userinfo?access_token=${accessToken}`)
+              .then(res => res.json())
+              .then(async (userInfo) => {
+                const remember = rememberMeRef.current;
+                try {
+                  const res = await fetch("/api/auth/google", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ 
+                      accessToken, 
+                      userInfo,
+                      rememberMe: remember 
+                    }),
+                    credentials: "include",
+                  });
+                  if (res.ok) {
+                    setLoginOpen(false);
+                    toast({
+                      title: "로그인 성공",
+                      description: remember
+                        ? "Google 계정으로 로그인되었습니다 (24시간 유지)"
+                        : "Google 계정으로 로그인되었습니다",
+                    });
+                    const { queryClient } = await import("@/lib/queryClient");
+                    queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
+                  } else {
+                    toast({
+                      title: "로그인 실패",
+                      description: "서버 인증에 실패했습니다",
+                      variant: "destructive",
+                    });
+                  }
+                } catch {
+                  toast({
+                    title: "로그인 실패",
+                    description: "Google 인증에 실패했습니다",
+                    variant: "destructive",
+                  });
+                } finally {
+                  setGoogleLoading(false);
+                }
+              })
+              .catch(() => {
+                setGoogleLoading(false);
+                toast({
+                  title: "로그인 실패",
+                  description: "사용자 정보를 가져올 수 없습니다",
+                  variant: "destructive",
+                });
+              });
+          }
+        }
+      } catch {
+        // cross-origin 에러 무시 (팝업이 google 도메인에 있을 때)
       }
-    });
+    }, 500);
   }, [handleGoogleCallback, toast]);
 
   const handleAdminLogin = async (e: React.FormEvent) => {
@@ -250,7 +291,7 @@ export function LoginDialog() {
       variant="outline"
       className="w-full h-11 gap-3 text-sm font-medium border-gray-300 hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-800"
       onClick={triggerGoogleLogin}
-      disabled={!googleReady || googleLoading || isGoogleLoggingIn}
+      disabled={googleLoading || isGoogleLoggingIn}
     >
       {googleLoading || isGoogleLoggingIn ? (
         <Loader2 className="w-5 h-5 animate-spin" />
@@ -322,9 +363,6 @@ export function LoginDialog() {
                   Google 계정으로 간편 로그인
                 </p>
                 <GoogleLoginButton />
-                {!googleReady && (
-                  <p className="text-xs text-muted-foreground">Google SDK 로딩 중...</p>
-                )}
               </div>
             ) : (
               <div className="text-center text-sm text-muted-foreground p-4 bg-muted/30 rounded-lg">
