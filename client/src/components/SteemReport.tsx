@@ -206,7 +206,7 @@ function loadAIAnalysisFromStorage(): { text: string; periodLabel: string } | nu
             lines.push('---');
             lines.push('*이 보고서는 AI(Gemini)가 실시간 데이터를 기반으로 자동 생성한 내용입니다.*');
             lines.push('*데이터 출처: 네이버 금융, FnGuide, 한국투자증권 API*');
-            return { text: lines.join('\n'), periodLabel: "ETF실시간" };
+            return { text: lines.join('\n'), periodLabel: "실시간ETF" };
           }
         }
       } catch { /* skip */ }
@@ -250,7 +250,7 @@ const PERIOD_TITLE_MAP: Record<string, string> = {
   "주간": "금주의 자산시장 동향",
   "월간": "이달의 자산시장 동향",
   "연간": "올해의 자산시장 동향",
-  "ETF실시간": "오늘의 자산시장 동향",
+  "실시간ETF": "오늘의 자산시장 동향",
 };
 
 function getDefaultTitle(periodLabel?: string): string {

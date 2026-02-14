@@ -1210,7 +1210,7 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
                         <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { setViewingAnalysis(saved); setAnalysisFontSize(DEFAULT_FONT_SIZE); }}>
                           <div className="flex items-center gap-2">
                             <span className="text-sm font-medium truncate hover:text-primary transition-colors">
-                              {isEtfSource ? "ETF실시간 AI 분석" : "AI 분석 보고서"}
+                              {isEtfSource ? "실시간ETF AI 분석" : "AI 분석 보고서"}
                             </span>
                             {idx === 0 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-bold flex-shrink-0">최신</span>}
                             {isEtfSource && <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400 font-medium flex-shrink-0">📈 ETF</span>}

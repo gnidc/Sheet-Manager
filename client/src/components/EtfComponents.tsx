@@ -487,7 +487,7 @@ export default function EtfComponents() {
 
   const topGainers = topGainersData?.items || [];
 
-  // 관심ETF(Core) 실시간 시세
+  // 관심(Core) 실시간 시세
   const { data: watchlistRealtimeData, isFetching: isLoadingWatchlist, refetch: refetchWatchlist } = useQuery<{
     items: (TopGainerEtf & { sector?: string; memo?: string })[];
     updatedAt: string;
@@ -510,7 +510,7 @@ export default function EtfComponents() {
     );
   }, [watchlistItemsRaw, coreSortDir]);
 
-  // 관심ETF(Satellite) 실시간 시세
+  // 관심(Satellite) 실시간 시세
   const { data: satelliteRealtimeData, isFetching: isLoadingSatellite, refetch: refetchSatellite } = useQuery<{
     items: (TopGainerEtf & { sector?: string; memo?: string })[];
     updatedAt: string;
@@ -626,7 +626,7 @@ export default function EtfComponents() {
 
   return (
     <div className="space-y-6">
-      {/* ===== 관심ETF(Core) 실시간 시세 ===== */}
+      {/* ===== 관심(Core) 실시간 시세 ===== */}
       {watchlistItems.length > 0 && (
         <Card>
           <CardHeader className="pb-3">
@@ -634,7 +634,7 @@ export default function EtfComponents() {
               <div className="flex items-center gap-2 flex-wrap">
                 <CardTitle className="text-lg flex items-center gap-2">
                   <Star className="w-5 h-5 text-yellow-500" />
-                  관심ETF(Core) 실시간 시세
+                  관심(Core) 실시간 시세
                 </CardTitle>
                 <Button
                   variant="outline"
@@ -678,7 +678,7 @@ export default function EtfComponents() {
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              관심ETF(Core)에 등록된 종목의 실시간 시세 | <span className="text-blue-500">ETF명 클릭 → funetf 상세페이지</span> | <span className="text-muted-foreground">행 클릭 → 구성종목 시세</span>
+              관심(Core)에 등록된 종목의 실시간 시세 | <span className="text-blue-500">ETF명 클릭 → funetf 상세페이지</span> | <span className="text-muted-foreground">행 클릭 → 구성종목 시세</span>
             </p>
           </CardHeader>
           <CardContent className="p-0">
@@ -809,7 +809,7 @@ export default function EtfComponents() {
         </Card>
       )}
 
-      {/* ===== 관심ETF(Satellite) 실시간 시세 ===== */}
+      {/* ===== 관심(Satellite) 실시간 시세 ===== */}
       {satelliteItems.length > 0 && (
         <Card>
           <CardHeader className="pb-3">
@@ -817,7 +817,7 @@ export default function EtfComponents() {
               <div className="flex items-center gap-2 flex-wrap">
                 <CardTitle className="text-lg flex items-center gap-2">
                   🛰️
-                  관심ETF(Satellite) 실시간 시세
+                  관심(Satellite) 실시간 시세
                 </CardTitle>
                 <Button
                   variant="outline"
@@ -861,7 +861,7 @@ export default function EtfComponents() {
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              관심ETF(Satellite)에 등록된 종목의 실시간 시세 | <span className="text-red-500 font-bold">종목 클릭 → 아래 구성종목 실시간 시세 & 차트 표시</span>
+              관심(Satellite)에 등록된 종목의 실시간 시세 | <span className="text-red-500 font-bold">종목 클릭 → 아래 구성종목 실시간 시세 & 차트 표시</span>
             </p>
           </CardHeader>
           <CardContent className="p-0">

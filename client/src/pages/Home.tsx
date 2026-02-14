@@ -120,7 +120,7 @@ export default function Home() {
                   <Button variant="outline" size="sm" className="gap-1.5 border-amber-300 text-amber-600 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-400 dark:hover:bg-amber-950 btn-hover-lift">
                     <Zap className="w-3.5 h-3.5" />
                     <span className="hidden sm:inline text-xs">자동매매</span>
-                  </Button>
+                    </Button>
                 </Link>
               )}
               <LoginDialog />
@@ -148,11 +148,11 @@ export default function Home() {
                     </button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent side="right" align="start" className="min-w-[160px]">
-                    <DropdownMenuItem onClick={() => setActiveTab("etf-components")} className="gap-2 cursor-pointer">📊 ETF실시간</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setActiveTab("etf-components")} className="gap-2 cursor-pointer">📊 실시간ETF</DropdownMenuItem>
                     <DropdownMenuItem onClick={() => setActiveTab("new-etf")} className="gap-2 cursor-pointer">🆕 신규ETF</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setActiveTab("watchlist-etf")} className="gap-2 cursor-pointer">⭐ 관심ETF(Core)</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setActiveTab("satellite-etf")} className="gap-2 cursor-pointer">🛰️ 관심ETF(Satellite)</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setActiveTab("etf-search")} className="gap-2 cursor-pointer">🔍 ETF검색/비교/AI추천</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setActiveTab("watchlist-etf")} className="gap-2 cursor-pointer">⭐ 관심(Core)</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setActiveTab("satellite-etf")} className="gap-2 cursor-pointer">🛰️ 관심(Satellite)</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setActiveTab("etf-search")} className="gap-2 cursor-pointer">🔍 ETF통합검색</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               ) : (
@@ -161,11 +161,11 @@ export default function Home() {
                   label="ETF정보"
                   active={["etf-components","new-etf","watchlist-etf","satellite-etf","etf-search"].includes(activeTab)}
                   items={[
-                    { label: "📊 ETF실시간", value: "etf-components" },
+                    { label: "📊 실시간ETF", value: "etf-components" },
                     { label: "🆕 신규ETF", value: "new-etf" },
-                    { label: "⭐ 관심ETF(Core)", value: "watchlist-etf" },
-                    { label: "🛰️ 관심ETF(Satellite)", value: "satellite-etf" },
-                    { label: "🔍 ETF검색/비교/AI추천", value: "etf-search" },
+                    { label: "⭐ 관심(Core)", value: "watchlist-etf" },
+                    { label: "🛰️ 관심(Satellite)", value: "satellite-etf" },
+                    { label: "🔍 ETF통합검색", value: "etf-search" },
                   ]}
                   activeTab={activeTab}
                   onSelect={setActiveTab}
@@ -317,32 +317,32 @@ export default function Home() {
             <TabsList className="flex w-full overflow-x-auto bg-violet-100/70 dark:bg-violet-950/30">
               <TabsTrigger value="home" className="gap-1 text-xs shrink-0">
                 <HomeIcon className="h-3.5 w-3.5" />
-                홈
-              </TabsTrigger>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
+              홈
+            </TabsTrigger>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
                   <button className={`inline-flex items-center gap-1 shrink-0 px-2 py-1.5 text-xs font-medium rounded-sm transition-all ${
                     activeTab === "etf-components" || activeTab === "new-etf" || activeTab === "watchlist-etf" || activeTab === "satellite-etf"
                       ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"
                   }`}>
                     <Scale className="h-3.5 w-3.5" /> ETF <ChevronDown className="h-2.5 w-2.5" />
-                  </button>
-                </DropdownMenuTrigger>
+                </button>
+              </DropdownMenuTrigger>
                 <DropdownMenuContent align="center" className="min-w-[130px]">
-                  <DropdownMenuItem onClick={() => setActiveTab("etf-components")} className="gap-2 cursor-pointer text-xs">📊 ETF실시간</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setActiveTab("etf-components")} className="gap-2 cursor-pointer text-xs">📊 실시간ETF</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => setActiveTab("new-etf")} className="gap-2 cursor-pointer text-xs">🆕 신규ETF</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setActiveTab("watchlist-etf")} className="gap-2 cursor-pointer text-xs">⭐ 관심ETF(Core)</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setActiveTab("satellite-etf")} className="gap-2 cursor-pointer text-xs">🛰️ 관심ETF(Satellite)</DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
+                  <DropdownMenuItem onClick={() => setActiveTab("watchlist-etf")} className="gap-2 cursor-pointer text-xs">⭐ 관심(Core)</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setActiveTab("satellite-etf")} className="gap-2 cursor-pointer text-xs">🛰️ 관심(Satellite)</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
                   <button className={`inline-flex items-center gap-1 shrink-0 px-2 py-1.5 text-xs font-medium rounded-sm transition-all ${
                     activeTab.startsWith("markets-") ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"
                   }`}>
                     <Globe className="h-3.5 w-3.5" /> Markets <ChevronDown className="h-2.5 w-2.5" />
-                  </button>
-                </DropdownMenuTrigger>
+                </button>
+              </DropdownMenuTrigger>
                 <DropdownMenuContent align="center" className="min-w-[120px]">
                   <DropdownMenuItem onClick={() => setActiveTab("markets-domestic")} className="gap-2 cursor-pointer text-xs">🇰🇷 국내증시</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => setActiveTab("markets-global")} className="gap-2 cursor-pointer text-xs">🌍 해외증시</DropdownMenuItem>
@@ -350,17 +350,17 @@ export default function Home() {
                   <DropdownMenuItem onClick={() => setActiveTab("markets-news")} className="gap-2 cursor-pointer text-xs">📰 뉴스</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => setActiveTab("markets-research")} className="gap-2 cursor-pointer text-xs">📊 리서치</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => setActiveTab("markets-calendar")} className="gap-2 cursor-pointer text-xs">📅 캘린더</DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
                   <button className={`inline-flex items-center gap-1 shrink-0 px-2 py-1.5 text-xs font-medium rounded-sm transition-all ${
                     activeTab.startsWith("stocks-") ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"
                   }`}>
                     <BarChart3 className="h-3.5 w-3.5" /> 주식 <ChevronDown className="h-2.5 w-2.5" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="center" className="min-w-[120px]">
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="center" className="min-w-[120px]">
                   <DropdownMenuItem onClick={() => setActiveTab("stocks-domestic")} className="gap-2 cursor-pointer text-xs">🇰🇷 국내주식</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => setActiveTab("stocks-overseas")} className="gap-2 cursor-pointer text-xs">🌐 해외주식</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => setActiveTab("stocks-10x")} className="gap-2 cursor-pointer text-xs">🚀 10X</DropdownMenuItem>
@@ -381,7 +381,7 @@ export default function Home() {
                   <DropdownMenuItem onClick={() => setActiveTab("strategy-yearly")} className="gap-2 cursor-pointer text-xs">📉 연간</DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-              {isAdmin && (
+                {isAdmin && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button className={`inline-flex items-center gap-1 shrink-0 px-2 py-1.5 text-xs font-medium rounded-sm transition-all ${
@@ -393,12 +393,12 @@ export default function Home() {
                 <DropdownMenuContent align="center" className="min-w-[120px]">
                   <DropdownMenuItem onClick={() => setActiveTab("crypto-steem-reader")} className="gap-2 cursor-pointer text-xs">📖 스팀글읽기</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => setActiveTab("crypto-steem-report")} className="gap-2 cursor-pointer text-xs">🔬 스팀보고서</DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              </DropdownMenuContent>
+            </DropdownMenu>
               )}
               <TabsTrigger value="ai-agent" className="gap-1 text-xs shrink-0">
                 <Bot className="h-3.5 w-3.5 text-purple-500" /> AI Agent
-              </TabsTrigger>
+            </TabsTrigger>
               <TabsTrigger value="bookmarks" className="gap-1 text-xs shrink-0">
                 <Star className="h-3.5 w-3.5 text-yellow-500" /> 즐겨찾기
             </TabsTrigger>
@@ -420,8 +420,8 @@ export default function Home() {
           <TabsContent value="etf-components">
             {isLoggedIn ? (
               <Suspense fallback={<ContentSkeleton />}>
-                <EtfComponents />
-              </Suspense>
+              <EtfComponents />
+            </Suspense>
             ) : (
               <LoginRequiredMessage />
             )}
@@ -528,7 +528,7 @@ export default function Home() {
               <Suspense fallback={<ContentSkeleton />}>
                 <DailyStrategy period={period} isAdmin={isAdmin} />
               </Suspense>
-            </TabsContent>
+          </TabsContent>
           ))}
 
           {/* CRYPTO - 스팀글읽기 (Admin 전용) */}
@@ -1282,7 +1282,7 @@ interface NoticeItem {
 // ===== 바로가기 버튼 =====
 function QuickLinks({ onNavigate }: { onNavigate: (tab: string) => void }) {
   const shortcuts = [
-    { label: "ETF실시간", tab: "etf-components", icon: "📈" },
+    { label: "실시간ETF", tab: "etf-components", icon: "📈" },
     { label: "ETF검색", tab: "etf-search", icon: "🔍" },
     { label: "국내증시", tab: "markets-domestic", icon: "🇰🇷" },
     { label: "해외증시", tab: "markets-global", icon: "🌍" },

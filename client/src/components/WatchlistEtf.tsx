@@ -285,7 +285,7 @@ export default function WatchlistEtfComponent({ listType = "core" }: WatchlistEt
 
   // listType에 따른 API 경로 및 라벨 설정
   const apiBase = listType === "satellite" ? "/api/satellite-etfs" : "/api/watchlist-etfs";
-  const listTitle = listType === "satellite" ? "관심ETF(Satellite)" : "관심ETF(Core)";
+  const listTitle = listType === "satellite" ? "관심(Satellite)" : "관심(Core)";
   const TitleIcon = listType === "satellite" ? Satellite : Star;
   const iconColor = listType === "satellite" ? "text-blue-500" : "text-yellow-500";
   const isSatellite = listType === "satellite";
@@ -584,7 +584,7 @@ export default function WatchlistEtfComponent({ listType = "core" }: WatchlistEt
                 {isAdmin && (
                   <Button size="sm" onClick={() => { setAddTarget("common"); setAddDialogOpen(true); }} className="gap-1.5">
                     <Plus className="w-4 h-4" />
-                    관심ETF 추가
+                    관심종목 추가
                   </Button>
                 )}
                 {checkedIds.size > 0 && (
@@ -690,17 +690,17 @@ export default function WatchlistEtfComponent({ listType = "core" }: WatchlistEt
                 <>
                   <Button size="sm" variant="default" onClick={() => { setAddTarget("common"); setAddDialogOpen(true); }} className="gap-1.5">
                     <Users className="w-4 h-4" />
-                    공통관심ETF 추가
+                    공통관심 추가
                   </Button>
                   <Button size="sm" variant="outline" onClick={() => { setAddTarget("personal"); setAddDialogOpen(true); }} className="gap-1.5">
                     <User className="w-4 h-4" />
-                    개인관심ETF 추가
+                    개인관심 추가
                   </Button>
                 </>
               ) : isLoggedIn ? (
                 <Button size="sm" variant="outline" onClick={() => { setAddTarget("personal"); setAddDialogOpen(true); }} className="gap-1.5">
                   <User className="w-4 h-4" />
-                  개인관심ETF 등록
+                  개인관심 등록
                 </Button>
               ) : null}
               {checkedIds.size > 0 && (

@@ -48,10 +48,10 @@ interface AdminUser {
 const PAGE_NAMES: Record<string, string> = {
   "/": "홈",
   "home": "홈",
-  "etf-components": "ETF실시간",
+  "etf-components": "실시간ETF",
   "new-etf": "신규ETF",
-  "watchlist-etf": "관심ETF(Core)",
-  "satellite-etf": "관심ETF(Satellite)",
+  "watchlist-etf": "관심(Core)",
+  "satellite-etf": "관심(Satellite)",
   "etf-search": "ETF검색",
   "markets-domestic": "국내증시",
   "markets-global": "해외증시",

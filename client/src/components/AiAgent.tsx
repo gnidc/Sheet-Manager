@@ -69,10 +69,10 @@ const DEFAULT_SYSTEM_PROMPT = `너는 경제 전문가이자 투자의 마이스
 // 메뉴 이름 매핑
 const TAB_NAMES: Record<string, string> = {
   "home": "🏠 홈",
-  "etf-components": "📊 ETF실시간",
+  "etf-components": "📊 실시간ETF",
   "new-etf": "🆕 신규ETF",
-  "watchlist-etf": "⭐ 관심ETF(Core)",
-  "satellite-etf": "🛰️ 관심ETF(Satellite)",
+  "watchlist-etf": "⭐ 관심(Core)",
+  "satellite-etf": "🛰️ 관심(Satellite)",
   "markets-domestic": "🇰🇷 국내증시",
   "markets-global": "🌍 해외증시",
   "markets-research": "📑 리서치",
@@ -753,7 +753,7 @@ export default function AiAgent({ isAdmin, onNavigate }: { isAdmin: boolean; onN
                     {[
                       { q: "코스피 지수 알려줘", icon: "📊" },
                       { q: "삼성전자 현재가 조회", icon: "🔍" },
-                      { q: "ETF실시간 메뉴로 이동", icon: "📈" },
+                      { q: "실시간ETF 메뉴로 이동", icon: "📈" },
                       { q: "상승률 TOP 종목 보여줘", icon: "🚀" },
                       { q: "내 계좌 잔고 확인", icon: "💰" },
                       { q: "환율 정보 알려줘", icon: "💱" },

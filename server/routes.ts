@@ -1794,7 +1794,7 @@ ${researchList}
     }
   });
 
-  // ===== 관심ETF(Core) ETF 실시간 시세 (top-gainers와 동일 포맷 + 배당수익률) =====
+  // ===== 관심(Core) ETF 실시간 시세 (top-gainers와 동일 포맷 + 배당수익률) =====
   app.get("/api/watchlist-etfs/realtime", async (req, res) => {
     try {
       const watchlist = await storage.getWatchlistEtfs();
@@ -1853,7 +1853,7 @@ ${researchList}
     }
   });
 
-  // ===== 관심ETF(Satellite) 실시간 시세 (공통 + 개인 합산) =====
+  // ===== 관심(Satellite) 실시간 시세 (공통 + 개인 합산) =====
   app.get("/api/satellite-etfs/realtime", async (req, res) => {
     try {
       const userId = (req as any).session?.userId;
@@ -6596,7 +6596,7 @@ ${etfListStr}
     }
   });
 
-  // ========== 관심ETF(Core) ETF 관리 ==========
+  // ========== 관심(Core) ETF 관리 ==========
 
   // 관심 ETF 목록 조회 (모든 로그인 유저)
   app.get("/api/watchlist-etfs", requireUser, async (req, res) => {
@@ -6737,7 +6737,7 @@ ${etfListStr}
     }
   });
 
-  // ========== 관심ETF(Satellite) 관리 ==========
+  // ========== 관심(Satellite) 관리 ==========
 
   // Satellite ETF 목록 조회 (공통 + 개인)
   app.get("/api/satellite-etfs", requireUser, async (req, res) => {

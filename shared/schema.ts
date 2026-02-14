@@ -150,7 +150,7 @@ export const insertSavedEtfSchema = createInsertSchema(savedEtfs).omit({ id: tru
 export type SavedEtf = typeof savedEtfs.$inferSelect;
 export type InsertSavedEtf = z.infer<typeof insertSavedEtfSchema>;
 
-// ========== 관심ETF(Core) ==========
+// ========== 관심(Core) ==========
 export const watchlistEtfs = pgTable("watchlist_etfs", {
   id: serial("id").primaryKey(),
   etfCode: text("etf_code").notNull(),
@@ -165,7 +165,7 @@ export const insertWatchlistEtfSchema = createInsertSchema(watchlistEtfs).omit({
 export type WatchlistEtf = typeof watchlistEtfs.$inferSelect;
 export type InsertWatchlistEtf = z.infer<typeof insertWatchlistEtfSchema>;
 
-// ========== 관심ETF(Satellite) ==========
+// ========== 관심(Satellite) ==========
 export const satelliteEtfs = pgTable("satellite_etfs", {
   id: serial("id").primaryKey(),
   etfCode: text("etf_code").notNull(),

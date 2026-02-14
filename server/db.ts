@@ -322,7 +322,16 @@ const dbProxy = new Proxy({} as ReturnType<typeof drizzle>, {
     // 따라서 Proxy를 통해 메서드를 래핑하여 각 호출 시마다 새로운 Client를 생성
     return function(...args: any[]) {
       return (async () => {
-        const client = createClient();
+        const connectionString = getDatabaseUrl();
+        const needsSSL = connectionString.includes('supabase') || 
+                         connectionString.includes('pooler') || 
+                         connectionString.includes('sslmode=');
+        const sslConfig = needsSSL ? { rejectUnauthorized: false } : undefined;
+        const client = new Client({
+          connectionString,
+          ssl: sslConfig,
+          connectionTimeoutMillis: 8000,
+        });
         try {
           await client.connect();
           const db = drizzle(client, { schema });
