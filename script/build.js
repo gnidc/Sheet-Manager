@@ -38,6 +38,57 @@ async function buildAll() {
   await rm("dist", { recursive: true, force: true });
   console.log("Cleaned dist directory");
 
+  // shared 디렉토리의 stale .js 파일 삭제 후 TypeScript → JavaScript 재컴파일
+  // esbuild가 .ts 대신 stale .js를 읽는 문제를 방지
+  // Vercel은 api/만 자동 컴파일하므로 shared/는 수동으로 컴파일 필요
+  console.log("building shared files...");
+  const { readdir } = await import("fs/promises");
+  const { join, extname } = await import("path");
+
+  async function cleanSharedJs(dir) {
+    const entries = await readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await cleanSharedJs(fullPath);
+      } else if (extname(entry.name) === ".js") {
+        await rm(fullPath, { force: true });
+      }
+    }
+  }
+
+  // 1단계: stale .js 파일 삭제
+  await cleanSharedJs("shared");
+  console.log("Cleaned stale shared .js files");
+
+  // 2단계: .ts → .js 재컴파일
+  async function compileSharedDir(dir) {
+    const entries = await readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await compileSharedDir(fullPath);
+      } else if (extname(entry.name) === ".ts" && !entry.name.endsWith(".d.ts")) {
+        const outPath = fullPath.replace(/\.ts$/, ".js");
+        await esbuild({
+          entryPoints: [fullPath],
+          platform: "node",
+          bundle: false,
+          format: "esm",
+          outfile: outPath,
+          define: {
+            "process.env.NODE_ENV": '"production"',
+          },
+          minify: false,
+          logLevel: "warning",
+        });
+      }
+    }
+  }
+
+  await compileSharedDir("shared");
+  console.log("Shared files build completed");
+
   console.log("building client...");
   await viteBuild();
   console.log("Client build completed");
@@ -61,47 +112,13 @@ async function buildAll() {
     },
     minify: true,
     external: externals,
-    logLevel: "warning", // chunk size 경고는 표시하되 info 레벨 로그는 줄임
+    logLevel: "warning",
   });
   console.log("Server build completed");
 
   // api/index.ts는 빌드하지 않고 TypeScript 그대로 사용
   // Vercel이 자동으로 TypeScript를 컴파일하므로 소스 파일만 배포하면 됨
   console.log("Skipping api/index.ts build - Vercel will compile TypeScript automatically");
-  
-  // shared 디렉토리의 TypeScript 파일들을 JavaScript로 컴파일
-  // Vercel은 api/만 자동 컴파일하므로 shared/는 수동으로 컴파일 필요
-  console.log("building shared files...");
-  const { readdir, stat } = await import("fs/promises");
-  const { join, extname, basename } = await import("path");
-  
-  async function compileSharedDir(dir) {
-    const entries = await readdir(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      const fullPath = join(dir, entry.name);
-      if (entry.isDirectory()) {
-        await compileSharedDir(fullPath);
-      } else if (extname(entry.name) === ".ts" && !entry.name.endsWith(".d.ts")) {
-        const outPath = fullPath.replace(/\.ts$/, ".js");
-        await esbuild({
-          entryPoints: [fullPath],
-          platform: "node",
-          bundle: false, // shared 파일들은 번들링하지 않음
-          format: "esm",
-          outfile: outPath,
-          define: {
-            "process.env.NODE_ENV": '"production"',
-          },
-          minify: false, // shared 파일들은 minify하지 않음
-          // bundle: false일 때는 external 옵션을 사용할 수 없음
-          logLevel: "warning",
-        });
-      }
-    }
-  }
-  
-  await compileSharedDir("shared");
-  console.log("Shared files build completed");
   
   // Verify dist/public exists
   const { existsSync } = await import("fs");
