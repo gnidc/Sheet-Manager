@@ -37,6 +37,7 @@ const TenBaggerStocks = lazy(() => import("@/components/TenBaggerStocks"));
 const AiAgent = lazy(() => import("@/components/AiAgent"));
 const EtfSearch = lazy(() => import("@/components/EtfSearch"));
 const AdminDashboard = lazy(() => import("@/components/AdminDashboard"));
+const MarketsEtc = lazy(() => import("@/components/MarketsEtc"));
 
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -511,7 +512,9 @@ export default function Home() {
 
           {/* ETC (Commodity, Forex, Crypto, Bond) */}
           <TabsContent value="markets-etc">
-            <MarketsView type="etc" />
+            <Suspense fallback={<ContentSkeleton />}>
+              <MarketsEtc />
+            </Suspense>
           </TabsContent>
 
           {/* 증시캘린더 */}

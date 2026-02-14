@@ -143,36 +143,94 @@ const DEFAULT_TEMPLATE = `# 📊 ETF 시장 일일 보고서
 
 const DEFAULT_TAGS = ["kr", "krsuccess", "avle", "investment"];
 
-// ===== localStorage에서 AI 트렌드 분석 보고서 불러오기 =====
-function loadAIAnalysisFromStorage(): string | null {
-  try {
-    const saved = localStorage.getItem("etf_analysis_result");
-    if (!saved) return null;
-    const data = JSON.parse(saved) as {
-      analysis: string;
-      analyzedAt: string;
-      dataPoints?: { risingCount: number; fallingCount: number; newsCount: number; market: string };
-    };
-    if (!data.analysis) return null;
+// ===== localStorage에서 AI 분석 보고서 불러오기 (일간/주간/월간/연간 중 가장 최근 보고서) =====
+const PERIOD_LABELS: Record<string, string> = {
+  daily: "일간", weekly: "주간", monthly: "월간", yearly: "연간",
+};
 
-    const lines: string[] = [];
-    lines.push(`# Comment`);
-    lines.push('');
-    lines.push('');
-    lines.push('');
-    lines.push(`# 📊 AI 트렌드 분석 보고서`);
-    lines.push('');
-    lines.push(`> 분석 시간: ${data.analyzedAt}`);
-    if (data.dataPoints) {
-      lines.push(`> 📈 상승 ETF ${data.dataPoints.risingCount}개 | 📉 하락 ETF ${data.dataPoints.fallingCount}개 | 📰 뉴스 ${data.dataPoints.newsCount}건 | ${data.dataPoints.market || ""}`);
+function loadAIAnalysisFromStorage(): { text: string; periodLabel: string } | null {
+  try {
+    // 1) 투자전략(DailyStrategy)에서 저장된 일간/주간/월간/연간 AI 분석 보고서 검색
+    const periods = ["daily", "weekly", "monthly", "yearly"] as const;
+    let latestAnalysis: { analysis: string; createdAt: string; period: string } | null = null;
+    let latestTs = 0;
+
+    for (const p of periods) {
+      const raw = localStorage.getItem(`strategy_ai_analysis_${p}`);
+      if (!raw) continue;
+      try {
+        const all = JSON.parse(raw) as Array<{
+          id: string;
+          createdAt: string;
+          result: { analysis: string; analyzedAt?: string };
+        }>;
+        if (!all.length) continue;
+        // id가 Date.now() 기반이므로 숫자로 정렬
+        const sorted = [...all].sort((a, b) => Number(b.id) - Number(a.id));
+        const newest = sorted[0];
+        const ts = Number(newest.id);
+        if (ts > latestTs && newest.result?.analysis) {
+          latestTs = ts;
+          latestAnalysis = {
+            analysis: newest.result.analysis,
+            createdAt: newest.createdAt,
+            period: p,
+          };
+        }
+      } catch { /* skip */ }
     }
-    lines.push('');
-    lines.push(data.analysis);
-    lines.push('');
-    lines.push('---');
-    lines.push('*이 보고서는 AI(Gemini)가 실시간 데이터를 기반으로 자동 생성한 내용입니다.*');
-    lines.push('*데이터 출처: 네이버 금융, FnGuide, 한국투자증권 API*');
-    return lines.join('\n');
+
+    // 2) 기존 ETF 실시간 분석 결과도 후보로 확인
+    const etfSaved = localStorage.getItem("etf_analysis_result");
+    if (etfSaved) {
+      try {
+        const etfData = JSON.parse(etfSaved) as {
+          analysis: string;
+          analyzedAt: string;
+          dataPoints?: { risingCount: number; fallingCount: number; newsCount: number; market: string };
+        };
+        // analyzedAt 시간 문자열에서 대략적 타임스탬프 추정 (최근 것인지 비교)
+        if (etfData.analysis) {
+          // etf_analysis_result에는 id/타임스탬프가 없으므로 0으로 설정 (투자전략 결과 우선)
+          if (!latestAnalysis) {
+            const lines: string[] = [];
+            lines.push(`# Comment`);
+            lines.push(''); lines.push(''); lines.push('');
+            lines.push(`# 📊 AI 트렌드 분석 보고서`);
+            lines.push('');
+            lines.push(`> 분석 시간: ${etfData.analyzedAt}`);
+            if (etfData.dataPoints) {
+              lines.push(`> 📈 상승 ETF ${etfData.dataPoints.risingCount}개 | 📉 하락 ETF ${etfData.dataPoints.fallingCount}개 | 📰 뉴스 ${etfData.dataPoints.newsCount}건 | ${etfData.dataPoints.market || ""}`);
+            }
+            lines.push(''); lines.push(etfData.analysis); lines.push('');
+            lines.push('---');
+            lines.push('*이 보고서는 AI(Gemini)가 실시간 데이터를 기반으로 자동 생성한 내용입니다.*');
+            lines.push('*데이터 출처: 네이버 금융, FnGuide, 한국투자증권 API*');
+            return { text: lines.join('\n'), periodLabel: "ETF실시간" };
+          }
+        }
+      } catch { /* skip */ }
+    }
+
+    // 3) 투자전략 보고서가 있으면 포맷팅
+    if (latestAnalysis) {
+      const pLabel = PERIOD_LABELS[latestAnalysis.period] || latestAnalysis.period;
+      const lines: string[] = [];
+      lines.push(`# Comment`);
+      lines.push(''); lines.push(''); lines.push('');
+      lines.push(`# 📊 AI ${pLabel} 분석 보고서`);
+      lines.push('');
+      lines.push(`> 생성 시간: ${latestAnalysis.createdAt}`);
+      lines.push('');
+      lines.push(latestAnalysis.analysis);
+      lines.push('');
+      lines.push('---');
+      lines.push('*이 보고서는 AI가 자동 수집 데이터를 기반으로 생성한 내용입니다.*');
+      lines.push('*데이터 출처: 네이버 금융, Yahoo Finance, CoinGecko, 한국투자증권 API 등*');
+      return { text: lines.join('\n'), periodLabel: pLabel };
+    }
+
+    return null;
   } catch {
     return null;
   }
@@ -187,8 +245,17 @@ function getTodayYYMMDD(): string {
   return `${yy}${mm}${dd}`;
 }
 
-function getDefaultTitle(): string {
-  return `(${getTodayYYMMDD()}) 오늘의 자산시장 동향`;
+const PERIOD_TITLE_MAP: Record<string, string> = {
+  "일간": "오늘의 자산시장 동향",
+  "주간": "금주의 자산시장 동향",
+  "월간": "이달의 자산시장 동향",
+  "연간": "올해의 자산시장 동향",
+  "ETF실시간": "오늘의 자산시장 동향",
+};
+
+function getDefaultTitle(periodLabel?: string): string {
+  const suffix = PERIOD_TITLE_MAP[periodLabel || ""] || "오늘의 자산시장 동향";
+  return `(${getTodayYYMMDD()}) ${suffix}`;
 }
 
 export default function SteemReport() {
@@ -197,8 +264,11 @@ export default function SteemReport() {
 
   // ===== 폼 상태 =====
   const [steemAccount, setSteemAccount] = useState(() => localStorage.getItem("steem_account") || "seraphim502");
-  const [postTitle, setPostTitle] = useState(getDefaultTitle());
-  const [postBody, setPostBody] = useState(() => loadAIAnalysisFromStorage() || "");
+  const [postTitle, setPostTitle] = useState(() => {
+    const loaded = loadAIAnalysisFromStorage();
+    return getDefaultTitle(loaded?.periodLabel);
+  });
+  const [postBody, setPostBody] = useState(() => loadAIAnalysisFromStorage()?.text || "");
   const [tagsInput, setTagsInput] = useState(DEFAULT_TAGS.join(", "));
   const [mainTag, setMainTag] = useState("kr");
   const [isPosting, setIsPosting] = useState(false);
@@ -490,16 +560,17 @@ export default function SteemReport() {
     toast({ title: "초안을 편집 모드로 불러왔습니다" });
   }, []);
 
-  // ===== AI 분석 보고서 불러오기 =====
+  // ===== AI 분석 보고서 불러오기 (일간/주간/월간/연간 중 가장 최근) =====
   const handleLoadAIReport = useCallback(() => {
     const aiReport = loadAIAnalysisFromStorage();
     if (aiReport) {
-      setPostBody(aiReport);
-      toast({ title: "✅ AI 트렌드 분석 보고서를 불러왔습니다" });
+      setPostBody(aiReport.text);
+      setPostTitle(getDefaultTitle(aiReport.periodLabel));
+      toast({ title: `✅ AI ${aiReport.periodLabel} 분석 보고서를 불러왔습니다` });
     } else {
       toast({
         title: "보고서 없음",
-        description: "AI 트렌드 분석 보고서가 없습니다. ETF실시간 탭에서 먼저 AI 분석을 실행해주세요.",
+        description: "AI 분석 보고서가 없습니다. 투자전략 탭에서 먼저 AI 분석을 실행해주세요.",
         variant: "destructive",
       });
     }

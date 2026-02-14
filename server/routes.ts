@@ -2540,6 +2540,556 @@ ${researchList}
     }
   });
 
+  // ========== ETC Markets (채권·환율·크립토·원자재) ==========
+
+  // --- 1) 채권/금리 ---
+  app.get("/api/markets/etc/bonds", async (_req, res) => {
+    try {
+      const bonds: any[] = [];
+      const domestic: any[] = [];
+
+      // 1) 해외 금리: Yahoo Finance API (가장 안정적)
+      const yahooBonds = [
+        { name: "미국 국채 10년", symbol: "^TNX", category: "us" },
+        { name: "미국 국채 5년", symbol: "^FVX", category: "us" },
+        { name: "미국 국채 30년", symbol: "^TYX", category: "us" },
+        { name: "미국 T-Bill 13주", symbol: "^IRX", category: "us" },
+      ];
+
+      await Promise.all(yahooBonds.map(async (b) => {
+        try {
+          const apiRes = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(b.symbol)}`, {
+            params: { range: "5d", interval: "1d" },
+            headers: { "User-Agent": UA }, timeout: 8000,
+          });
+          const meta = apiRes.data?.chart?.result?.[0]?.meta || {};
+          const price = meta.regularMarketPrice || 0;
+          const prev = meta.chartPreviousClose || meta.previousClose || 0;
+          const change = prev ? parseFloat((price - prev).toFixed(3)) : 0;
+          const changeRate = prev ? parseFloat(((change / prev) * 100).toFixed(2)) : 0;
+          bonds.push({
+            name: b.name,
+            symbol: b.symbol,
+            category: b.category,
+            value: price,
+            change,
+            changeRate,
+            high: meta.regularMarketDayHigh || 0,
+            low: meta.regularMarketDayLow || 0,
+          });
+        } catch {
+          bonds.push({ name: b.name, symbol: b.symbol, category: b.category, value: 0, change: 0, changeRate: 0, high: 0, low: 0 });
+        }
+      }));
+
+      // 2) 국내 금리: Naver 금융 marketindex 페이지 스크래핑
+      try {
+        const exRes = await axios.get("https://finance.naver.com/marketindex/", {
+          headers: { "User-Agent": UA }, timeout: 8000, responseType: "arraybuffer",
+        });
+        const iconv = await import("iconv-lite");
+        const html = iconv.default.decode(Buffer.from(exRes.data), "euc-kr");
+        const $ = cheerio.load(html);
+
+        // 국내시장금리 테이블
+        const bondTable = $("h3:contains('국내시장금리')").closest(".section_bond, .section, div").find("table");
+        if (bondTable.length === 0) {
+          // 대안: 텍스트 기반 검색
+          $("table").each((_i, tbl) => {
+            const text = $(tbl).text();
+            if (text.includes("CD금리") || text.includes("국고채") || text.includes("콜 금리")) {
+              $(tbl).find("tr").each((_j, row) => {
+                const tds = $(row).find("td, th");
+                if (tds.length >= 2) {
+                  const name = $(tds[0]).text().trim();
+                  const value = parseFloat($(tds[1]).text().replace(/,/g, "")) || 0;
+                  const change = tds.length >= 3 ? parseFloat($(tds[2]).text().replace(/,/g, "")) || 0 : 0;
+                  // 채권/금리와 관련 없는 항목 제외 (주의: "금"은 "금리"에 포함되므로 정확 매칭 필요)
+                  const nonBondPatterns = [/달러\s*인덱스/, /환율/, /USD\//, /유가/, /^금\s/, /국제\s*금/];
+                  if (name && value > 0 && !name.includes("구분") && !nonBondPatterns.some(p => p.test(name))) {
+                    domestic.push({
+                      name,
+                      symbol: name,
+                      category: "kr",
+                      value,
+                      change,
+                      changeRate: value > 0 ? parseFloat(((change / (value - change)) * 100).toFixed(2)) : 0,
+                      high: 0, low: 0,
+                    });
+                  }
+                }
+              });
+            }
+          });
+        } else {
+          bondTable.find("tr").each((_j, row) => {
+            const tds = $(row).find("td, th");
+            if (tds.length >= 2) {
+              const name = $(tds[0]).text().trim();
+              const value = parseFloat($(tds[1]).text().replace(/,/g, "")) || 0;
+              const change = tds.length >= 3 ? parseFloat($(tds[2]).text().replace(/,/g, "")) || 0 : 0;
+              const nonBondPatterns = [/달러\s*인덱스/, /환율/, /USD\//, /유가/, /^금\s/, /국제\s*금/];
+              if (name && value > 0 && !name.includes("구분") && !nonBondPatterns.some(p => p.test(name))) {
+                domestic.push({
+                  name,
+                  symbol: name,
+                  category: "kr",
+                  value,
+                  change,
+                  changeRate: value > 0 ? parseFloat(((change / (value - change)) * 100).toFixed(2)) : 0,
+                  high: 0, low: 0,
+                });
+              }
+            }
+          });
+        }
+      } catch (err: any) {
+        console.log("[ETC] Naver domestic bonds error:", err.message);
+      }
+
+      res.json({
+        bonds: [...bonds, ...domestic],
+        updatedAt: new Date().toLocaleString("ko-KR"),
+      });
+    } catch (error: any) {
+      console.error("[ETC] Bonds error:", error.message);
+      res.status(500).json({ message: "채권/금리 조회 실패" });
+    }
+  });
+
+  // --- 2) 환율 ---
+  app.get("/api/markets/etc/forex", async (_req, res) => {
+    try {
+      const rates: any[] = [];
+      const forexSymbols = [
+        { name: "USD/KRW (달러)", symbol: "FX_USDKRW" },
+        { name: "EUR/KRW (유로)", symbol: "FX_EURKRW" },
+        { name: "JPY/KRW (엔화, 100엔)", symbol: "FX_JPYKRW" },
+        { name: "CNY/KRW (위안)", symbol: "FX_CNYKRW" },
+        { name: "GBP/KRW (파운드)", symbol: "FX_GBPKRW" },
+        { name: "EUR/USD", symbol: "FX_EURUSD" },
+        { name: "USD/JPY", symbol: "FX_USDJPY" },
+        { name: "GBP/USD", symbol: "FX_GBPUSD" },
+      ];
+
+      // Naver marketindex API
+      try {
+        const exRes = await axios.get("https://finance.naver.com/marketindex/", {
+          headers: { "User-Agent": UA }, timeout: 8000, responseType: "arraybuffer",
+        });
+        const iconv = await import("iconv-lite");
+        const html = iconv.default.decode(Buffer.from(exRes.data), "euc-kr");
+        const $ = cheerio.load(html);
+
+        // 환율 관련 키워드 (비환율 항목 필터링용)
+        const nonForexKeywords = ["WTI", "휘발유", "국내 금", "국제 금", "금 선물"];
+
+        // 주요 환율 리스트
+        $(".market_data .data_lst li").each((_i, el) => {
+          // .blind 텍스트만 사용해서 중복 방지
+          let name = $(el).find("h3 .blind").first().text().trim().replace("전일대비", "").trim();
+          if (!name) name = $(el).find("h3").first().text().trim().replace("전일대비", "").trim();
+          const value = parseFloat($(el).find(".value").text().replace(/,/g, "")) || 0;
+          const change = parseFloat($(el).find(".change").text().replace(/,/g, "")) || 0;
+          const isDown = $(el).find(".ico.down").length > 0 || $(el).hasClass("dn");
+          // 비환율 항목 제외
+          if (name && value > 0 && !nonForexKeywords.some(kw => name.includes(kw))) {
+            rates.push({
+              name,
+              value,
+              change: isDown ? -Math.abs(change) : Math.abs(change),
+              changeRate: value > 0 ? parseFloat(((change / (value - (isDown ? -change : change))) * 100).toFixed(2)) : 0,
+            });
+          }
+        });
+
+        // 추가 환율 (exchange rate table)
+        $(".tbl_exchange tbody tr").each((_i, row) => {
+          const tds = $(row).find("td");
+          if (tds.length < 4) return;
+          const currency = $(tds[0]).text().trim();
+          const ttb = parseFloat($(tds[1]).text().replace(/,/g, "")) || 0;
+          const tts = parseFloat($(tds[2]).text().replace(/,/g, "")) || 0;
+          const baseRate = parseFloat($(tds[3]).text().replace(/,/g, "")) || 0;
+          if (currency && baseRate > 0 && rates.length < 20) {
+            rates.push({ name: currency, value: baseRate, change: 0, changeRate: 0, ttb, tts });
+          }
+        });
+      } catch {}
+
+      // 폴백: polling API
+      if (rates.length === 0) {
+        await Promise.all(forexSymbols.map(async (f) => {
+          try {
+            const apiRes = await axios.get(`https://polling.finance.naver.com/api/realtime?query=${f.symbol}`, {
+              headers: { "User-Agent": UA }, timeout: 5000,
+            });
+            const data = apiRes.data?.result?.areas?.[0]?.datas?.[0] || {};
+            rates.push({
+              name: f.name,
+              value: parseFloat(data.nv) || 0,
+              change: parseFloat(data.cv) || 0,
+              changeRate: parseFloat(data.cr) || 0,
+            });
+          } catch {
+            rates.push({ name: f.name, value: 0, change: 0, changeRate: 0 });
+          }
+        }));
+      }
+
+      res.json({ rates, updatedAt: new Date().toLocaleString("ko-KR") });
+    } catch (error: any) {
+      console.error("[ETC] Forex error:", error.message);
+      res.status(500).json({ message: "환율 조회 실패" });
+    }
+  });
+
+  // --- 3) 크립토 ---
+  app.get("/api/markets/etc/crypto", async (_req, res) => {
+    try {
+      const cryptos: any[] = [];
+      let usdKrw = 1440; // 기본 환율 (fallback)
+
+      // USD/KRW 환율 조회
+      try {
+        const fxRes = await axios.get("https://finance.naver.com/marketindex/", {
+          headers: { "User-Agent": UA }, timeout: 5000, responseType: "arraybuffer",
+        });
+        const iconv = await import("iconv-lite");
+        const fxHtml = iconv.default.decode(Buffer.from(fxRes.data), "euc-kr");
+        const $fx = cheerio.load(fxHtml);
+        $fx(".market_data .data_lst li").each((_i, el) => {
+          const name = $fx(el).find("h3 .blind").first().text().trim();
+          if (name.includes("미국") || name.includes("USD")) {
+            const val = parseFloat($fx(el).find(".value").text().replace(/,/g, "")) || 0;
+            if (val > 0) usdKrw = val;
+          }
+        });
+      } catch {}
+      
+      // CoinGecko Public API - USD 기준으로 조회
+      try {
+        const cgRes = await axios.get("https://api.coingecko.com/api/v3/coins/markets", {
+          params: {
+            vs_currency: "usd",
+            order: "market_cap_desc",
+            per_page: 20,
+            page: 1,
+            sparkline: true,
+            price_change_percentage: "1h,24h,7d",
+          },
+          headers: { "User-Agent": UA },
+          timeout: 10000,
+        });
+        
+        for (const coin of cgRes.data || []) {
+          const priceUsd = coin.current_price || 0;
+          cryptos.push({
+            rank: coin.market_cap_rank,
+            name: coin.name,
+            symbol: (coin.symbol || "").toUpperCase(),
+            image: coin.image,
+            priceUsd,
+            priceKrw: Math.round(priceUsd * usdKrw),
+            change24h: coin.price_change_percentage_24h || 0,
+            change7d: coin.price_change_percentage_7d_in_currency || 0,
+            change1h: coin.price_change_percentage_1h_in_currency || 0,
+            marketCapUsd: coin.market_cap,
+            volume24hUsd: coin.total_volume,
+            high24hUsd: coin.high_24h,
+            low24hUsd: coin.low_24h,
+            sparkline: coin.sparkline_in_7d?.price?.filter((_: any, i: number) => i % 8 === 0) || [],
+          });
+        }
+      } catch (cgErr: any) {
+        console.log("[ETC] CoinGecko fallback to Upbit:", cgErr.message);
+        // 폴백: Upbit (KRW 기준)
+        const cryptoSymbols = [
+          { name: "비트코인", symbol: "BTC" },
+          { name: "이더리움", symbol: "ETH" },
+          { name: "리플", symbol: "XRP" },
+          { name: "솔라나", symbol: "SOL" },
+          { name: "에이다", symbol: "ADA" },
+          { name: "도지코인", symbol: "DOGE" },
+        ];
+        for (const c of cryptoSymbols) {
+          try {
+            const apiRes = await axios.get(`https://api.upbit.com/v1/ticker?markets=KRW-${c.symbol}`, {
+              headers: { "User-Agent": UA }, timeout: 5000,
+            });
+            const data = apiRes.data?.[0] || {};
+            const priceKrw = data.trade_price || 0;
+            cryptos.push({
+              rank: cryptos.length + 1,
+              name: c.name,
+              symbol: c.symbol,
+              image: "",
+              priceUsd: usdKrw > 0 ? parseFloat((priceKrw / usdKrw).toFixed(2)) : 0,
+              priceKrw,
+              change24h: (data.signed_change_rate || 0) * 100,
+              change7d: 0,
+              change1h: 0,
+              marketCapUsd: 0,
+              volume24hUsd: usdKrw > 0 ? Math.round((data.acc_trade_price_24h || 0) / usdKrw) : 0,
+              high24hUsd: usdKrw > 0 ? parseFloat(((data.high_price || 0) / usdKrw).toFixed(2)) : 0,
+              low24hUsd: usdKrw > 0 ? parseFloat(((data.low_price || 0) / usdKrw).toFixed(2)) : 0,
+              sparkline: [],
+            });
+          } catch {}
+        }
+      }
+
+      // 김치프리미엄 계산 (BTC, ETH, XRP) - Upbit 국내가격 vs CoinGecko 글로벌가격
+      const kimchiTargets = ["BTC", "ETH", "XRP", "USDT", "USDC"];
+      const kimchiPremiums: Record<string, { upbitKrw: number; premium: number }> = {};
+      try {
+        const upbitMarkets = kimchiTargets.map(s => `KRW-${s}`).join(",");
+        const upbitRes = await axios.get(`https://api.upbit.com/v1/ticker?markets=${upbitMarkets}`, {
+          headers: { "User-Agent": UA }, timeout: 5000,
+        });
+        for (const tick of upbitRes.data || []) {
+          const sym = (tick.market || "").replace("KRW-", "");
+          const upbitKrw = tick.trade_price || 0;
+          const globalCoin = cryptos.find((c: any) => c.symbol === sym);
+          if (globalCoin && globalCoin.priceUsd > 0 && usdKrw > 0 && upbitKrw > 0) {
+            const globalKrw = globalCoin.priceUsd * usdKrw;
+            const premium = parseFloat((((upbitKrw - globalKrw) / globalKrw) * 100).toFixed(2));
+            kimchiPremiums[sym] = { upbitKrw, premium };
+            // crypto 항목에 김치프리미엄 정보 추가
+            globalCoin.upbitKrw = upbitKrw;
+            globalCoin.kimchiPremium = premium;
+          }
+        }
+      } catch (kpErr: any) {
+        console.log("[ETC] Kimchi premium fetch error:", kpErr.message);
+      }
+
+      res.json({ cryptos, usdKrw, kimchiPremiums, updatedAt: new Date().toLocaleString("ko-KR") });
+    } catch (error: any) {
+      console.error("[ETC] Crypto error:", error.message);
+      res.status(500).json({ message: "크립토 조회 실패" });
+    }
+  });
+
+  // --- 4) 원자재/실물자산 ---
+  app.get("/api/markets/etc/commodities", async (_req, res) => {
+    try {
+      const commodities: any[] = [];
+      
+      // Yahoo Finance API로 원자재 데이터 (가장 안정적)
+      const yahooCommodities = [
+        { name: "금 (Gold)", symbol: "GC=F", category: "metals", unit: "USD/oz" },
+        { name: "은 (Silver)", symbol: "SI=F", category: "metals", unit: "USD/oz" },
+        { name: "구리 (Copper)", symbol: "HG=F", category: "metals", unit: "USD/lb" },
+        { name: "WTI 원유", symbol: "CL=F", category: "energy", unit: "USD/bbl" },
+        { name: "브렌트 원유", symbol: "BZ=F", category: "energy", unit: "USD/bbl" },
+        { name: "천연가스", symbol: "NG=F", category: "energy", unit: "USD/MMBtu" },
+        { name: "옥수수 (Corn)", symbol: "ZC=F", category: "agriculture", unit: "USd/bu" },
+        { name: "대두 (Soybean)", symbol: "ZS=F", category: "agriculture", unit: "USd/bu" },
+        { name: "밀 (Wheat)", symbol: "ZW=F", category: "agriculture", unit: "USd/bu" },
+        { name: "팔라듐", symbol: "PA=F", category: "metals", unit: "USD/oz" },
+        { name: "백금 (Platinum)", symbol: "PL=F", category: "metals", unit: "USD/oz" },
+      ];
+
+      await Promise.all(yahooCommodities.map(async (c) => {
+        try {
+          const apiRes = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(c.symbol)}`, {
+            params: { range: "5d", interval: "1d" },
+            headers: { "User-Agent": UA }, timeout: 8000,
+          });
+          const meta = apiRes.data?.chart?.result?.[0]?.meta || {};
+          const price = meta.regularMarketPrice || 0;
+          const prev = meta.chartPreviousClose || meta.previousClose || 0;
+          const change = prev ? parseFloat((price - prev).toFixed(3)) : 0;
+          const changeRate = prev ? parseFloat(((change / prev) * 100).toFixed(2)) : 0;
+          commodities.push({
+            name: c.name,
+            symbol: c.symbol,
+            category: c.category,
+            value: price,
+            change,
+            changeRate,
+            high: meta.regularMarketDayHigh || 0,
+            low: meta.regularMarketDayLow || 0,
+            unit: c.unit,
+          });
+        } catch {
+          commodities.push({ name: c.name, symbol: c.symbol, category: c.category, value: 0, change: 0, changeRate: 0, high: 0, low: 0, unit: c.unit });
+        }
+      }));
+
+      // Naver에서 국내 금가격, WTI, 휘발유 추가 (원화 기준)
+      try {
+        const exRes = await axios.get("https://finance.naver.com/marketindex/", {
+          headers: { "User-Agent": UA }, timeout: 8000, responseType: "arraybuffer",
+        });
+        const iconv = await import("iconv-lite");
+        const html = iconv.default.decode(Buffer.from(exRes.data), "euc-kr");
+        const $ = cheerio.load(html);
+
+        $(".market_data .data_lst li").each((_i, el) => {
+          let name = $(el).find("h3 .blind").first().text().trim().replace("전일대비", "").trim();
+          if (!name) name = $(el).find("h3").first().text().trim().replace("전일대비", "").trim();
+          const value = parseFloat($(el).find(".value").text().replace(/,/g, "")) || 0;
+          const change = parseFloat($(el).find(".change").text().replace(/,/g, "")) || 0;
+          const isDown = $(el).find(".ico.down").length > 0 || $(el).hasClass("dn");
+          if (name && value > 0 && (name.includes("국내 금") || name.includes("휘발유"))) {
+            commodities.push({
+              name: name + " (KRW)",
+              symbol: name,
+              category: name.includes("금") ? "metals" : "energy",
+              value,
+              change: isDown ? -Math.abs(change) : Math.abs(change),
+              changeRate: value > 0 ? parseFloat(((change / (value - (isDown ? -change : change))) * 100).toFixed(2)) : 0,
+              high: 0, low: 0,
+              unit: "원",
+            });
+          }
+        });
+      } catch {}
+
+      res.json({ commodities, updatedAt: new Date().toLocaleString("ko-KR") });
+    } catch (error: any) {
+      console.error("[ETC] Commodities error:", error.message);
+      res.status(500).json({ message: "원자재 조회 실패" });
+    }
+  });
+
+  // --- 5) ETC 마켓 차트 (캔들차트 데이터) ---
+  app.get("/api/markets/etc/chart", async (req, res) => {
+    try {
+      const symbol = req.query.symbol as string;
+      const type = req.query.type as string; // bond, forex, crypto, commodity
+      const period = (req.query.period as string) || "day";
+
+      if (!symbol) return res.status(400).json({ message: "symbol 파라미터가 필요합니다" });
+
+      // Yahoo Finance 심볼 매핑
+      let yahooSymbol = symbol;
+
+      // 환율: 내부 심볼 → Yahoo Finance 변환
+      const forexMap: Record<string, string> = {
+        "FX_USDKRW": "USDKRW=X",
+        "FX_EURKRW": "EURKRW=X",
+        "FX_JPYKRW": "JPYKRW=X",
+        "FX_CNYKRW": "CNYKRW=X",
+        "FX_GBPKRW": "GBPKRW=X",
+        "FX_EURUSD": "EURUSD=X",
+        "FX_USDJPY": "USDJPY=X",
+        "FX_GBPUSD": "GBPUSD=X",
+        // 네이버에서 가져온 이름 기반 매핑
+        "미국 USD": "USDKRW=X",
+        "유럽연합 EUR": "EURKRW=X",
+        "일본 JPY(100엔)": "JPYKRW=X",
+        "일본 JPY": "JPYKRW=X",
+        "중국 CNY": "CNYKRW=X",
+        "영국 GBP": "GBPKRW=X",
+        "EUR/USD": "EURUSD=X",
+        "USD/JPY": "USDJPY=X",
+        "GBP/USD": "GBPUSD=X",
+      };
+      if (type === "forex") {
+        yahooSymbol = forexMap[symbol] || symbol;
+        // 여전히 FX_ prefix면 변환 시도
+        if (yahooSymbol === symbol && !symbol.includes("=")) {
+          // 일반 텍스트 이름에서 매칭 시도
+          for (const [key, val] of Object.entries(forexMap)) {
+            if (symbol.includes(key) || key.includes(symbol)) {
+              yahooSymbol = val;
+              break;
+            }
+          }
+        }
+      }
+
+      // 크립토: 심볼 → Yahoo Finance (BTC → BTC-USD)
+      if (type === "crypto") {
+        yahooSymbol = symbol.includes("-") ? symbol : `${symbol}-USD`;
+      }
+
+      // 국내 금리 (^으로 시작하지 않는 채권)는 차트 데이터 없음
+      if (type === "bond" && !symbol.startsWith("^")) {
+        return res.json({ chartData: [], message: "국내 금리 데이터는 차트를 지원하지 않습니다" });
+      }
+
+      // 국내 원자재 (원화 기준)는 차트 데이터 없음
+      if (type === "commodity" && !symbol.includes("=") && !symbol.includes("-") && !symbol.match(/^[A-Z]/)) {
+        return res.json({ chartData: [], message: "국내 원자재 데이터는 차트를 지원하지 않습니다" });
+      }
+
+      const periodConfig: Record<string, { interval: string; range: string }> = {
+        day: { interval: "1d", range: "6mo" },
+        week: { interval: "1wk", range: "2y" },
+        month: { interval: "1mo", range: "5y" },
+      };
+      const pConf = periodConfig[period] || periodConfig.day;
+
+      const chartRes = await axios.get(
+        `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}`,
+        {
+          params: { range: pConf.range, interval: pConf.interval },
+          headers: { "User-Agent": UA },
+          timeout: 10000,
+        }
+      ).catch(() => null);
+
+      const result = chartRes?.data?.chart?.result?.[0];
+      if (!result) return res.json({ chartData: [] });
+
+      const timestamps = result.timestamp || [];
+      const quote = result.indicators?.quote?.[0] || {};
+      const opens = quote.open || [];
+      const highs = quote.high || [];
+      const lows = quote.low || [];
+      const closes = quote.close || [];
+      const volumes = quote.volume || [];
+
+      const items: any[] = [];
+      for (let i = 0; i < timestamps.length; i++) {
+        if (opens[i] == null || closes[i] == null) continue;
+        const dt = new Date(timestamps[i] * 1000);
+        const decimals = type === "bond" ? 4 : type === "forex" ? 4 : type === "crypto" ? 2 : 2;
+        items.push({
+          date: `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`,
+          open: parseFloat(opens[i]?.toFixed(decimals)) || 0,
+          high: parseFloat(highs[i]?.toFixed(decimals)) || 0,
+          low: parseFloat(lows[i]?.toFixed(decimals)) || 0,
+          close: parseFloat(closes[i]?.toFixed(decimals)) || 0,
+          volume: volumes[i] || 0,
+        });
+      }
+
+      // 이동평균선 계산
+      const calcMA = (data: any[], maPeriod: number) => {
+        return data.map((item, idx) => {
+          if (idx < maPeriod - 1) return { ...item, [`ma${maPeriod}`]: null };
+          const slice = data.slice(idx - maPeriod + 1, idx + 1);
+          const avg = slice.reduce((s: number, d: any) => s + d.close, 0) / maPeriod;
+          return { ...item, [`ma${maPeriod}`]: parseFloat(avg.toFixed(4)) };
+        });
+      };
+
+      let enriched = items;
+      enriched = calcMA(enriched, 5);
+      enriched = calcMA(enriched, 20);
+      enriched = calcMA(enriched, 60);
+
+      const meta = result.meta || {};
+      res.json({
+        chartData: enriched,
+        meta: {
+          symbol: meta.symbol,
+          currency: meta.currency,
+          exchangeName: meta.exchangeName,
+          regularMarketPrice: meta.regularMarketPrice,
+        },
+      });
+    } catch (error: any) {
+      console.error("[ETC] Chart error:", error.message);
+      res.status(500).json({ message: "차트 데이터 조회 실패" });
+    }
+  });
+
   // ========== 종목코드 검색 ==========
   app.get("/api/stock/search", async (req, res) => {
     try {
@@ -6800,8 +7350,8 @@ ${etfListStr}
         }
       }
 
-      // 3) 시장 데이터 수집 (기존 로직 활용)
-      const [indices, volumeRanking, news] = await Promise.all([
+      // 3) 시장 데이터 수집 (주식 + 채권 + 환율 + 크립토 + 원자재)
+      const [indices, volumeRanking, news, bondsRaw, forexRaw, cryptoRaw, commoditiesRaw] = await Promise.all([
         kisApi.getMarketIndices().catch(() => []),
         kisApi.getVolumeRanking().catch(() => []),
         (async () => {
@@ -6816,6 +7366,133 @@ ${etfListStr}
               const title = $(el).find("a").first().text().trim();
               if (title) items.push(title);
             });
+            return items;
+          } catch { return []; }
+        })(),
+        // === 채권/금리 ===
+        (async () => {
+          try {
+            const bonds: any[] = [];
+            // 국제 금리 (Yahoo Finance)
+            const ySymbols = [
+              { symbol: "^TNX", name: "미국 국채 10년" },
+              { symbol: "^FVX", name: "미국 국채 5년" },
+              { symbol: "^TYX", name: "미국 국채 30년" },
+              { symbol: "^IRX", name: "미국 T-Bill 13주" },
+            ];
+            for (const s of ySymbols) {
+              try {
+                const r = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${s.symbol}`, {
+                  params: { range: "5d", interval: "1d" }, headers: { "User-Agent": UA }, timeout: 8000,
+                });
+                const meta = r.data?.chart?.result?.[0]?.meta;
+                const closes = r.data?.chart?.result?.[0]?.indicators?.quote?.[0]?.close || [];
+                const last = meta?.regularMarketPrice || closes[closes.length - 1] || 0;
+                const prev = closes.length >= 2 ? closes[closes.length - 2] : last;
+                bonds.push({ name: s.name, value: last, change: +(last - prev).toFixed(3), changeRate: prev ? +((last - prev) / prev * 100).toFixed(2) : 0 });
+              } catch {}
+            }
+            return bonds;
+          } catch { return []; }
+        })(),
+        // === 환율 ===
+        (async () => {
+          try {
+            const iconv = await import("iconv-lite");
+            const fxRes = await axios.get("https://finance.naver.com/marketindex/", {
+              headers: { "User-Agent": UA }, timeout: 5000, responseType: "arraybuffer",
+            });
+            const fxHtml = iconv.default.decode(Buffer.from(fxRes.data), "euc-kr");
+            const $fx = cheerio.load(fxHtml);
+            const rates: any[] = [];
+            $fx(".market_data .data_lst li").each((_i, el) => {
+              const name = $fx(el).find("h3 .blind").first().text().trim();
+              if (!name || name.includes("금") || name.includes("WTI") || name.includes("휘발유")) return;
+              const value = parseFloat($fx(el).find(".value").text().replace(/,/g, "")) || 0;
+              const change = parseFloat($fx(el).find(".change").text().replace(/,/g, "")) || 0;
+              const isDown = $fx(el).find(".down, .fall").length > 0;
+              if (value > 0) rates.push({ name, value, change: isDown ? -change : change });
+            });
+            return rates;
+          } catch { return []; }
+        })(),
+        // === 크립토 ===
+        (async () => {
+          try {
+            const cgRes = await axios.get("https://api.coingecko.com/api/v3/coins/markets", {
+              params: { vs_currency: "usd", order: "market_cap_desc", per_page: 10, page: 1, sparkline: false },
+              headers: { "User-Agent": UA }, timeout: 10000,
+            });
+            // 업비트 김치프리미엄 조회
+            let upbitPrices: Record<string, number> = {};
+            let usdKrw = 1440;
+            try {
+              const iconv = await import("iconv-lite");
+              const fxRes = await axios.get("https://finance.naver.com/marketindex/", {
+                headers: { "User-Agent": UA }, timeout: 5000, responseType: "arraybuffer",
+              });
+              const fxHtml = iconv.default.decode(Buffer.from(fxRes.data), "euc-kr");
+              const $fx = cheerio.load(fxHtml);
+              $fx(".market_data .data_lst li").each((_i, el) => {
+                const nm = $fx(el).find("h3 .blind").first().text().trim();
+                if (nm.includes("미국") || nm.includes("USD")) {
+                  const val = parseFloat($fx(el).find(".value").text().replace(/,/g, "")) || 0;
+                  if (val > 0) usdKrw = val;
+                }
+              });
+            } catch {}
+            try {
+              const upbitRes = await axios.get("https://api.upbit.com/v1/ticker", {
+                params: { markets: "KRW-BTC,KRW-ETH,KRW-XRP,KRW-USDT,KRW-USDC" },
+                timeout: 5000,
+              });
+              for (const t of upbitRes.data) {
+                const sym = t.market.replace("KRW-", "");
+                upbitPrices[sym] = t.trade_price;
+              }
+            } catch {}
+            return (cgRes.data || []).map((c: any) => {
+              const sym = c.symbol?.toUpperCase();
+              const globalKrw = c.current_price * usdKrw;
+              const kimchi = upbitPrices[sym] && globalKrw > 0 ? ((upbitPrices[sym] - globalKrw) / globalKrw * 100) : null;
+              return {
+                symbol: sym, name: c.name,
+                priceUsd: c.current_price,
+                change24h: c.price_change_percentage_24h,
+                change7d: c.price_change_percentage_7d_in_currency,
+                kimchiPremium: kimchi ? +kimchi.toFixed(2) : null,
+              };
+            });
+          } catch { return []; }
+        })(),
+        // === 원자재 ===
+        (async () => {
+          try {
+            const ySymbols = [
+              { symbol: "GC=F", name: "금(Gold)" },
+              { symbol: "SI=F", name: "은(Silver)" },
+              { symbol: "CL=F", name: "WTI 원유" },
+              { symbol: "NG=F", name: "천연가스" },
+              { symbol: "HG=F", name: "구리" },
+            ];
+            const items: any[] = [];
+            for (const s of ySymbols) {
+              try {
+                const r = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${s.symbol}`, {
+                  params: { range: "5d", interval: "1d" }, headers: { "User-Agent": UA }, timeout: 8000,
+                });
+                const meta = r.data?.chart?.result?.[0]?.meta;
+                const closes = r.data?.chart?.result?.[0]?.indicators?.quote?.[0]?.close || [];
+                const last = meta?.regularMarketPrice || closes[closes.length - 1] || 0;
+                const prev = closes.length >= 2 ? closes[closes.length - 2] : last;
+                items.push({
+                  name: s.name, value: last,
+                  change: +(last - prev).toFixed(2),
+                  changeRate: prev ? +((last - prev) / prev * 100).toFixed(2) : 0,
+                  currency: meta?.currency || "USD",
+                });
+              } catch {}
+            }
             return items;
           } catch { return []; }
         })(),
@@ -6834,10 +7511,27 @@ ${etfListStr}
         ? news.map((n: string, i: number) => `${i+1}. ${n}`).join("\n")
         : "뉴스 없음";
 
-      // 4) 최종 프롬프트 구성
-      const systemRole = `당신은 한국 금융시장 전문 애널리스트입니다. 제공된 모든 데이터(시장 데이터, 첨부 URL, 첨부 파일)를 종합적으로 분석하여 상세한 한국어 보고서를 작성해주세요. 반드시 30줄 이상으로 작성하세요.`;
+      // ETC 마켓 컨텍스트 생성
+      const bondsContext = (bondsRaw as any[]).length > 0
+        ? (bondsRaw as any[]).map((b: any) => `${b.name}: ${b.value?.toFixed(3)}% (${b.change > 0 ? "+" : ""}${b.change}%p, ${b.changeRate > 0 ? "+" : ""}${b.changeRate}%)`).join(", ")
+        : "데이터 없음";
 
-      let dataSection = `[자동 수집 데이터]\n📅 날짜: ${today}\n📊 시장 현황: ${marketContext}\n\n🔥 거래량 상위 종목:\n${volumeContext}\n\n📰 주요 뉴스:\n${newsContext}`;
+      const forexContext = (forexRaw as any[]).length > 0
+        ? (forexRaw as any[]).map((r: any) => `${r.name}: ${r.value?.toLocaleString()} (${r.change > 0 ? "+" : ""}${r.change})`).join(", ")
+        : "데이터 없음";
+
+      const cryptoContext = (cryptoRaw as any[]).length > 0
+        ? (cryptoRaw as any[]).map((c: any) => `${c.symbol}: $${c.priceUsd?.toLocaleString()} (24h: ${c.change24h > 0 ? "+" : ""}${c.change24h?.toFixed(1)}%, 7d: ${c.change7d != null ? (c.change7d > 0 ? "+" : "") + c.change7d?.toFixed(1) + "%" : "N/A"}${c.kimchiPremium != null ? `, 김프: ${c.kimchiPremium > 0 ? "+" : ""}${c.kimchiPremium}%` : ""})`).join("\n")
+        : "데이터 없음";
+
+      const commoditiesContext = (commoditiesRaw as any[]).length > 0
+        ? (commoditiesRaw as any[]).map((c: any) => `${c.name}: $${c.value?.toLocaleString()} (${c.changeRate > 0 ? "+" : ""}${c.changeRate}%)`).join(", ")
+        : "데이터 없음";
+
+      // 4) 최종 프롬프트 구성
+      const systemRole = `당신은 글로벌 금융시장 전문 애널리스트입니다. 제공된 모든 데이터(주식 시장, 채권/금리, 환율, 크립토, 원자재, 첨부 URL, 첨부 파일)를 종합적으로 분석하여 상세한 한국어 보고서를 작성해주세요. 반드시 50줄 이상으로 작성하세요.`;
+
+      let dataSection = `[자동 수집 데이터]\n📅 날짜: ${today}\n📊 주식 시장 현황: ${marketContext}\n\n🔥 거래량 상위 종목:\n${volumeContext}\n\n📰 주요 뉴스:\n${newsContext}\n\n🏛️ 채권/금리: ${bondsContext}\n\n💱 환율: ${forexContext}\n\n₿ 크립토 (TOP 10):\n${cryptoContext}\n\n🪙 원자재: ${commoditiesContext}`;
 
       if (urlContents.length > 0) {
         dataSection += `\n\n[참고 URL 내용]\n${urlContents.join("")}`;

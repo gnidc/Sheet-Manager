@@ -31,7 +31,55 @@ import {
   ZoomIn,
   ZoomOut,
   Type,
+  ClipboardPaste,
 } from "lucide-react";
+
+// Markdown → HTML 변환 후 서식 복사 (네이버 카페 등 리치 에디터 호환)
+async function copyAsRichText(markdown: string): Promise<boolean> {
+  try {
+    // Markdown → HTML 변환
+    let html = markdown
+      // 헤딩 (### → h3, ## → h2, # → h1)
+      .replace(/^#### (.+)$/gm, '<h4 style="font-size:14px;font-weight:bold;margin:12px 0 4px;">$1</h4>')
+      .replace(/^### (.+)$/gm, '<h3 style="font-size:16px;font-weight:bold;margin:14px 0 6px;">$1</h3>')
+      .replace(/^## (.+)$/gm, '<h2 style="font-size:18px;font-weight:bold;margin:16px 0 6px;">$1</h2>')
+      .replace(/^# (.+)$/gm, '<h1 style="font-size:20px;font-weight:bold;margin:18px 0 8px;">$1</h1>')
+      // 볼드, 이탤릭
+      .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+      .replace(/\*(.+?)\*/g, '<i>$1</i>')
+      // 구분선
+      .replace(/^---+$/gm, '<hr style="border:none;border-top:1px solid #ccc;margin:12px 0;">')
+      // 순서 있는 리스트
+      .replace(/^(\d+)\. (.+)$/gm, '<div style="margin-left:16px;">$1. $2</div>')
+      // 순서 없는 리스트
+      .replace(/^[-*] (.+)$/gm, '<div style="margin-left:16px;">• $1</div>')
+      // 인라인 코드
+      .replace(/`(.+?)`/g, '<code style="background:#f1f1f1;padding:1px 4px;border-radius:3px;font-size:13px;">$1</code>')
+      // 줄바꿈 (빈 줄은 단락 구분)
+      .replace(/\n\n/g, '</p><p style="margin:8px 0;">')
+      .replace(/\n/g, '<br>');
+
+    html = `<div style="font-family:'Malgun Gothic','맑은 고딕',sans-serif;font-size:14px;line-height:1.7;color:#333;"><p style="margin:8px 0;">${html}</p></div>`;
+
+    const htmlBlob = new Blob([html], { type: "text/html" });
+    const textBlob = new Blob([markdown], { type: "text/plain" });
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        "text/html": htmlBlob,
+        "text/plain": textBlob,
+      }),
+    ]);
+    return true;
+  } catch {
+    // ClipboardItem 미지원 브라우저 fallback
+    try {
+      await navigator.clipboard.writeText(markdown);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
 
 interface MarketIndex {
   name: string;
@@ -152,9 +200,93 @@ const PERIOD_DESCRIPTIONS: Record<ReportPeriod, string> = {
 
 const DEFAULT_PROMPTS: Record<ReportPeriod, string> = {
   daily: "실시간 ETF 상승리스트, 네이버 실시간 뉴스(https://stock.naver.com/news ), 네이버 마켓동향 (https://stock.naver.com/market/stock/kr )을 참고하여 오늘의 시장 동향을 요약 정리해줘",
-  weekly: "이번 주 시장 동향과 주요 이벤트, ETF 상승리스트, 뉴스를 참고하여 주간 시장 분석을 요약 정리해줘",
-  monthly: "이번 달 시장 동향과 주요 이벤트, ETF 흐름, 뉴스를 참고하여 월간 시장 분석을 요약 정리해줘",
-  yearly: "올해 시장 동향과 주요 이벤트, ETF 흐름, 뉴스를 참고하여 연간 시장 분석을 요약 정리해줘",
+  weekly: `글로벌 자산시장 주간 종합 보고서를 작성해줘. 아래 참고자료와 자동 수집된 시장 데이터를 최대한 활용할 것.
+
+📌 참고 자료 URL:
+- 국내 시장 동향: https://stock.naver.com/market/stock/kr
+- 해외 시장 동향: https://stock.naver.com/market/stock/usa
+- 네이버 금융 뉴스: https://stock.naver.com/news
+- 글로벌 매크로 뉴스: https://www.bloomberg.com/markets
+- 크립토 동향: https://www.coingecko.com/ko
+- 원자재 동향: https://finance.naver.com/marketindex/commodityList.naver
+
+📋 보고서 구성 (각 섹션별 구체적 수치와 근거 필수):
+
+## 1. 📊 글로벌 매크로 주간 요약
+- 미국(S&P500, 나스닥, 다우), 유럽(유로스톡스50, DAX), 아시아(닛케이, 항셍, 상해종합) 주간 등락률
+- 코스피/코스닥 주간 등락률 및 외국인·기관 순매수 동향
+- 이번 주 발표된 주요 경제지표 (CPI, 고용, PMI, GDP 등) 요약 및 시장 반응
+
+## 2. 💵 환율·금리 동향
+- USD/KRW, EUR/USD, USD/JPY, USD/CNY 주간 변동 및 핵심 요인
+- 미국 국채 2년/10년 금리 변동, 장단기 금리차 추이
+- 한국 국고채 3년/10년 동향, 한미 금리차
+
+## 3. ₿ 크립토 주간 동향
+- BTC, ETH 주간 등락률 및 핵심 이벤트 (ETF 자금흐름, 규제, 온체인 데이터 등)
+- 알트코인 시장 트렌드, 김치프리미엄 변동
+- 주요 크립토 인플루언서 발언 (일론 머스크, 마이클 세일러, CZ, 비탈릭 부테린 등)
+
+## 4. 🪙 실물자산(원자재) 동향
+- 금(Gold), 은(Silver) 주간 등락과 안전자산 수요 분석
+- WTI 원유 동향 및 OPEC+ 관련 이슈
+- 구리, 천연가스 등 산업용 원자재 흐름과 경기 신호 해석
+
+## 5. 🔥 주간 핵심 테마 & 섹터 분석
+- 이번 주 가장 뜨거운 투자 테마 TOP 3 (AI/반도체, 2차전지, 바이오 등)
+- 국내 ETF 상승률 TOP 5 / 하락률 TOP 5 및 테마별 자금 흐름
+- 해외 ETF 주목 종목 (미국 섹터 ETF, 신흥국 ETF 등)
+
+## 6. 🎤 주요 인플루언서 & 기관 발언 요약
+- 연준 위원 발언 (파월, 월러, 데일리 등) 및 정책 시사점
+- 월가 주요 기관 전망 (JP모건, 골드만삭스, 모건스탠리 등)
+- 국내 증권사 주요 리서치 헤드라인
+- 유명 투자자/인플루언서 발언 (워렌 버핏, 캐시 우드, 일론 머스크 등)
+
+## 7. ⚠️ 리스크 요인 & 주목 이벤트
+- 지정학적 리스크 (중동, 미중관계, 러우전쟁 등) 현황
+- 다음 주 주요 경제지표 발표 일정 (FOMC, CPI, 고용 등)
+- 실적 발표 시즌이면 주요 기업 실적 일정
+
+## 8. 💡 다음 주 투자 전략 제안
+- 매크로 환경을 고려한 자산배분 방향 (주식:채권:원자재:크립토:현금 비중)
+- Core ETF (안정형) 추천 및 근거
+- Satellite ETF (공격형) 추천 및 근거
+- 단기 트레이딩 관점 주목 종목/섹터
+
+※ 반드시 70줄 이상 상세히 작성하고, 모든 수치는 구체적으로 기재할 것`,
+  monthly: `이번 달 글로벌 자산시장 월간 종합 보고서를 작성해줘.
+
+📌 참고 자료 URL:
+- 국내 시장: https://stock.naver.com/market/stock/kr
+- 해외 시장: https://stock.naver.com/market/stock/usa
+- 네이버 뉴스: https://stock.naver.com/news
+
+📋 보고서 구성:
+1. 글로벌 주요 지수 월간 등락률 (코스피/코스닥/S&P500/나스닥/다우/유럽/아시아)
+2. 환율·금리 월간 변동 (USD/KRW, 미국채10년, 한국국고채)
+3. 크립토 월간 동향 (BTC, ETH, 주요 이벤트)
+4. 원자재 월간 동향 (금, 원유, 구리)
+5. 월간 핵심 테마 및 ETF 흐름
+6. 주요 기관/인플루언서 발언 요약
+7. 다음 달 전망 및 투자 전략 제안 (자산배분 방향)
+
+※ 반드시 50줄 이상 상세히 작성할 것`,
+  yearly: `올해 글로벌 자산시장 연간 종합 보고서를 작성해줘.
+
+📌 참고 자료 URL:
+- 국내 시장: https://stock.naver.com/market/stock/kr
+- 해외 시장: https://stock.naver.com/market/stock/usa
+
+📋 보고서 구성:
+1. 글로벌 주요 지수 연간 성과 (코스피/코스닥/S&P500/나스닥 등)
+2. 환율·금리 연간 추이 (USD/KRW, 미국채금리, 한국금리)
+3. 크립토 연간 동향 (BTC, ETH, 주요 이벤트)
+4. 원자재 연간 동향 (금, 원유)
+5. 연간 핵심 테마 & 투자 트렌드 회고
+6. 내년 전망 및 투자 전략 제안
+
+※ 반드시 50줄 이상 상세히 작성할 것`,
 };
 
 const MAX_SAVED_REPORTS = 5;
@@ -991,12 +1123,20 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
                 </span>
                 <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => {
                   navigator.clipboard.writeText(aiAnalysis.analysis).then(() => {
-                    toast({ title: "복사 완료", description: "AI 분석 결과가 클립보드에 복사되었습니다." });
+                    toast({ title: "복사 완료", description: "텍스트가 클립보드에 복사되었습니다." });
                   }).catch(() => {
                     toast({ title: "복사 실패", description: "클립보드 복사에 실패했습니다.", variant: "destructive" });
                   });
                 }}>
                   <Copy className="w-3 h-3" /> 복사
+                </Button>
+                <Button variant="outline" size="sm" className="h-7 text-xs gap-1 border-primary/30 text-primary hover:bg-primary/5" onClick={() => {
+                  copyAsRichText(aiAnalysis.analysis).then((ok) => {
+                    if (ok) toast({ title: "서식 복사 완료", description: "서식이 포함된 텍스트가 복사되었습니다. 네이버 카페 등에 붙여넣기 하세요." });
+                    else toast({ title: "서식 복사 실패", description: "브라우저가 서식 복사를 지원하지 않습니다.", variant: "destructive" });
+                  });
+                }}>
+                  <ClipboardPaste className="w-3 h-3" /> 서식복사
                 </Button>
                 <Button variant="ghost" size="sm" onClick={() => setAiAnalysis(null)} className="h-7 text-xs">닫기</Button>
               </div>
@@ -1525,19 +1665,28 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
             </div>
           )}
 
-          <div className="flex justify-end gap-2 pt-3 border-t">
+          <div className="flex justify-end gap-2 pt-3 border-t flex-wrap">
             <Button variant="outline" onClick={() => setViewingAnalysis(null)}>닫기</Button>
             {viewingAnalysis && (
               <>
                 <Button variant="outline" className="gap-1.5" onClick={() => {
                   navigator.clipboard.writeText(viewingAnalysis.result.analysis).then(() => {
-                    toast({ title: "복사 완료", description: "AI 분석 결과가 클립보드에 복사되었습니다." });
+                    toast({ title: "복사 완료", description: "텍스트가 클립보드에 복사되었습니다." });
                   }).catch(() => {
                     toast({ title: "복사 실패", description: "클립보드 복사에 실패했습니다.", variant: "destructive" });
                   });
                 }}>
                   <Copy className="w-4 h-4" />
                   복사
+                </Button>
+                <Button variant="outline" className="gap-1.5 border-primary/30 text-primary hover:bg-primary/5" onClick={() => {
+                  copyAsRichText(viewingAnalysis.result.analysis).then((ok) => {
+                    if (ok) toast({ title: "서식 복사 완료", description: "서식이 포함된 텍스트가 복사되었습니다. 네이버 카페 등에 붙여넣기 하세요." });
+                    else toast({ title: "서식 복사 실패", description: "브라우저가 서식 복사를 지원하지 않습니다.", variant: "destructive" });
+                  });
+                }}>
+                  <ClipboardPaste className="w-4 h-4" />
+                  서식복사
                 </Button>
                 <Button onClick={() => {
                   setAiAnalysis(viewingAnalysis.result);
