@@ -1,12 +1,13 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --font-display: 'Outfit', sans-serif;
-  --font-body: 'Plus Jakarta Sans', sans-serif;
+  --font-display: 'Pretendard Variable', 'Pretendard', 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-body: 'Pretendard Variable', 'Pretendard', 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
 
   /* Premium Financial Dashboard Theme - Light Mode */
@@ -23,10 +24,10 @@
   --primary: 224 76% 48%;
   --primary-foreground: 0 0% 100%;
   
-  --secondary: 220 14% 94%;
+  --secondary: 220 14% 96%;
   --secondary-foreground: 222 47% 11%;
   
-  --muted: 220 14% 94%;
+  --muted: 220 14% 96%;
   --muted-foreground: 215 16% 47%;
   
   --accent: 172 66% 45%; /* Teal for positive indicators */
@@ -40,6 +41,12 @@
   --ring: 224 76% 48%;
   
   --radius: 0.75rem;
+
+  /* Financial color tokens */
+  --color-rise: 0 84% 60%;      /* 상승 빨강 */
+  --color-fall: 217 91% 60%;    /* 하락 파랑 */
+  --color-steady: 220 14% 46%;  /* 보합 회색 */
+  --color-ai: 263 70% 58%;      /* AI 퍼플 */
 }
 
 /* Subtle Dark Mode for late night trading analysis */
@@ -68,15 +75,22 @@
   --destructive: 0 62% 30%;
   --destructive-foreground: 0 0% 98%;
   
-  --border: 217 32% 17%;
-  --input: 217 32% 17%;
+  --border: 217 32% 20%;
+  --input: 217 32% 20%;
   --ring: 224 76% 48%;
+
+  --color-rise: 0 72% 55%;
+  --color-fall: 217 80% 65%;
+  --color-steady: 215 20% 55%;
+  --color-ai: 263 70% 65%;
 }
 
 @layer base {
   body {
     @apply bg-background text-foreground antialiased;
     font-family: var(--font-body);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   h1, h2, h3, h4, h5, h6 {
@@ -86,6 +100,11 @@
   
   code, .font-mono {
     font-family: var(--font-mono);
+  }
+
+  /* Smooth page transitions */
+  * {
+    @apply transition-colors duration-150;
   }
 }
 
@@ -106,4 +125,145 @@
   .glass-card {
     @apply bg-card/80 backdrop-blur-md border border-white/20 shadow-xl;
   }
+
+  /* ===== Premium Card Styles ===== */
+  .card-premium {
+    @apply bg-card border border-border/60 rounded-xl shadow-sm 
+           hover:shadow-md hover:border-border 
+           transition-all duration-200 ease-out;
+  }
+  .card-premium-hover {
+    @apply card-premium hover:-translate-y-0.5;
+  }
+
+  /* ===== Financial Badges (상승/하락/보합) ===== */
+  .badge-rise {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full 
+           text-xs font-semibold
+           bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400;
+  }
+  .badge-fall {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full 
+           text-xs font-semibold
+           bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400;
+  }
+  .badge-steady {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full 
+           text-xs font-semibold
+           bg-gray-50 text-gray-500 dark:bg-gray-800/40 dark:text-gray-400;
+  }
+
+  /* ===== Tabular Numbers for Financial Data ===== */
+  .num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+    font-size: 0.9em;
+  }
+  .num-rise {
+    @apply num;
+    color: hsl(var(--color-rise));
+  }
+  .num-fall {
+    @apply num;
+    color: hsl(var(--color-fall));
+  }
+  .num-steady {
+    @apply num;
+    color: hsl(var(--color-steady));
+  }
+
+  /* ===== AI Gradient ===== */
+  .ai-gradient {
+    @apply bg-gradient-to-r from-purple-500 via-violet-500 to-indigo-500;
+  }
+  .ai-gradient-text {
+    @apply bg-gradient-to-r from-purple-500 via-violet-500 to-indigo-500 
+           bg-clip-text text-transparent;
+  }
+
+  /* ===== Table Styles ===== */
+  .table-finance tbody tr {
+    @apply border-b border-border/50 transition-colors duration-100;
+  }
+  .table-finance tbody tr:hover {
+    @apply bg-muted/40;
+  }
+  .table-finance tbody tr:nth-child(even) {
+    @apply bg-muted/20;
+  }
+  .table-finance th {
+    @apply text-xs font-semibold text-muted-foreground uppercase tracking-wider 
+           bg-muted/30 sticky top-0 z-10;
+  }
+
+  /* ===== Skeleton Loading ===== */
+  .skeleton {
+    @apply animate-pulse rounded-md bg-muted/60;
+  }
+  .skeleton-text {
+    @apply skeleton h-4 w-full;
+  }
+  .skeleton-title {
+    @apply skeleton h-6 w-3/4;
+  }
+  .skeleton-card {
+    @apply skeleton h-32 w-full rounded-xl;
+  }
+
+  /* ===== Glassmorphism Header ===== */
+  .glass-header {
+    @apply bg-white/80 dark:bg-slate-950/80 backdrop-blur-xl 
+           border-b border-border/50 shadow-sm;
+  }
+
+  /* ===== Button Hover Effects ===== */
+  .btn-hover-lift {
+    @apply transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0;
+  }
+
+  /* ===== Content Fade-in Animation ===== */
+  @keyframes fadeInUp {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  .animate-fade-in {
+    animation: fadeInUp 0.3s ease-out forwards;
+  }
+
+  /* ===== Tab Content Transition ===== */
+  [data-state="active"][role="tabpanel"] {
+    animation: fadeInUp 0.25s ease-out;
+  }
+
+  /* ===== Sidebar Styles ===== */
+  .sidebar-nav {
+    @apply flex flex-col gap-0.5 rounded-xl p-2;
+  }
+  .sidebar-item {
+    @apply flex items-center gap-2.5 w-full rounded-lg px-3 py-2.5 
+           text-sm font-medium transition-all duration-150 text-left 
+           text-muted-foreground hover:text-foreground hover:bg-muted/60;
+  }
+  .sidebar-item-active {
+    @apply bg-primary/10 text-primary shadow-sm border border-primary/10
+           dark:bg-primary/15 dark:text-primary;
+  }
+  .sidebar-item-active::before {
+    content: '';
+    @apply absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r-full bg-primary;
+  }
+}
+
+@layer utilities {
+  /* Quick show/hide for dark mode toggle */
+  .dark .dark-show { display: block; }
+  .dark .dark-hide { display: none; }
+  .light .dark-show, :not(.dark) .dark-show { display: none; }
 }

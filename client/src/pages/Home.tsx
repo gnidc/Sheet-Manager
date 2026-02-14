@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Plus, ExternalLink, TrendingUp, Globe, Loader2, Star, Newspaper, FileText, Trash2, Pencil, Scale, Zap, ChevronDown, Calendar, Home as HomeIcon, Search, X, Eye, ChevronLeft, ChevronRight, PenSquare, Send, LogIn, LogOut, Bell, BellRing, MessageCircle, Heart, UserPlus, FileEdit, BarChart3, Bot } from "lucide-react";
+import { Plus, ExternalLink, TrendingUp, Globe, Loader2, Star, Newspaper, FileText, Trash2, Pencil, Scale, Zap, ChevronDown, Calendar, Home as HomeIcon, Search, X, Eye, ChevronLeft, ChevronRight, PenSquare, Send, LogIn, LogOut, Bell, BellRing, MessageCircle, Heart, UserPlus, FileEdit, BarChart3, Bot, Moon, Sun, PanelLeftClose, PanelLeft } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -43,9 +43,28 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState("home");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [darkMode, setDarkMode] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('theme') === 'dark' || 
+        (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    }
+    return false;
+  });
   
   const { toast } = useToast();
   const { isAdmin, isLoggedIn } = useAuth();
+
+  // Dark mode toggle
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('theme', 'light');
+    }
+  }, [darkMode]);
 
   // 방문 추적: 탭 전환 시 기록
   useEffect(() => {
@@ -64,27 +83,43 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-background pb-20">
       {/* Header / Hero */}
-      <header className="bg-white border-b sticky top-0 z-30 shadow-sm dark:bg-slate-950">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <header className="glass-header sticky top-0 z-30">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
+          <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div className="bg-primary/10 p-2 rounded-lg">
-                <TrendingUp className="w-6 h-6 text-primary" />
+              {/* Sidebar toggle (desktop) */}
+              <button
+                onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+                className="hidden md:flex items-center justify-center w-8 h-8 rounded-lg hover:bg-muted/60 transition-colors text-muted-foreground hover:text-foreground"
+                title={sidebarCollapsed ? "사이드바 펼치기" : "사이드바 접기"}
+              >
+                {sidebarCollapsed ? <PanelLeft className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
+              </button>
+              <div className="bg-gradient-to-br from-primary/20 to-primary/5 p-2 rounded-xl">
+                <TrendingUp className="w-5 h-5 text-primary" />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-foreground tracking-tight">Life Fitness ETF (투자와 함께 하는 삶)</h1>
-                <p className="text-xs text-muted-foreground hidden sm:block">Advanced ETF Analytics Dashboard</p>
+                <h1 className="text-lg font-bold text-foreground tracking-tight">Life Fitness ETF</h1>
+                <p className="text-[11px] text-muted-foreground hidden sm:block">투자와 함께 하는 삶 · Advanced Analytics</p>
               </div>
             </div>
             
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              {/* Dark mode toggle */}
+              <button
+                onClick={() => setDarkMode(!darkMode)}
+                className="flex items-center justify-center w-9 h-9 rounded-xl hover:bg-muted/60 transition-all duration-200 text-muted-foreground hover:text-foreground"
+                title={darkMode ? "라이트 모드" : "다크 모드"}
+              >
+                {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              </button>
               <QnABoard />
               {(isAdmin || isLoggedIn) && (
                 <Link href="/trading">
-                  <Button variant="outline" className="gap-2 border-amber-300 text-amber-600 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-400 dark:hover:bg-amber-950">
-                    <Zap className="w-4 h-4" />
-                    <span className="hidden sm:inline">자동매매</span>
-                    </Button>
+                  <Button variant="outline" size="sm" className="gap-1.5 border-amber-300 text-amber-600 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-400 dark:hover:bg-amber-950 btn-hover-lift">
+                    <Zap className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline text-xs">자동매매</span>
+                  </Button>
                 </Link>
               )}
               <LoginDialog />
@@ -98,217 +133,180 @@ export default function Home() {
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <div className="flex gap-4">
           {/* 왼쪽 세로 메인탭 사이드바 */}
-          <div className="hidden md:flex flex-col w-40 shrink-0 sticky top-[85px] self-start max-h-[calc(100vh-100px)] overflow-y-auto">
-            <nav className="flex flex-col gap-0.5 bg-violet-100/70 dark:bg-violet-950/30 rounded-lg p-1.5">
+          <div className={`hidden md:flex flex-col shrink-0 sticky top-[73px] self-start max-h-[calc(100vh-85px)] overflow-y-auto scrollbar-thin transition-all duration-300 ease-in-out ${sidebarCollapsed ? 'w-14' : 'w-44'}`}>
+            <nav className="sidebar-nav bg-card border border-border/60 shadow-sm">
               {/* 홈 */}
-              <button
-                onClick={() => setActiveTab("home")}
-                className={`flex items-center gap-2 w-full rounded-md px-3 py-2 text-sm font-medium transition-all text-left ${
-                  activeTab === "home"
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground hover:bg-background/50"
-                }`}
-              >
-                <HomeIcon className="h-4 w-4 shrink-0" />
-                홈
-              </button>
+              <SidebarButton icon={<HomeIcon className="h-4 w-4 shrink-0" />} label="홈" active={activeTab === "home"} collapsed={sidebarCollapsed} onClick={() => setActiveTab("home")} />
 
-              {/* ETF정보 드롭다운 */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                    className={`flex items-center gap-2 w-full rounded-md px-3 py-2 text-sm font-medium transition-all text-left ${
-                    activeTab === "etf-components" || activeTab === "new-etf" || activeTab === "watchlist-etf" || activeTab === "satellite-etf" || activeTab === "etf-search"
-                      ? "bg-background text-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground hover:bg-background/50"
-                  }`}
-                >
-                    <Scale className="h-4 w-4 shrink-0" />
-                  ETF정보
-                    <ChevronDown className="h-3 w-3 opacity-60 ml-auto" />
-                </button>
-              </DropdownMenuTrigger>
-                <DropdownMenuContent side="right" align="start" className="min-w-[140px]">
-                  <DropdownMenuItem onClick={() => setActiveTab("etf-components")} className="gap-2 cursor-pointer">
-                  📊 ETF실시간
-                </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setActiveTab("new-etf")} className="gap-2 cursor-pointer">
-                  🆕 신규ETF
-                </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setActiveTab("watchlist-etf")} className="gap-2 cursor-pointer">
-                  ⭐ 관심ETF(Core)
-                </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setActiveTab("satellite-etf")} className="gap-2 cursor-pointer">
-                  🛰️ 관심ETF(Satellite)
-                </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setActiveTab("etf-search")} className="gap-2 cursor-pointer">
-                  🔍 ETF검색/비교/AI추천
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
-              {/* Markets 드롭다운 */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                    className={`flex items-center gap-2 w-full rounded-md px-3 py-2 text-sm font-medium transition-all text-left ${
-                    activeTab.startsWith("markets-")
-                      ? "bg-background text-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground hover:bg-background/50"
-                  }`}
-                >
-                    <Globe className="h-4 w-4 shrink-0" />
-                  Markets
-                    <ChevronDown className="h-3 w-3 opacity-60 ml-auto" />
-                </button>
-              </DropdownMenuTrigger>
-                <DropdownMenuContent side="right" align="start" className="min-w-[140px]">
-                <DropdownMenuItem onClick={() => setActiveTab("markets-domestic")} className="gap-2 cursor-pointer">
-                  🇰🇷 국내증시
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setActiveTab("markets-global")} className="gap-2 cursor-pointer">
-                  🌍 해외증시
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setActiveTab("markets-etc")} className="gap-2 cursor-pointer">
-                  💹 ETC
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setActiveTab("markets-news")} className="gap-2 cursor-pointer">
-                  📰 주요뉴스
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setActiveTab("markets-research")} className="gap-2 cursor-pointer">
-                  📊 리서치
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setActiveTab("markets-calendar")} className="gap-2 cursor-pointer">
-                  📅 증시캘린더
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
-              {/* 주식정보 드롭다운 */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                    className={`flex items-center gap-2 w-full rounded-md px-3 py-2 text-sm font-medium transition-all text-left ${
-                    activeTab.startsWith("stocks-")
-                      ? "bg-background text-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground hover:bg-background/50"
-                  }`}
-                >
-                    <BarChart3 className="h-4 w-4 shrink-0" />
-                  주식정보
-                    <ChevronDown className="h-3 w-3 opacity-60 ml-auto" />
-                </button>
-              </DropdownMenuTrigger>
-                <DropdownMenuContent side="right" align="start" className="min-w-[140px]">
-                <DropdownMenuItem onClick={() => setActiveTab("stocks-domestic")} className="gap-2 cursor-pointer">
-                  🇰🇷 국내주식
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setActiveTab("stocks-overseas")} className="gap-2 cursor-pointer">
-                  🌐 해외주식
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setActiveTab("stocks-10x")} className="gap-2 cursor-pointer">
-                  🚀 10X
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
-              {/* 투자전략 드롭다운 */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                    className={`flex items-center gap-2 w-full rounded-md px-3 py-2 text-sm font-medium transition-all text-left ${
-                    activeTab.startsWith("strategy-")
-                      ? "bg-background text-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground hover:bg-background/50"
-                  }`}
-                >
-                    <Calendar className="h-4 w-4 shrink-0" />
-                  투자전략
-                    <ChevronDown className="h-3 w-3 opacity-60 ml-auto" />
-                </button>
-              </DropdownMenuTrigger>
-                <DropdownMenuContent side="right" align="start" className="min-w-[120px]">
-                <DropdownMenuItem onClick={() => setActiveTab("strategy-daily")} className="gap-2 cursor-pointer">
-                  📋 일일 보고서
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setActiveTab("strategy-weekly")} className="gap-2 cursor-pointer">
-                  📊 주간 보고서
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setActiveTab("strategy-monthly")} className="gap-2 cursor-pointer">
-                  📈 월간 보고서
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setActiveTab("strategy-yearly")} className="gap-2 cursor-pointer">
-                  📉 연간 보고서
-                </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-
-              {/* CRYPTO 드롭다운 (Admin 전용) */}
-                {isAdmin && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    className={`flex items-center gap-2 w-full rounded-md px-3 py-2 text-sm font-medium transition-all text-left ${
-                      activeTab.startsWith("crypto-")
-                        ? "bg-background text-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground hover:bg-background/50"
-                    }`}
-                  >
-                    <Zap className="h-4 w-4 shrink-0" />
-                    CRYPTO
-                    <ChevronDown className="h-3 w-3 opacity-60 ml-auto" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent side="right" align="start" className="min-w-[130px]">
-                  <DropdownMenuItem onClick={() => setActiveTab("crypto-steem-reader")} className="gap-2 cursor-pointer">
-                    📖 스팀글읽기
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setActiveTab("crypto-steem-report")} className="gap-2 cursor-pointer">
-                  🔬 스팀보고서
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+              {/* ETF정보 */}
+              {sidebarCollapsed ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className={`sidebar-item relative justify-center px-0 ${(activeTab === "etf-components" || activeTab === "new-etf" || activeTab === "watchlist-etf" || activeTab === "satellite-etf" || activeTab === "etf-search") ? "sidebar-item-active" : ""}`} title="ETF정보">
+                      <Scale className="h-4 w-4 shrink-0" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent side="right" align="start" className="min-w-[160px]">
+                    <DropdownMenuItem onClick={() => setActiveTab("etf-components")} className="gap-2 cursor-pointer">📊 ETF실시간</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setActiveTab("new-etf")} className="gap-2 cursor-pointer">🆕 신규ETF</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setActiveTab("watchlist-etf")} className="gap-2 cursor-pointer">⭐ 관심ETF(Core)</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setActiveTab("satellite-etf")} className="gap-2 cursor-pointer">🛰️ 관심ETF(Satellite)</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setActiveTab("etf-search")} className="gap-2 cursor-pointer">🔍 ETF검색/비교/AI추천</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : (
+                <SidebarAccordion
+                  icon={<Scale className="h-4 w-4 shrink-0" />}
+                  label="ETF정보"
+                  active={["etf-components","new-etf","watchlist-etf","satellite-etf","etf-search"].includes(activeTab)}
+                  items={[
+                    { label: "📊 ETF실시간", value: "etf-components" },
+                    { label: "🆕 신규ETF", value: "new-etf" },
+                    { label: "⭐ 관심ETF(Core)", value: "watchlist-etf" },
+                    { label: "🛰️ 관심ETF(Satellite)", value: "satellite-etf" },
+                    { label: "🔍 ETF검색/비교/AI추천", value: "etf-search" },
+                  ]}
+                  activeTab={activeTab}
+                  onSelect={setActiveTab}
+                />
               )}
 
+              {/* Markets */}
+              {sidebarCollapsed ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className={`sidebar-item relative justify-center px-0 ${activeTab.startsWith("markets-") ? "sidebar-item-active" : ""}`} title="Markets">
+                      <Globe className="h-4 w-4 shrink-0" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent side="right" align="start" className="min-w-[140px]">
+                    <DropdownMenuItem onClick={() => setActiveTab("markets-domestic")} className="gap-2 cursor-pointer">🇰🇷 국내증시</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setActiveTab("markets-global")} className="gap-2 cursor-pointer">🌍 해외증시</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setActiveTab("markets-etc")} className="gap-2 cursor-pointer">💹 ETC</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setActiveTab("markets-news")} className="gap-2 cursor-pointer">📰 주요뉴스</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setActiveTab("markets-research")} className="gap-2 cursor-pointer">📊 리서치</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setActiveTab("markets-calendar")} className="gap-2 cursor-pointer">📅 증시캘린더</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : (
+                <SidebarAccordion
+                  icon={<Globe className="h-4 w-4 shrink-0" />}
+                  label="Markets"
+                  active={activeTab.startsWith("markets-")}
+                  items={[
+                    { label: "🇰🇷 국내증시", value: "markets-domestic" },
+                    { label: "🌍 해외증시", value: "markets-global" },
+                    { label: "💹 ETC", value: "markets-etc" },
+                    { label: "📰 주요뉴스", value: "markets-news" },
+                    { label: "📊 리서치", value: "markets-research" },
+                    { label: "📅 증시캘린더", value: "markets-calendar" },
+                  ]}
+                  activeTab={activeTab}
+                  onSelect={setActiveTab}
+                />
+              )}
+
+              {/* 주식정보 */}
+              {sidebarCollapsed ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className={`sidebar-item relative justify-center px-0 ${activeTab.startsWith("stocks-") ? "sidebar-item-active" : ""}`} title="주식정보">
+                      <BarChart3 className="h-4 w-4 shrink-0" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent side="right" align="start" className="min-w-[140px]">
+                    <DropdownMenuItem onClick={() => setActiveTab("stocks-domestic")} className="gap-2 cursor-pointer">🇰🇷 국내주식</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setActiveTab("stocks-overseas")} className="gap-2 cursor-pointer">🌐 해외주식</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setActiveTab("stocks-10x")} className="gap-2 cursor-pointer">🚀 10X</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : (
+                <SidebarAccordion
+                  icon={<BarChart3 className="h-4 w-4 shrink-0" />}
+                  label="주식정보"
+                  active={activeTab.startsWith("stocks-")}
+                  items={[
+                    { label: "🇰🇷 국내주식", value: "stocks-domestic" },
+                    { label: "🌐 해외주식", value: "stocks-overseas" },
+                    { label: "🚀 10X", value: "stocks-10x" },
+                  ]}
+                  activeTab={activeTab}
+                  onSelect={setActiveTab}
+                />
+              )}
+
+              {/* 투자전략 */}
+              {sidebarCollapsed ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className={`sidebar-item relative justify-center px-0 ${activeTab.startsWith("strategy-") ? "sidebar-item-active" : ""}`} title="투자전략">
+                      <Calendar className="h-4 w-4 shrink-0" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent side="right" align="start" className="min-w-[130px]">
+                    <DropdownMenuItem onClick={() => setActiveTab("strategy-daily")} className="gap-2 cursor-pointer">📋 일일 보고서</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setActiveTab("strategy-weekly")} className="gap-2 cursor-pointer">📊 주간 보고서</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setActiveTab("strategy-monthly")} className="gap-2 cursor-pointer">📈 월간 보고서</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setActiveTab("strategy-yearly")} className="gap-2 cursor-pointer">📉 연간 보고서</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : (
+                <SidebarAccordion
+                  icon={<Calendar className="h-4 w-4 shrink-0" />}
+                  label="투자전략"
+                  active={activeTab.startsWith("strategy-")}
+                  items={[
+                    { label: "📋 일일 보고서", value: "strategy-daily" },
+                    { label: "📊 주간 보고서", value: "strategy-weekly" },
+                    { label: "📈 월간 보고서", value: "strategy-monthly" },
+                    { label: "📉 연간 보고서", value: "strategy-yearly" },
+                  ]}
+                  activeTab={activeTab}
+                  onSelect={setActiveTab}
+                />
+              )}
+
+              {/* CRYPTO (Admin 전용) */}
+              {isAdmin && (
+                sidebarCollapsed ? (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button className={`sidebar-item relative justify-center px-0 ${activeTab.startsWith("crypto-") ? "sidebar-item-active" : ""}`} title="CRYPTO">
+                        <Zap className="h-4 w-4 shrink-0" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent side="right" align="start" className="min-w-[130px]">
+                      <DropdownMenuItem onClick={() => setActiveTab("crypto-steem-reader")} className="gap-2 cursor-pointer">📖 스팀글읽기</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setActiveTab("crypto-steem-report")} className="gap-2 cursor-pointer">🔬 스팀보고서</DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                ) : (
+                  <SidebarAccordion
+                    icon={<Zap className="h-4 w-4 shrink-0" />}
+                    label="CRYPTO"
+                    active={activeTab.startsWith("crypto-")}
+                    items={[
+                      { label: "📖 스팀글읽기", value: "crypto-steem-reader" },
+                      { label: "🔬 스팀보고서", value: "crypto-steem-report" },
+                    ]}
+                    activeTab={activeTab}
+                    onSelect={setActiveTab}
+                  />
+                )
+              )}
+
+              {/* 구분선 */}
+              <div className="my-1 border-t border-border/40" />
+
               {/* AI Agent */}
-              <button
-                onClick={() => setActiveTab("ai-agent")}
-                className={`flex items-center gap-2 w-full rounded-md px-3 py-2 text-sm font-medium transition-all text-left ${
-                  activeTab === "ai-agent"
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground hover:bg-background/50"
-                }`}
-              >
-                <Bot className="h-4 w-4 shrink-0 text-purple-500" />
-              AI Agent
-              </button>
+              <SidebarButton icon={<Bot className="h-4 w-4 shrink-0 text-purple-500" />} label="AI Agent" active={activeTab === "ai-agent"} collapsed={sidebarCollapsed} onClick={() => setActiveTab("ai-agent")} />
 
               {/* 즐겨찾기 */}
-              <button
-                onClick={() => setActiveTab("bookmarks")}
-                className={`flex items-center gap-2 w-full rounded-md px-3 py-2 text-sm font-medium transition-all text-left ${
-                  activeTab === "bookmarks"
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground hover:bg-background/50"
-                }`}
-              >
-                <Star className="h-4 w-4 text-yellow-500 shrink-0" />
-                즐겨찾기
-              </button>
+              <SidebarButton icon={<Star className="h-4 w-4 shrink-0 text-yellow-500" />} label="즐겨찾기" active={activeTab === "bookmarks"} collapsed={sidebarCollapsed} onClick={() => setActiveTab("bookmarks")} />
 
               {/* Admin Dashboard */}
               {isAdmin && (
-              <button
-                onClick={() => setActiveTab("admin-dashboard")}
-                className={`flex items-center gap-2 w-full rounded-md px-3 py-2 text-sm font-medium transition-all text-left ${
-                  activeTab === "admin-dashboard"
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground hover:bg-background/50"
-                }`}
-              >
-                <BarChart3 className="h-4 w-4 shrink-0 text-emerald-500" />
-                Dashboard
-              </button>
+                <SidebarButton icon={<BarChart3 className="h-4 w-4 shrink-0 text-emerald-500" />} label="Dashboard" active={activeTab === "admin-dashboard"} collapsed={sidebarCollapsed} onClick={() => setActiveTab("admin-dashboard")} />
               )}
             </nav>
           </div>
@@ -420,11 +418,7 @@ export default function Home() {
 
           <TabsContent value="etf-components">
             {isLoggedIn ? (
-              <Suspense fallback={
-                <div className="flex items-center justify-center py-20">
-                  <Loader2 className="w-8 h-8 animate-spin text-primary" />
-                </div>
-              }>
+              <Suspense fallback={<ContentSkeleton />}>
                 <EtfComponents />
               </Suspense>
             ) : (
@@ -433,22 +427,14 @@ export default function Home() {
           </TabsContent>
 
           <TabsContent value="new-etf">
-            <Suspense fallback={
-              <div className="flex items-center justify-center py-20">
-                <Loader2 className="w-8 h-8 animate-spin text-primary" />
-              </div>
-            }>
+            <Suspense fallback={<ContentSkeleton />}>
               <NewEtfComp />
             </Suspense>
           </TabsContent>
 
           <TabsContent value="watchlist-etf">
             {isLoggedIn ? (
-              <Suspense fallback={
-                <div className="flex items-center justify-center py-20">
-                  <Loader2 className="w-8 h-8 animate-spin text-primary" />
-                </div>
-              }>
+              <Suspense fallback={<ContentSkeleton />}>
                 <WatchlistEtfComp listType="core" />
               </Suspense>
             ) : (
@@ -458,11 +444,7 @@ export default function Home() {
 
           <TabsContent value="satellite-etf">
             {isLoggedIn ? (
-              <Suspense fallback={
-                <div className="flex items-center justify-center py-20">
-                  <Loader2 className="w-8 h-8 animate-spin text-primary" />
-                </div>
-              }>
+              <Suspense fallback={<ContentSkeleton />}>
                 <WatchlistEtfComp listType="satellite" />
               </Suspense>
             ) : (
@@ -471,63 +453,47 @@ export default function Home() {
           </TabsContent>
 
           <TabsContent value="etf-search">
-            <Suspense fallback={
-              <div className="flex items-center justify-center py-20">
-                <Loader2 className="w-8 h-8 animate-spin text-primary" />
-              </div>
-            }>
+            <Suspense fallback={<ContentSkeleton />}>
               <EtfSearch isAdmin={isAdmin} onNavigate={setActiveTab} />
             </Suspense>
           </TabsContent>
 
           <TabsContent value="markets-news">
-            <Suspense fallback={
-              <div className="flex items-center justify-center py-20">
-                <Loader2 className="w-8 h-8 animate-spin text-primary" />
-                  </div>
-            }>
+            <Suspense fallback={<ContentSkeleton />}>
               <MarketNews />
             </Suspense>
           </TabsContent>
 
           <TabsContent value="markets-research">
-            <Suspense fallback={
-              <div className="flex items-center justify-center py-20">
-                <Loader2 className="w-8 h-8 animate-spin text-primary" />
-              </div>
-            }>
+            <Suspense fallback={<ContentSkeleton />}>
               <ResearchList />
             </Suspense>
           </TabsContent>
 
           {/* 국내증시 */}
           <TabsContent value="markets-domestic">
-            <Suspense fallback={
-              <div className="flex items-center justify-center py-20">
-                <Loader2 className="w-8 h-8 animate-spin text-primary" />
-              </div>
-            }>
+            <Suspense fallback={<ContentSkeleton />}>
               <DomesticMarket />
             </Suspense>
           </TabsContent>
 
           {/* 해외증시 */}
           <TabsContent value="markets-global">
-            <Suspense fallback={<div className="flex items-center justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>}>
+            <Suspense fallback={<ContentSkeleton />}>
               <GlobalMarket />
             </Suspense>
           </TabsContent>
 
           {/* 국내주식 */}
           <TabsContent value="stocks-domestic">
-            <Suspense fallback={<div className="flex items-center justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>}>
+            <Suspense fallback={<ContentSkeleton />}>
               <DomesticStocks />
             </Suspense>
           </TabsContent>
 
           {/* 해외주식 */}
           <TabsContent value="stocks-overseas">
-            <Suspense fallback={<div className="flex items-center justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>}>
+            <Suspense fallback={<ContentSkeleton />}>
               <OverseasStocks />
             </Suspense>
           </TabsContent>
@@ -535,7 +501,7 @@ export default function Home() {
           {/* 10X (Ten Bagger) */}
           <TabsContent value="stocks-10x">
             {isLoggedIn ? (
-              <Suspense fallback={<div className="flex items-center justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>}>
+              <Suspense fallback={<ContentSkeleton />}>
                 <TenBaggerStocks />
               </Suspense>
             ) : (
@@ -556,24 +522,16 @@ export default function Home() {
           {/* 투자전략 보고서 - 일일/주간/월간/연간 */}
           {(["daily", "weekly", "monthly", "yearly"] as const).map((period) => (
             <TabsContent key={period} value={`strategy-${period}`}>
-              <Suspense fallback={
-                <div className="flex items-center justify-center py-20">
-                  <Loader2 className="w-8 h-8 animate-spin text-primary" />
-              </div>
-              }>
+              <Suspense fallback={<ContentSkeleton />}>
                 <DailyStrategy period={period} isAdmin={isAdmin} />
               </Suspense>
-          </TabsContent>
+            </TabsContent>
           ))}
 
           {/* CRYPTO - 스팀글읽기 (Admin 전용) */}
           {isAdmin && (
           <TabsContent value="crypto-steem-reader">
-            <Suspense fallback={
-              <div className="flex items-center justify-center py-20">
-                <Loader2 className="w-8 h-8 animate-spin text-primary" />
-              </div>
-            }>
+            <Suspense fallback={<ContentSkeleton />}>
               <SteemReader />
             </Suspense>
           </TabsContent>
@@ -582,11 +540,7 @@ export default function Home() {
           {/* CRYPTO - 스팀보고서 (Admin 전용) */}
           {isAdmin && (
           <TabsContent value="crypto-steem-report">
-            <Suspense fallback={
-              <div className="flex items-center justify-center py-20">
-                <Loader2 className="w-8 h-8 animate-spin text-primary" />
-              </div>
-            }>
+            <Suspense fallback={<ContentSkeleton />}>
               <SteemReport />
             </Suspense>
           </TabsContent>
@@ -594,7 +548,7 @@ export default function Home() {
 
           <TabsContent value="ai-agent">
             {isLoggedIn ? (
-              <Suspense fallback={<div className="flex items-center justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>}>
+              <Suspense fallback={<ContentSkeleton />}>
                 <AiAgent isAdmin={isAdmin} onNavigate={setActiveTab} />
               </Suspense>
             ) : (
@@ -603,11 +557,7 @@ export default function Home() {
           </TabsContent>
 
           <TabsContent value="bookmarks">
-            <Suspense fallback={
-              <div className="flex items-center justify-center py-20">
-                <Loader2 className="w-8 h-8 animate-spin text-primary" />
-              </div>
-            }>
+            <Suspense fallback={<ContentSkeleton />}>
               <BookmarksComp />
             </Suspense>
           </TabsContent>
@@ -615,11 +565,7 @@ export default function Home() {
           {/* Admin Dashboard */}
           {isAdmin && (
           <TabsContent value="admin-dashboard">
-            <Suspense fallback={
-              <div className="flex items-center justify-center py-20">
-                <Loader2 className="w-8 h-8 animate-spin text-primary" />
-              </div>
-            }>
+            <Suspense fallback={<ContentSkeleton />}>
               <AdminDashboard />
             </Suspense>
           </TabsContent>
@@ -628,6 +574,84 @@ export default function Home() {
           </div>
         </Tabs>
       </main>
+    </div>
+  );
+}
+
+// ===== 사이드바 버튼 컴포넌트 =====
+function SidebarButton({ icon, label, active, collapsed, onClick }: {
+  icon: React.ReactNode; label: string; active: boolean; collapsed: boolean; onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={collapsed ? label : undefined}
+      className={`sidebar-item relative ${collapsed ? 'justify-center px-0' : ''} ${active ? 'sidebar-item-active' : ''}`}
+    >
+      {icon}
+      {!collapsed && <span className="truncate">{label}</span>}
+    </button>
+  );
+}
+
+// ===== 사이드바 아코디언 서브메뉴 컴포넌트 =====
+function SidebarAccordion({ icon, label, active, items, activeTab, onSelect }: {
+  icon: React.ReactNode; label: string; active: boolean;
+  items: { label: string; value: string }[];
+  activeTab: string; onSelect: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(active);
+  
+  useEffect(() => {
+    if (active) setOpen(true);
+  }, [active]);
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(!open)}
+        className={`sidebar-item relative ${active ? 'text-foreground font-semibold' : ''}`}
+      >
+        {icon}
+        <span className="truncate flex-1">{label}</span>
+        <ChevronDown className={`h-3 w-3 opacity-50 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+      </button>
+      <div className={`overflow-hidden transition-all duration-200 ease-in-out ${open ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0'}`}>
+        <div className="ml-3 pl-3 border-l border-border/40 space-y-0.5 py-1">
+          {items.map((item) => (
+            <button
+              key={item.value}
+              onClick={() => onSelect(item.value)}
+              className={`w-full text-left rounded-md px-2.5 py-1.5 text-xs font-medium transition-all duration-150 ${
+                activeTab === item.value
+                  ? 'bg-primary/10 text-primary dark:bg-primary/15'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ===== 스켈레톤 로딩 컴포넌트 =====
+function ContentSkeleton() {
+  return (
+    <div className="animate-fade-in space-y-4 py-6">
+      <div className="skeleton-title" />
+      <div className="space-y-3">
+        <div className="skeleton-text" />
+        <div className="skeleton-text w-5/6" />
+        <div className="skeleton-text w-4/6" />
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+        <div className="skeleton-card" />
+        <div className="skeleton-card" />
+        <div className="skeleton-card" />
+      </div>
     </div>
   );
 }
