@@ -17,9 +17,32 @@ const NAVER_CLIENT_SECRET = process.env.NAVER_CLIENT_SECRET;
 const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "kwonjs77@gmail.com").split(",").map(e => e.trim().toLowerCase());
 
 // AI API: Gemini 네이티브 REST API 또는 OpenAI
-async function callAI(prompt: string): Promise<string> {
-  const geminiKey = process.env.GEMINI_API_KEY;
-  const openaiKey = process.env.OPENAI_API_KEY;
+interface UserAiKeyOption {
+  provider?: string;     // "gemini" | "openai"
+  geminiApiKey?: string;
+  openaiApiKey?: string;
+}
+
+async function callAI(prompt: string, userKey?: UserAiKeyOption): Promise<string> {
+  // 사용자 키가 있으면 우선 사용, 없으면 서버 기본 키 사용
+  let geminiKey: string | undefined;
+  let openaiKey: string | undefined;
+
+  if (userKey) {
+    if (userKey.provider === "openai" && userKey.openaiApiKey) {
+      openaiKey = userKey.openaiApiKey;
+    } else if (userKey.geminiApiKey) {
+      geminiKey = userKey.geminiApiKey;
+    } else if (userKey.openaiApiKey) {
+      openaiKey = userKey.openaiApiKey;
+    }
+  }
+
+  // 사용자 키가 없으면 서버 기본 키 사용
+  if (!geminiKey && !openaiKey) {
+    geminiKey = process.env.GEMINI_API_KEY;
+    openaiKey = process.env.OPENAI_API_KEY;
+  }
 
   if (geminiKey) {
     // Gemini 네이티브 REST API 사용 (자동 재시도 포함)
@@ -42,7 +65,6 @@ async function callAI(prompt: string): Promise<string> {
         return content;
       } catch (err: any) {
         if (err.response?.status === 429 && attempt < maxRetries) {
-          // retryDelay 파싱 (예: "8s" → 8000ms)
           const retryInfo = err.response?.data?.error?.details?.find((d: any) => d.retryDelay);
           const delaySec = parseInt(retryInfo?.retryDelay) || 10;
           console.log(`[AI] Rate limited, retrying in ${delaySec}s (attempt ${attempt}/${maxRetries})...`);
@@ -51,6 +73,10 @@ async function callAI(prompt: string): Promise<string> {
         }
         if (err.response?.status === 429) {
           throw new Error("Gemini API 할당량 초과. 잠시 후 다시 시도하세요.");
+        }
+        // API 키가 잘못된 경우 명확한 에러 메시지
+        if (err.response?.status === 400 || err.response?.status === 403) {
+          throw new Error("AI API 키가 유효하지 않습니다. 키를 확인해주세요.");
         }
         throw err;
       }
@@ -70,7 +96,7 @@ async function callAI(prompt: string): Promise<string> {
     return completion.choices[0]?.message?.content || "분석 생성에 실패했습니다.";
   }
 
-  throw new Error("AI API 키가 설정되지 않았습니다. GEMINI_API_KEY 또는 OPENAI_API_KEY를 .env에 추가하세요.");
+  throw new Error("AI API 키가 설정되지 않았습니다. 설정에서 Gemini 또는 OpenAI API 키를 등록해주세요.");
 }
 
 // 환경 변수 확인 (디버깅)
@@ -2587,6 +2613,53 @@ ${researchList}
     }
   });
 
+  // ========== 종목 통합 검색 (국내+해외) ==========
+  app.get("/api/stock/search-autocomplete", async (req, res) => {
+    try {
+      const query = (req.query.query as string || "").trim();
+      if (!query) return res.status(400).json({ items: [] });
+
+      const acRes = await axios.get(`https://ac.stock.naver.com/ac`, {
+        params: { q: query, target: "stock" },
+        headers: { "User-Agent": UA },
+        timeout: 5000,
+      }).catch(() => null);
+
+      if (!acRes?.data?.items || acRes.data.items.length === 0) {
+        return res.json({ items: [] });
+      }
+
+      const results = acRes.data.items.slice(0, 20).map((item: any) => {
+        const isKOR = item.nationCode === "KOR";
+        let exchange = "KOSPI";
+        const typeCode = (item.typeCode || "").toUpperCase();
+        if (isKOR) {
+          exchange = typeCode.includes("KOSDAQ") ? "KOSDAQ" : "KOSPI";
+        } else {
+          if (typeCode.includes("NYSE")) exchange = "NYSE";
+          else if (typeCode.includes("NASDAQ")) exchange = "NASDAQ";
+          else if (typeCode.includes("AMEX")) exchange = "AMEX";
+          else if (typeCode.includes("TSE") || typeCode.includes("TOKYO")) exchange = "TSE";
+          else if (typeCode.includes("HKEX") || typeCode.includes("HK")) exchange = "HKEX";
+          else if (typeCode.includes("SSE") || typeCode.includes("SHANGHAI")) exchange = "SSE";
+          else exchange = "NASDAQ";
+        }
+        return {
+          code: item.code,
+          name: item.name,
+          exchange,
+          typeName: item.typeName || "",
+          nationName: item.nationName || "",
+          nationCode: item.nationCode || "",
+        };
+      });
+
+      res.json({ items: results });
+    } catch (error: any) {
+      res.status(500).json({ items: [], message: error.message || "검색 실패" });
+    }
+  });
+
   // ========== 관심종목 (주식정보) ==========
 
   // 관심종목 목록 조회 (공통)
@@ -2596,6 +2669,12 @@ ${researchList}
       const listType = (req.query.listType as string) || "common";
       const userId = req.session?.userId;
       
+      // "shared" 타입 조회: 개인관심이지만 isShared=true인 종목 (모든 계정에 표시)
+      if (listType === "shared") {
+        const stocks = await storage.getWatchlistStocksShared(market);
+        return res.json(stocks);
+      }
+
       if (listType === "personal" && !userId && !req.session?.isAdmin) {
         return res.json([]);
       }
@@ -2625,10 +2704,14 @@ ${researchList}
     try {
       const userId = req.session?.userId;
       if (!userId) return res.status(400).json({ message: "사용자 ID가 필요합니다." });
+      const { isShared, ...restBody } = req.body;
+      const userName = req.session?.userName || req.session?.userEmail || "사용자";
       const stock = await storage.createWatchlistStock({
-        ...req.body,
+        ...restBody,
         listType: "personal",
         userId,
+        isShared: isShared === true,
+        sharedBy: isShared === true ? userName : null,
       });
       res.json(stock);
     } catch (error: any) {
@@ -2912,11 +2995,18 @@ ${researchList}
   app.get("/api/stock/chart/:code", async (req, res) => {
     try {
       const code = req.params.code;
-      const count = parseInt(req.query.count as string) || 120;
+      const period = (req.query.period as string) || "day"; // day | week | month
+      const validPeriods: Record<string, { timeframe: string; defaultCount: number }> = {
+        day: { timeframe: "day", defaultCount: 120 },
+        week: { timeframe: "week", defaultCount: 104 },
+        month: { timeframe: "month", defaultCount: 60 },
+      };
+      const pConfig = validPeriods[period] || validPeriods.day;
+      const count = parseInt(req.query.count as string) || pConfig.defaultCount;
 
       // fchart API에서 OHLCV 데이터 가져오기
       const chartRes = await axios.get(`https://fchart.stock.naver.com/sise.nhn`, {
-        params: { symbol: code, timeframe: "day", count, requestType: 0 },
+        params: { symbol: code, timeframe: pConfig.timeframe, count, requestType: 0 },
         headers: { "User-Agent": UA },
         timeout: 8000,
         responseType: "text",
@@ -2980,10 +3070,17 @@ ${researchList}
   app.get("/api/stock/chart/overseas/:code", async (req, res) => {
     try {
       const code = req.params.code;
+      const period = (req.query.period as string) || "day"; // day | week | month
+      const periodConfig: Record<string, { interval: string; range: string }> = {
+        day: { interval: "1d", range: "1y" },
+        week: { interval: "1wk", range: "5y" },
+        month: { interval: "1mo", range: "10y" },
+      };
+      const pConf = periodConfig[period] || periodConfig.day;
 
       // Yahoo Finance API 사용 (해외주식 차트 데이터)
       const chartRes = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${code}`, {
-        params: { range: "1y", interval: "1d" },
+        params: { range: pConf.range, interval: pConf.interval },
         headers: { "User-Agent": UA },
         timeout: 10000,
       }).catch(() => null);
@@ -3395,6 +3492,20 @@ ${researchList}
       }
 
       const isOverseas = market === "overseas";
+
+      // 사용자별 AI API 키 조회
+      const discUserId = (req as any).session?.userId;
+      let discUserAiKey: UserAiKeyOption | undefined;
+      if (discUserId) {
+        const discConfig = await storage.getUserAiConfig(discUserId);
+        if (discConfig?.useOwnKey && (discConfig.geminiApiKey || discConfig.openaiApiKey)) {
+          discUserAiKey = {
+            provider: discConfig.aiProvider || "gemini",
+            geminiApiKey: discConfig.geminiApiKey || undefined,
+            openaiApiKey: discConfig.openaiApiKey || undefined,
+          };
+        }
+      }
       let fetchedContents: string[] = [];
 
       if (isOverseas) {
@@ -3558,7 +3669,7 @@ ${contentSection}
 간결하되 핵심 내용을 놓치지 않도록 정리해주세요.`;
       }
 
-      const result = await callAI(prompt);
+      const result = await callAI(prompt, discUserAiKey);
       res.json({ analysis: result, analyzedAt: new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }) });
     } catch (error: any) {
       console.error("[Disclosure AI Analyze] Error:", error.message);
@@ -3578,21 +3689,28 @@ ${contentSection}
         case "AMEX": suffix = ".A"; break;
       }
 
-      const apiRes = await axios.get(`https://m.stock.naver.com/api/stock/${code}${suffix}/research`, {
-        params: { page: 1, size: 15 },
+      // Naver api.stock 해외주식 Morningstar 리서치 API
+      const apiRes = await axios.get(`https://api.stock.naver.com/stock/${code}${suffix}/research`, {
         headers: { "User-Agent": UA },
-        timeout: 8000,
+        timeout: 10000,
       }).catch(() => null);
 
       const reports: any[] = [];
-      if (apiRes?.data?.researchList) {
-        apiRes.data.researchList.forEach((item: any) => {
+      if (Array.isArray(apiRes?.data)) {
+        apiRes.data.forEach((item: any) => {
+          // rating: 1(매우과대평가) ~ 5(매우과소평가), 3(적정)
+          const ratingLabels: Record<number, string> = { 1: "★", 2: "★★", 3: "★★★", 4: "★★★★", 5: "★★★★★" };
+          const valuationLabel = item.valuationRatingType?.name || "";
           reports.push({
             title: item.title || "",
-            url: item.link || item.url || "",
-            source: item.brokerName || item.office || "",
-            targetPrice: item.targetPrice || "-",
-            date: item.date || item.publishDate || "",
+            url: item.originalPDF || "",
+            source: "Morningstar",
+            targetPrice: item.fairValue ? `$${item.fairValue}` : "-",
+            date: item.analystNotePublishDate || "",
+            rating: item.morningstarRating ? ratingLabels[item.morningstarRating] || String(item.morningstarRating) : "-",
+            moat: item.economicMoatType?.name || "-",
+            uncertainty: item.uncertaintyType?.name || "-",
+            valuation: valuationLabel,
           });
         });
       }
@@ -3684,6 +3802,20 @@ ${contentSection}
         return res.status(400).json({ message: "stockCode, stockName 필수" });
       }
       const isOverseas = market === "overseas";
+
+      // 사용자별 AI API 키 조회
+      const userId = (req as any).session?.userId;
+      let userAiKey: UserAiKeyOption | undefined;
+      if (userId) {
+        const config = await storage.getUserAiConfig(userId);
+        if (config?.useOwnKey && (config.geminiApiKey || config.openaiApiKey)) {
+          userAiKey = {
+            provider: config.aiProvider || "gemini",
+            geminiApiKey: config.geminiApiKey || undefined,
+            openaiApiKey: config.openaiApiKey || undefined,
+          };
+        }
+      }
 
       // 1) 기본정보 가져오기
       let basicInfo = "";
@@ -3792,7 +3924,7 @@ ${newsInfo || "(조회 불가)"}
 
 분석은 객관적이고 데이터 기반으로 작성해주세요.`;
 
-      const result = await callAI(prompt);
+      const result = await callAI(prompt, userAiKey);
 
       // 한줄요약 및 투자의견 추출
       let summary = "";
@@ -3803,12 +3935,12 @@ ${newsInfo || "(조회 불가)"}
       if (ratingMatch) rating = ratingMatch[1].trim();
 
       // DB 저장
-      const userId = (req as any).session?.userId || null;
       const userName = (req as any).session?.userName || null;
+      const isPublic = req.body.isPublic !== false; // 기본값 true (공개)
       const saved = await storage.createStockAiAnalysis({
         stockCode, stockName, market: market || "domestic", exchange: exchange || null,
         analysisResult: result, summary, rating,
-        userId, userName,
+        userId: userId || null, userName, isPublic,
       });
 
       res.json({ analysis: saved });
@@ -3818,13 +3950,14 @@ ${newsInfo || "(조회 불가)"}
     }
   });
 
-  // 분석 리스트 조회
+  // 분석 리스트 조회 (공개 + 본인 비공개만)
   app.get("/api/stock/ai-analyses", async (req, res) => {
     try {
       const stockCode = req.query.stockCode as string | undefined;
       const market = req.query.market as string | undefined;
-      const analyses = await storage.getStockAiAnalyses(stockCode, market);
-      res.json({ analyses });
+      const currentUserId = (req as any).session?.userId || null;
+      const analyses = await storage.getStockAiAnalyses(stockCode, market, currentUserId);
+      res.json({ analyses, currentUserId });
     } catch (error: any) {
       res.status(500).json({ message: error.message || "분석 목록 조회 실패" });
     }
@@ -3842,14 +3975,102 @@ ${newsInfo || "(조회 불가)"}
     }
   });
 
-  // 분석 삭제
+  // 분석 삭제 (본인 작성 또는 admin만 삭제 가능)
   app.delete("/api/stock/ai-analyses/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      const analysis = await storage.getStockAiAnalysis(id);
+      if (!analysis) return res.status(404).json({ message: "분석 결과를 찾을 수 없습니다" });
+      const currentUserId = (req as any).session?.userId;
+      const isAdminUser = !!(req as any).session?.isAdmin;
+      if (!isAdminUser && analysis.userId !== currentUserId) {
+        return res.status(403).json({ message: "본인이 작성한 분석만 삭제할 수 있습니다" });
+      }
       await storage.deleteStockAiAnalysis(id);
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ message: error.message || "분석 삭제 실패" });
+    }
+  });
+
+  // ========== 사용자별 AI API 설정 ==========
+
+  // AI 설정 조회
+  app.get("/api/user/ai-config", async (req, res) => {
+    try {
+      const userId = (req as any).session?.userId;
+      if (!userId) return res.json({ config: null });
+      const config = await storage.getUserAiConfig(userId);
+      if (!config) return res.json({ config: null });
+      // API 키는 마스킹해서 반환 (앞 8자리만 표시)
+      res.json({
+        config: {
+          ...config,
+          geminiApiKey: config.geminiApiKey ? config.geminiApiKey.slice(0, 8) + "••••••••" : null,
+          openaiApiKey: config.openaiApiKey ? config.openaiApiKey.slice(0, 8) + "••••••••" : null,
+          hasGeminiKey: !!config.geminiApiKey,
+          hasOpenaiKey: !!config.openaiApiKey,
+        }
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "AI 설정 조회 실패" });
+    }
+  });
+
+  // AI 설정 저장
+  app.post("/api/user/ai-config", async (req, res) => {
+    try {
+      const userId = (req as any).session?.userId;
+      if (!userId) return res.status(401).json({ message: "로그인이 필요합니다" });
+      const { aiProvider, geminiApiKey, openaiApiKey } = req.body;
+      const config = await storage.upsertUserAiConfig({
+        userId,
+        aiProvider: aiProvider || "gemini",
+        geminiApiKey: geminiApiKey || null,
+        openaiApiKey: openaiApiKey || null,
+        useOwnKey: true,
+      });
+      res.json({
+        success: true,
+        config: {
+          ...config,
+          geminiApiKey: config.geminiApiKey ? config.geminiApiKey.slice(0, 8) + "••••••••" : null,
+          openaiApiKey: config.openaiApiKey ? config.openaiApiKey.slice(0, 8) + "••••••••" : null,
+          hasGeminiKey: !!config.geminiApiKey,
+          hasOpenaiKey: !!config.openaiApiKey,
+        }
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "AI 설정 저장 실패" });
+    }
+  });
+
+  // AI API 키 테스트
+  app.post("/api/user/ai-config/test", async (req, res) => {
+    try {
+      const { aiProvider, geminiApiKey, openaiApiKey } = req.body;
+      const testPrompt = "안녕하세요. 이것은 API 키 테스트입니다. '키 테스트 성공'이라고 한 줄만 응답해주세요.";
+      const userKey: UserAiKeyOption = {
+        provider: aiProvider,
+        geminiApiKey,
+        openaiApiKey,
+      };
+      const result = await callAI(testPrompt, userKey);
+      res.json({ success: true, message: "API 키가 정상적으로 작동합니다.", response: result.slice(0, 100) });
+    } catch (error: any) {
+      res.status(400).json({ success: false, message: `API 키 테스트 실패: ${error.message}` });
+    }
+  });
+
+  // AI 설정 삭제
+  app.delete("/api/user/ai-config", async (req, res) => {
+    try {
+      const userId = (req as any).session?.userId;
+      if (!userId) return res.status(401).json({ message: "로그인이 필요합니다" });
+      await storage.deleteUserAiConfig(userId);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "AI 설정 삭제 실패" });
     }
   });
 
@@ -4017,6 +4238,13 @@ ${newsInfo || "(조회 불가)"}
       if (listType === "personal" && !userId && !req.session?.isAdmin) {
         return res.json([]);
       }
+
+      // "shared" 타입 조회: 개인관심이지만 isShared=true인 종목 (모든 계정에 표시)
+      if (listType === "shared") {
+        const stocks = await storage.getTenbaggerStocksShared();
+        return res.json(stocks);
+      }
+
       const stocks = await storage.getTenbaggerStocks(listType, userId || undefined);
       res.json(stocks);
     } catch (error: any) {
@@ -4043,10 +4271,14 @@ ${newsInfo || "(조회 불가)"}
     try {
       const userId = req.session?.userId;
       if (!userId) return res.status(400).json({ message: "사용자 ID가 필요합니다." });
+      const { isShared, ...restBody } = req.body;
+      const userName = req.session?.userName || req.session?.userEmail || "사용자";
       const stock = await storage.createTenbaggerStock({
-        ...req.body,
+        ...restBody,
         listType: "personal",
         userId,
+        isShared: isShared === true,
+        sharedBy: isShared === true ? userName : null,
       });
       res.json(stock);
     } catch (error: any) {
@@ -6590,6 +6822,749 @@ ${newsSummary}`;
     } catch (error: any) {
       console.error("[Steem] Replies fetch failed:", error.message);
       res.status(500).json({ message: `Replies 조회 실패: ${error.message}` });
+    }
+  });
+
+  // ========== AI 프롬프트 CRUD ==========
+
+  // 프롬프트 목록 조회 (기본 + 공유 + 본인)
+  app.get("/api/ai-prompts", async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      const prompts = await storage.getAiPrompts(userId || undefined);
+      res.json(prompts);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "프롬프트 조회 실패" });
+    }
+  });
+
+  // 프롬프트 생성
+  app.post("/api/ai-prompts", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      const userName = req.session?.userName || req.session?.userEmail || "사용자";
+      const { title, content, category, isShared, isDefault } = req.body;
+      if (!title || !content) {
+        return res.status(400).json({ message: "제목과 내용을 입력해주세요." });
+      }
+      const prompt = await storage.createAiPrompt({
+        title,
+        content,
+        category: category || "일반",
+        isDefault: req.session?.isAdmin ? (isDefault === true) : false,
+        isShared: isShared === true,
+        sharedBy: isShared === true ? userName : null,
+        userId: userId || null,
+      });
+      res.json(prompt);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "프롬프트 생성 실패" });
+    }
+  });
+
+  // 프롬프트 수정
+  app.patch("/api/ai-prompts/:id", requireUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const existing = await storage.getAiPrompt(id);
+      if (!existing) return res.status(404).json({ message: "프롬프트를 찾을 수 없습니다." });
+      // 기본 프롬프트는 admin만 수정
+      if (existing.isDefault && !req.session?.isAdmin) {
+        return res.status(403).json({ message: "기본 프롬프트는 관리자만 수정할 수 있습니다." });
+      }
+      // 본인 프롬프트만 수정 (admin은 모두 가능)
+      if (!req.session?.isAdmin && existing.userId !== req.session?.userId) {
+        return res.status(403).json({ message: "본인의 프롬프트만 수정 가능합니다." });
+      }
+      const prompt = await storage.updateAiPrompt(id, req.body);
+      res.json(prompt);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "프롬프트 수정 실패" });
+    }
+  });
+
+  // 프롬프트 삭제
+  app.delete("/api/ai-prompts/:id", requireUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const existing = await storage.getAiPrompt(id);
+      if (!existing) return res.status(404).json({ message: "프롬프트를 찾을 수 없습니다." });
+      if (existing.isDefault && !req.session?.isAdmin) {
+        return res.status(403).json({ message: "기본 프롬프트는 관리자만 삭제할 수 있습니다." });
+      }
+      if (!req.session?.isAdmin && existing.userId !== req.session?.userId) {
+        return res.status(403).json({ message: "본인의 프롬프트만 삭제 가능합니다." });
+      }
+      await storage.deleteAiPrompt(id);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "프롬프트 삭제 실패" });
+    }
+  });
+
+  // 기본 프롬프트 초기화 (서버 시작 시)
+  (async () => {
+    try {
+      const existingPrompts = await storage.getAiPrompts();
+      const hasDefault = existingPrompts.some((p: any) => p.isDefault);
+      if (!hasDefault) {
+        await storage.createAiPrompt({
+          title: "투자 마이스터",
+          content: `너는 경제 전문가이자 투자의 마이스터야~
+이 대화는 주식 및 ETF거래를 통해 투자 수익률을 극대화함과 동시에 장기적으로 안정적인 복리 수익률을 추구하고자 하는 안정적,적극적 투자성향을 모두 가지고 있는 투자스타일의 투자자를 위한 대화창이야.
+최근의 매크로 동향, 최신뉴스 및 테마동향, ETF 정보, 지수동향 등을 종합 참고하여 투자자의 질문에 대답을 해주길 바래~
+그리고 본 페이지에 구현된 기능을 가능하면 에이전트 방식으로 실행할 수 있도록 해줘(메뉴이동,내용입력,정보검색 등)`,
+          category: "투자전략",
+          isDefault: true,
+          isShared: false,
+          sharedBy: null,
+          userId: null,
+        });
+        console.log("[AI Agent] 기본 프롬프트 생성 완료");
+      }
+    } catch (e: any) {
+      console.log("[AI Agent] 기본 프롬프트 초기화 실패:", e.message);
+    }
+  })();
+
+  // ========== AI Agent 시스템 ==========
+
+  // Agent에서 사용 가능한 Action 정의
+  const AGENT_ACTIONS_DESCRIPTION = `
+당신은 투자 전문 AI Agent입니다. 사용자의 요청을 분석하여 필요한 경우 아래 사용 가능한 액션을 JSON으로 반환합니다.
+
+## 응답 규칙
+1. 실행할 액션이 있는 경우: 먼저 자연어 답변을 한 뒤, 마지막에 [ACTIONS]...[/ACTIONS] 블록으로 JSON 배열을 반환합니다.
+2. 액션 없이 대화만 하는 경우: 자연어로 답변합니다.
+3. 여러 액션을 순차적으로 실행해야 하면 배열에 여러 개를 넣을 수 있습니다.
+4. 주문(place_order) 같은 위험 액션은 반드시 confirm_required로 감싸서 사용자 확인을 받도록 합니다.
+
+## 사용 가능한 액션 목록
+
+### 메뉴 이동 (navigate)
+- 화면을 특정 탭/메뉴로 전환합니다
+- target 값: "home", "etf-components", "new-etf", "watchlist-etf", "satellite-etf", "markets-domestic", "markets-global", "markets-research", "daily-strategy", "domestic-stocks", "overseas-stocks", "tenbagger", "steem-report", "steem-reader", "ai-agent", "bookmarks"
+- trading 페이지: target을 "/trading"으로 지정
+예시: {"action":"navigate","params":{"target":"etf-components"}}
+예시: {"action":"navigate","params":{"target":"/trading"}}
+
+### 종목 검색 (search_stock)
+- 키워드로 국내/해외 종목을 검색합니다
+예시: {"action":"search_stock","params":{"keyword":"삼성전자"}}
+
+### 종목 현재가 조회 (fetch_stock_price)
+- 특정 종목의 현재가를 조회합니다
+예시: {"action":"fetch_stock_price","params":{"stockCode":"005930"}}
+
+### 계좌 잔고 조회 (fetch_balance)
+- 사용자의 보유 종목 및 잔고를 조회합니다
+예시: {"action":"fetch_balance","params":{}}
+
+### 시장 지수 조회 (fetch_market_indices)
+- 코스피, 코스닥 등 주요 시장 지수를 조회합니다
+예시: {"action":"fetch_market_indices","params":{}}
+
+### 해외 시장 지수 조회 (fetch_global_indices)
+- S&P500, 나스닥, 다우 등 해외 주요 지수를 조회합니다
+예시: {"action":"fetch_global_indices","params":{}}
+
+### 실시간 상승 ETF TOP 15 조회 (fetch_etf_top_gainers)
+- 실시간 상승 ETF 상위 종목을 조회합니다
+예시: {"action":"fetch_etf_top_gainers","params":{}}
+
+### 업종별 등락현황 조회 (fetch_sectors)
+- 업종별 등락현황을 조회합니다
+예시: {"action":"fetch_sectors","params":{}}
+
+### 종목 순위 조회 (fetch_top_stocks)
+- 거래량/상승률/하락률 상위 종목을 조회합니다
+- category: "volume"(거래량), "rising"(상승), "falling"(하락)
+예시: {"action":"fetch_top_stocks","params":{"category":"rising"}}
+
+### 환율 조회 (fetch_exchange_rates)
+- 주요 환율 정보를 조회합니다
+예시: {"action":"fetch_exchange_rates","params":{}}
+
+### 종목 상세정보 열기 (open_stock_detail)
+- 특정 종목의 상세 정보 페이지를 새 창으로 엽니다
+- market: "domestic" 또는 "overseas"
+예시: {"action":"open_stock_detail","params":{"stockCode":"005930","stockName":"삼성전자","market":"domestic"}}
+
+### 종목 뉴스 조회 (fetch_stock_news)
+- 특정 종목의 최신 뉴스를 조회합니다
+- market: "domestic" 또는 "overseas"
+예시: {"action":"fetch_stock_news","params":{"stockCode":"005930","market":"domestic"}}
+
+### 시장 뉴스 조회 (fetch_market_news)
+- 최신 시장 뉴스를 조회합니다
+예시: {"action":"fetch_market_news","params":{}}
+
+### 관심 종목 목록 조회 (fetch_watchlist)
+- 등록된 관심 종목 목록을 조회합니다
+- market: "domestic" 또는 "overseas" (선택)
+예시: {"action":"fetch_watchlist","params":{"market":"domestic"}}
+
+### 종목 매수 주문 (place_order)
+⚠️ 위험 액션 - 반드시 confirm_required를 true로 설정
+- stockCode: 종목코드
+- orderType: "buy" 또는 "sell"
+- quantity: 수량
+- price: 가격 (지정가)
+- orderMethod: "limit"(지정가) 또는 "market"(시장가)
+예시: {"action":"place_order","params":{"stockCode":"005930","orderType":"buy","quantity":10,"price":58000,"orderMethod":"limit"},"confirm_required":true,"confirm_message":"삼성전자 10주를 58,000원에 매수합니다. 실행하시겠습니까?"}
+
+### AI 종합분석 (ai_stock_analysis)
+- 특정 종목에 대한 AI 종합분석을 수행합니다
+예시: {"action":"ai_stock_analysis","params":{"stockCode":"005930","stockName":"삼성전자","market":"domestic"}}
+
+### ETF 구성종목 조회 (fetch_etf_components)
+- 특정 ETF의 구성종목을 조회합니다
+예시: {"action":"fetch_etf_components","params":{"code":"069500"}}
+
+### 주문 내역 조회 (fetch_orders)
+- 최근 주문 내역을 조회합니다
+예시: {"action":"fetch_orders","params":{}}
+
+### 관심 ETF 시세 조회 (fetch_watchlist_etf_realtime)
+- 관심 ETF 목록의 실시간 시세를 조회합니다
+- type: "core" 또는 "satellite"
+예시: {"action":"fetch_watchlist_etf_realtime","params":{"type":"core"}}
+
+### 리서치 보고서 조회 (fetch_research)
+- 최신 증권사 리서치 보고서를 조회합니다
+예시: {"action":"fetch_research","params":{}}
+`;
+
+  // Agent Action 실행 함수
+  async function executeAgentAction(action: any, req: Request): Promise<any> {
+    const params = action.params || {};
+    
+    try {
+      switch (action.action) {
+        case "navigate": {
+          return { type: "navigate", target: params.target, success: true };
+        }
+        
+        case "search_stock": {
+          const keyword = params.keyword;
+          if (!keyword) return { type: "error", message: "검색 키워드가 필요합니다." };
+          const url = `https://ac.stock.naver.com/ac?q=${encodeURIComponent(keyword)}&target=stock%2Cindex`;
+          const response = await axios.get(url, { timeout: 5000 });
+          const items = response.data?.items || [];
+          const results: any[] = [];
+          for (const group of items) {
+            for (const item of (group.items || [])) {
+              results.push({
+                code: item.code,
+                name: item.name,
+                market: item.typeCode === "stock" ? (item.nationCode === "KR" ? "domestic" : "overseas") : "index",
+                exchange: item.exchange || "",
+              });
+            }
+          }
+          return { type: "data", dataType: "search_results", data: results.slice(0, 10), success: true };
+        }
+        
+        case "fetch_stock_price": {
+          const code = params.stockCode;
+          if (!code) return { type: "error", message: "종목코드가 필요합니다." };
+          const market = params.market || "domestic";
+          try {
+            let priceData;
+            if (market === "overseas") {
+              const suffix = params.exchange === "NASDAQ" || params.exchange === "NAS" ? ".O" : 
+                            params.exchange === "NYSE" || params.exchange === "NYS" ? ".N" : ".O";
+              const url = `https://m.stock.naver.com/api/stock/${code}${suffix}/basic`;
+              const response = await axios.get(url, { timeout: 5000, headers: { "User-Agent": "Mozilla/5.0" } });
+              priceData = response.data;
+            } else {
+              const url = `https://m.stock.naver.com/api/stock/${code}/basic`;
+              const response = await axios.get(url, { timeout: 5000, headers: { "User-Agent": "Mozilla/5.0" } });
+              priceData = response.data;
+            }
+            return { 
+              type: "data", dataType: "stock_price", 
+              data: {
+                stockCode: code,
+                name: priceData?.stockName || priceData?.stockNameEng || code,
+                currentPrice: priceData?.closePrice || priceData?.lastPrice,
+                changePrice: priceData?.compareToPreviousClosePrice,
+                changeRate: priceData?.fluctuationsRatio,
+                high: priceData?.highPrice,
+                low: priceData?.lowPrice,
+                volume: priceData?.accumulatedTradingVolume,
+                marketCap: priceData?.marketCap,
+              },
+              success: true 
+            };
+          } catch (e: any) {
+            return { type: "error", message: `현재가 조회 실패: ${e.message}` };
+          }
+        }
+
+        case "fetch_balance": {
+          try {
+            const userCreds = await getUserCredentials(req);
+            let result;
+            if (userCreds) {
+              result = await kisApi.userGetBalance(userCreds.userId, userCreds.creds);
+            } else {
+              result = await kisApi.getBalance();
+            }
+            return { type: "data", dataType: "balance", data: result, success: true };
+          } catch (e: any) {
+            return { type: "error", message: `잔고 조회 실패: ${e.message}` };
+          }
+        }
+
+        case "fetch_market_indices": {
+          try {
+            const url = "https://m.stock.naver.com/api/index/KOSPI/basic";
+            const url2 = "https://m.stock.naver.com/api/index/KOSDAQ/basic";
+            const [kospi, kosdaq] = await Promise.all([
+              axios.get(url, { timeout: 5000, headers: { "User-Agent": "Mozilla/5.0" } }),
+              axios.get(url2, { timeout: 5000, headers: { "User-Agent": "Mozilla/5.0" } }),
+            ]);
+            return { 
+              type: "data", dataType: "market_indices", 
+              data: {
+                kospi: { value: kospi.data?.closePrice, change: kospi.data?.compareToPreviousClosePrice, changeRate: kospi.data?.fluctuationsRatio },
+                kosdaq: { value: kosdaq.data?.closePrice, change: kosdaq.data?.compareToPreviousClosePrice, changeRate: kosdaq.data?.fluctuationsRatio },
+              },
+              success: true 
+            };
+          } catch (e: any) {
+            return { type: "error", message: `시장 지수 조회 실패: ${e.message}` };
+          }
+        }
+
+        case "fetch_global_indices": {
+          try {
+            const indices = ["SPI@SPX", "NAS@IXIC", "DJI@DJI"];
+            const results = await Promise.all(
+              indices.map(idx => 
+                axios.get(`https://m.stock.naver.com/api/index/${idx}/basic`, {
+                  timeout: 5000, headers: { "User-Agent": "Mozilla/5.0" }
+                }).catch(() => null)
+              )
+            );
+            const data: any = {};
+            const names = ["S&P 500", "NASDAQ", "Dow Jones"];
+            results.forEach((r, i) => {
+              if (r?.data) {
+                data[names[i]] = {
+                  value: r.data.closePrice,
+                  change: r.data.compareToPreviousClosePrice,
+                  changeRate: r.data.fluctuationsRatio,
+                };
+              }
+            });
+            return { type: "data", dataType: "global_indices", data, success: true };
+          } catch (e: any) {
+            return { type: "error", message: `해외 지수 조회 실패: ${e.message}` };
+          }
+        }
+
+        case "fetch_etf_top_gainers": {
+          try {
+            const url = "https://m.stock.naver.com/api/stocks/etf/rising?page=1&pageSize=15";
+            const response = await axios.get(url, { timeout: 5000, headers: { "User-Agent": "Mozilla/5.0" } });
+            const stocks = (response.data?.stocks || []).slice(0, 15).map((s: any) => ({
+              code: s.itemCode,
+              name: s.stockName,
+              price: s.closePrice,
+              changeRate: s.fluctuationsRatio,
+              change: s.compareToPreviousClosePrice,
+            }));
+            return { type: "data", dataType: "etf_top_gainers", data: stocks, success: true };
+          } catch (e: any) {
+            return { type: "error", message: `ETF 상승 종목 조회 실패: ${e.message}` };
+          }
+        }
+
+        case "fetch_sectors": {
+          try {
+            const url = "https://m.stock.naver.com/api/stocks/up/KOSPI?page=1&pageSize=10";
+            const response = await axios.get(url, { timeout: 5000, headers: { "User-Agent": "Mozilla/5.0" } });
+            return { type: "data", dataType: "sectors", data: response.data, success: true };
+          } catch (e: any) {
+            return { type: "error", message: `업종 조회 실패: ${e.message}` };
+          }
+        }
+
+        case "fetch_top_stocks": {
+          try {
+            const category = params.category || "rising";
+            const typeMap: any = { rising: "up", falling: "down", volume: "volume" };
+            const url = `https://m.stock.naver.com/api/stocks/${typeMap[category] || "up"}/KOSPI?page=1&pageSize=10`;
+            const response = await axios.get(url, { timeout: 5000, headers: { "User-Agent": "Mozilla/5.0" } });
+            const stocks = (response.data?.stocks || []).map((s: any) => ({
+              code: s.itemCode,
+              name: s.stockName,
+              price: s.closePrice,
+              changeRate: s.fluctuationsRatio,
+              change: s.compareToPreviousClosePrice,
+              volume: s.accumulatedTradingVolume,
+            }));
+            return { type: "data", dataType: "top_stocks", category, data: stocks, success: true };
+          } catch (e: any) {
+            return { type: "error", message: `종목 순위 조회 실패: ${e.message}` };
+          }
+        }
+
+        case "fetch_exchange_rates": {
+          try {
+            const url = "https://m.stock.naver.com/api/exchange/FX_USDKRW/basic";
+            const url2 = "https://m.stock.naver.com/api/exchange/FX_JPYKRW/basic";
+            const url3 = "https://m.stock.naver.com/api/exchange/FX_EURKRW/basic";
+            const [usd, jpy, eur] = await Promise.all([
+              axios.get(url, { timeout: 5000, headers: { "User-Agent": "Mozilla/5.0" } }).catch(() => null),
+              axios.get(url2, { timeout: 5000, headers: { "User-Agent": "Mozilla/5.0" } }).catch(() => null),
+              axios.get(url3, { timeout: 5000, headers: { "User-Agent": "Mozilla/5.0" } }).catch(() => null),
+            ]);
+            const data: any = {};
+            if (usd?.data) data["USD/KRW"] = { value: usd.data.closePrice, change: usd.data.compareToPreviousClosePrice, changeRate: usd.data.fluctuationsRatio };
+            if (jpy?.data) data["JPY/KRW"] = { value: jpy.data.closePrice, change: jpy.data.compareToPreviousClosePrice, changeRate: jpy.data.fluctuationsRatio };
+            if (eur?.data) data["EUR/KRW"] = { value: eur.data.closePrice, change: eur.data.compareToPreviousClosePrice, changeRate: eur.data.fluctuationsRatio };
+            return { type: "data", dataType: "exchange_rates", data, success: true };
+          } catch (e: any) {
+            return { type: "error", message: `환율 조회 실패: ${e.message}` };
+          }
+        }
+
+        case "open_stock_detail": {
+          const { stockCode, stockName, market } = params;
+          if (!stockCode) return { type: "error", message: "종목코드가 필요합니다." };
+          return { 
+            type: "open_window", 
+            url: `/stock-detail?code=${stockCode}&name=${encodeURIComponent(stockName || stockCode)}&market=${market || "domestic"}`,
+            success: true 
+          };
+        }
+
+        case "fetch_stock_news": {
+          try {
+            const { stockCode, market } = params;
+            if (!stockCode) return { type: "error", message: "종목코드가 필요합니다." };
+            const isOverseas = market === "overseas";
+            let url;
+            if (isOverseas) {
+              const suffix = params.exchange === "NASDAQ" || params.exchange === "NAS" ? ".O" : ".N";
+              url = `https://m.stock.naver.com/api/stock/${stockCode}${suffix}/news?page=1&pageSize=10`;
+            } else {
+              url = `https://m.stock.naver.com/api/stock/${stockCode}/news?page=1&pageSize=10`;
+            }
+            const response = await axios.get(url, { timeout: 5000, headers: { "User-Agent": "Mozilla/5.0" } });
+            const news = (response.data?.news || response.data || []).slice(0, 10).map((n: any) => ({
+              title: n.title,
+              source: n.officeName || n.source,
+              date: n.datetime || n.date,
+              link: n.link || n.url,
+            }));
+            return { type: "data", dataType: "stock_news", data: news, success: true };
+          } catch (e: any) {
+            return { type: "error", message: `뉴스 조회 실패: ${e.message}` };
+          }
+        }
+
+        case "fetch_market_news": {
+          try {
+            const url = "https://m.stock.naver.com/api/news/list?category=market&page=1&pageSize=10";
+            const response = await axios.get(url, { timeout: 5000, headers: { "User-Agent": "Mozilla/5.0" } });
+            const news = (response.data?.news || response.data || []).slice(0, 10).map((n: any) => ({
+              title: n.title,
+              source: n.officeName || n.source,
+              date: n.datetime || n.date,
+            }));
+            return { type: "data", dataType: "market_news", data: news, success: true };
+          } catch (e: any) {
+            return { type: "error", message: `시장 뉴스 조회 실패: ${e.message}` };
+          }
+        }
+
+        case "fetch_watchlist": {
+          try {
+            const market = params.market || "domestic";
+            const stocks = await storage.getWatchlistStocks(market);
+            const data = stocks.map((s: any) => ({
+              code: s.stockCode,
+              name: s.stockName,
+              market: s.market,
+              sector: s.sector,
+              memo: s.memo,
+            }));
+            return { type: "data", dataType: "watchlist", data, success: true };
+          } catch (e: any) {
+            return { type: "error", message: `관심종목 조회 실패: ${e.message}` };
+          }
+        }
+
+        case "place_order": {
+          // 주문 실행 - confirm이 필요하므로 여기서는 실행하지 않고 confirm 요청 반환
+          if (action.confirm_required) {
+            return { 
+              type: "confirm_required", 
+              action: action,
+              message: action.confirm_message || `${params.orderType === "buy" ? "매수" : "매도"} 주문을 실행하시겠습니까?`,
+              success: true 
+            };
+          }
+          // confirm된 주문 실행
+          try {
+            const userCreds = await getUserCredentials(req);
+            let result;
+            if (userCreds) {
+              result = await kisApi.userPlaceOrder(userCreds.userId, userCreds.creds, {
+                stockCode: params.stockCode,
+                orderType: params.orderType,
+                quantity: Number(params.quantity),
+                price: params.price ? Number(params.price) : undefined,
+                orderMethod: params.orderMethod || "limit",
+              });
+            } else {
+              result = await kisApi.placeOrder({
+                stockCode: params.stockCode,
+                orderType: params.orderType,
+                quantity: Number(params.quantity),
+                price: params.price ? Number(params.price) : undefined,
+                orderMethod: params.orderMethod || "limit",
+              });
+            }
+            
+            // 주문 기록
+            const agentUserId = req.session?.userId || null;
+            await storage.createTradingOrder({
+              stockCode: params.stockCode,
+              stockName: params.stockName || params.stockCode,
+              orderType: params.orderType,
+              orderMethod: params.orderMethod || "limit",
+              quantity: Number(params.quantity),
+              price: params.price ? String(params.price) : null,
+              totalAmount: result.success && params.price ? String(Number(params.price) * Number(params.quantity)) : null,
+              status: result.success ? "filled" : "failed",
+              kisOrderNo: result.orderNo || null,
+              userId: agentUserId,
+              errorMessage: result.message || null,
+            });
+            
+            return { 
+              type: "data", dataType: "order_result", 
+              data: { success: result.success, message: result.message, orderNo: result.orderNo },
+              success: result.success 
+            };
+          } catch (e: any) {
+            return { type: "error", message: `주문 실행 실패: ${e.message}` };
+          }
+        }
+
+        case "ai_stock_analysis": {
+          return { 
+            type: "navigate_with_action",
+            target: params.market === "overseas" ? "overseas-stocks" : "domestic-stocks",
+            action: "open_stock_detail_and_analyze",
+            params: { stockCode: params.stockCode, stockName: params.stockName, market: params.market },
+            message: `${params.stockName || params.stockCode} 종목 상세 화면을 열고 AI 분석을 시작합니다.`,
+            success: true 
+          };
+        }
+
+        case "fetch_etf_components": {
+          try {
+            const code = params.code;
+            if (!code) return { type: "error", message: "ETF 코드가 필요합니다." };
+            // ISIN 변환
+            const isinBase = `KR7${code.padStart(6, "0")}00`;
+            let sum = 0;
+            for (let i = 0; i < isinBase.length; i++) {
+              const c = isinBase.charCodeAt(i);
+              let val = c >= 65 ? c - 55 : c - 48;
+              const digits = val.toString();
+              for (let j = 0; j < digits.length; j++) {
+                let d = parseInt(digits[j]);
+                if ((i * 2 + j) % 2 === 1) d *= 2;
+                sum += d > 9 ? d - 9 : d;
+              }
+            }
+            const checkDigit = (10 - (sum % 10)) % 10;
+            const isin = isinBase + checkDigit;
+
+            const url = `https://www.funetf.co.kr/api/etf/components?isin=${isin}`;
+            const response = await axios.get(url, { timeout: 5000 }).catch(() => null);
+            if (response?.data) {
+              return { type: "data", dataType: "etf_components", data: response.data, success: true };
+            }
+            return { type: "error", message: "ETF 구성종목 데이터를 가져올 수 없습니다." };
+          } catch (e: any) {
+            return { type: "error", message: `ETF 구성종목 조회 실패: ${e.message}` };
+          }
+        }
+
+        case "fetch_orders": {
+          try {
+            const userId = req.session?.userId || null;
+            const orders = await storage.getTradingOrders(20, userId || undefined);
+            const recent = orders.slice(0, 20).map((o: any) => ({
+              stockCode: o.stockCode,
+              stockName: o.stockName,
+              orderType: o.orderType,
+              quantity: o.quantity,
+              price: o.price,
+              status: o.status,
+              createdAt: o.createdAt,
+            }));
+            return { type: "data", dataType: "orders", data: recent, success: true };
+          } catch (e: any) {
+            return { type: "error", message: `주문 내역 조회 실패: ${e.message}` };
+          }
+        }
+
+        case "fetch_watchlist_etf_realtime": {
+          try {
+            const etfType = params.type || "core";
+            const etfs = etfType === "satellite" 
+              ? await storage.getSatelliteEtfs()
+              : await storage.getWatchlistEtfs();
+            const data = etfs.map((e: any) => ({
+              code: e.code,
+              name: e.name,
+              sector: e.sector,
+            }));
+            return { type: "data", dataType: "watchlist_etf", data, success: true };
+          } catch (e: any) {
+            return { type: "error", message: `관심 ETF 조회 실패: ${e.message}` };
+          }
+        }
+
+        case "fetch_research": {
+          try {
+            const url = "https://stock.naver.com/api/research?category=invest&page=1&pageSize=10";
+            const response = await axios.get(url, { timeout: 5000, headers: { "User-Agent": "Mozilla/5.0" } }).catch(() => null);
+            if (response?.data) {
+              return { type: "data", dataType: "research", data: response.data, success: true };
+            }
+            return { type: "error", message: "리서치 데이터를 가져올 수 없습니다." };
+          } catch (e: any) {
+            return { type: "error", message: `리서치 조회 실패: ${e.message}` };
+          }
+        }
+
+        default:
+          return { type: "error", message: `알 수 없는 액션: ${action.action}` };
+      }
+    } catch (err: any) {
+      return { type: "error", message: `액션 실행 오류: ${err.message}` };
+    }
+  }
+
+  // AI Agent 대화 (2단계 프로세스)
+  app.post("/api/ai-agent/chat", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      if (!userId) return res.status(401).json({ message: "로그인이 필요합니다." });
+
+      const { messages, systemPrompt } = req.body;
+      if (!messages || !Array.isArray(messages) || messages.length === 0) {
+        return res.status(400).json({ message: "메시지를 입력해주세요." });
+      }
+
+      // 사용자 AI 키 가져오기
+      const userAiConfig = await storage.getUserAiConfig(userId);
+      let userKey: UserAiKeyOption | undefined;
+      if (userAiConfig && userAiConfig.useOwnKey) {
+        userKey = {
+          provider: userAiConfig.aiProvider || "gemini",
+          geminiApiKey: userAiConfig.geminiApiKey || undefined,
+          openaiApiKey: userAiConfig.openaiApiKey || undefined,
+        };
+      }
+
+      // Step 1: AI에게 액션 추출을 포함한 프롬프트 전달
+      let fullPrompt = `[시스템 지시사항]\n`;
+      if (systemPrompt) {
+        fullPrompt += `${systemPrompt}\n\n`;
+      }
+      fullPrompt += AGENT_ACTIONS_DESCRIPTION;
+      fullPrompt += `\n\n[대화 기록]\n`;
+      for (const msg of messages) {
+        const role = msg.role === "user" ? "사용자" : "AI";
+        fullPrompt += `${role}: ${msg.content}\n`;
+      }
+      fullPrompt += "\nAI:";
+
+      const aiResponse = await callAI(fullPrompt, userKey);
+
+      // Step 2: 응답에서 [ACTIONS] 블록 파싱
+      const actionsMatch = aiResponse.match(/\[ACTIONS\]([\s\S]*?)\[\/ACTIONS\]/);
+      let actions: any[] = [];
+      let textResponse = aiResponse;
+
+      if (actionsMatch) {
+        textResponse = aiResponse.replace(/\[ACTIONS\][\s\S]*?\[\/ACTIONS\]/, "").trim();
+        try {
+          actions = JSON.parse(actionsMatch[1].trim());
+          if (!Array.isArray(actions)) actions = [actions];
+        } catch (e) {
+          console.error("[Agent] Action JSON 파싱 실패:", actionsMatch[1]);
+          actions = [];
+        }
+      }
+
+      // Step 3: 각 Action 실행
+      const actionResults: any[] = [];
+      for (const action of actions) {
+        const result = await executeAgentAction(action, req);
+        actionResults.push(result);
+      }
+
+      // Step 4: Action 결과가 있으면 AI에게 결과를 전달하여 최종 답변 생성
+      let finalResponse = textResponse;
+      if (actionResults.length > 0) {
+        const hasDataResults = actionResults.some(r => r.type === "data" || r.type === "error");
+        
+        if (hasDataResults) {
+          // 데이터 조회 결과가 있으면 AI에게 다시 한번 정리 요청
+          const dataStr = JSON.stringify(actionResults.filter(r => r.type === "data" || r.type === "error"), null, 2);
+          const summaryPrompt = `아래는 사용자의 요청에 따라 실행된 액션의 결과 데이터입니다. 이 데이터를 보기 좋게 정리하여 사용자에게 답변해주세요. 핵심 수치는 빠짐없이 포함하고, 간결하면서도 전문적으로 답변해주세요. 가격 등 숫자는 천 단위 구분 쉼표를 사용해주세요.
+
+사용자 질문: ${messages[messages.length - 1]?.content || ""}
+
+실행 결과 데이터:
+${dataStr}
+
+위 데이터를 기반으로 답변해주세요:`;
+          
+          try {
+            finalResponse = await callAI(summaryPrompt, userKey);
+          } catch (e) {
+            // 요약 실패 시 원래 텍스트 응답 사용
+            finalResponse = textResponse || "데이터를 조회했으나 정리에 실패했습니다.";
+          }
+        }
+      }
+
+      res.json({ 
+        response: finalResponse,
+        actions: actionResults,
+      });
+    } catch (error: any) {
+      console.error("[AI Agent Chat Error]:", error.message);
+      res.status(500).json({ message: error.message || "AI 응답 실패" });
+    }
+  });
+
+  // Agent Action 확인(Confirm) 후 실행 엔드포인트
+  app.post("/api/ai-agent/execute-action", requireUser, async (req, res) => {
+    try {
+      const { action } = req.body;
+      if (!action) return res.status(400).json({ message: "액션 정보가 필요합니다." });
+      
+      // confirm_required를 제거하고 실행
+      const execAction = { ...action, confirm_required: false };
+      const result = await executeAgentAction(execAction, req);
+      res.json(result);
+    } catch (error: any) {
+      console.error("[Agent Execute Error]:", error.message);
+      res.status(500).json({ message: error.message || "액션 실행 실패" });
     }
   });
 

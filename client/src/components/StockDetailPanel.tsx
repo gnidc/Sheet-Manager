@@ -4,7 +4,9 @@ import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 // Card imports removed - now rendered inside Dialog
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -13,12 +15,13 @@ import {
 import {
   Loader2, TrendingUp, TrendingDown, Minus, BarChart3,
   FileText, Building2, MessageCircle, Send, Trash2, ExternalLink, Info,
-  Sparkles, Copy, ZoomIn, ZoomOut, Newspaper,
+  Sparkles, Copy, ZoomIn, ZoomOut, Newspaper, Key, Settings, CheckCircle,
+  Globe, Lock,
 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer, Cell, BarChart,
+  Tooltip, ResponsiveContainer, Cell, BarChart, Customized,
 } from "recharts";
 
 interface StockDetailPanelProps {
@@ -52,6 +55,7 @@ export default function StockDetailPanel({
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState("basic");
+  const [chartPeriod, setChartPeriod] = useState<"day" | "week" | "month">("day");
   const [commentText, setCommentText] = useState("");
   const [memoText, setMemoText] = useState("");
   const [memoSaved, setMemoSaved] = useState(true);
@@ -65,14 +69,23 @@ export default function StockDetailPanel({
   const [aiAnalysisResult, setAiAnalysisResult] = useState<any | null>(null);
   const [aiAnalysisFontSize, setAiAnalysisFontSize] = useState(14);
   const [showAnalysisList, setShowAnalysisList] = useState(false);
+  const [aiIsPublic, setAiIsPublic] = useState(true); // 공개/비공개 토글
+  // AI API 키 설정 관련 상태
+  const [showAiKeyDialog, setShowAiKeyDialog] = useState(false);
+  const [aiKeyProvider, setAiKeyProvider] = useState<"gemini" | "openai">("gemini");
+  const [aiKeyGemini, setAiKeyGemini] = useState("");
+  const [aiKeyOpenai, setAiKeyOpenai] = useState("");
+  const [aiKeyTesting, setAiKeyTesting] = useState(false);
+  const [aiKeySaving, setAiKeySaving] = useState(false);
+  const [pendingAiAnalysis, setPendingAiAnalysis] = useState(false); // 키 등록 후 분석 자동 실행용
 
   const isOverseas = market === "overseas";
   const detailUrl = isOverseas
     ? `/api/stock/detail/overseas/${stockCode}?exchange=${exchange || "NASDAQ"}`
     : `/api/stock/detail/${stockCode}`;
   const chartUrl = isOverseas
-    ? `/api/stock/chart/overseas/${stockCode}?exchange=${exchange || "NASDAQ"}`
-    : `/api/stock/chart/${stockCode}`;
+    ? `/api/stock/chart/overseas/${stockCode}?exchange=${exchange || "NASDAQ"}&period=${chartPeriod}`
+    : `/api/stock/chart/${stockCode}?period=${chartPeriod}`;
   const financialsUrl = isOverseas
     ? `/api/stock/financials/overseas/${stockCode}?exchange=${exchange || "NASDAQ"}`
     : `/api/stock/financials/${stockCode}`;
@@ -103,7 +116,7 @@ export default function StockDetailPanel({
     chartData: ChartDataItem[];
     volumeProfile: { price: number; volume: number }[];
   }>({
-    queryKey: ["stock-chart", stockCode, market],
+    queryKey: ["stock-chart", stockCode, market, chartPeriod],
     queryFn: async () => {
       const res = await fetch(chartUrl, { credentials: "include" });
       if (!res.ok) throw new Error("조회 실패");
@@ -172,6 +185,31 @@ export default function StockDetailPanel({
     staleTime: 30000,
   });
 
+  // 사용자 AI 설정 조회
+  const { data: aiConfigData, refetch: refetchAiConfig } = useQuery<any>({
+    queryKey: ["user-ai-config"],
+    queryFn: async () => {
+      const res = await fetch("/api/user/ai-config", { credentials: "include" });
+      if (!res.ok) return { config: null };
+      return res.json();
+    },
+    staleTime: 60000,
+  });
+
+  const hasAiKey = aiConfigData?.config?.hasGeminiKey || aiConfigData?.config?.hasOpenaiKey;
+
+  // AI 종합분석 버튼 클릭 핸들러
+  const handleAiAnalysisClick = () => {
+    if (hasAiKey) {
+      // 키가 이미 등록되어 있으면 바로 분석 실행
+      runAiAnalysis();
+    } else {
+      // 키가 없으면 등록 안내 다이얼로그 표시
+      setPendingAiAnalysis(true);
+      setShowAiKeyDialog(true);
+    }
+  };
+
   // AI 종합분석 실행
   const runAiAnalysis = async () => {
     setAiAnalysisLoading(true);
@@ -181,9 +219,12 @@ export default function StockDetailPanel({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ stockCode, stockName, market, exchange }),
+        body: JSON.stringify({ stockCode, stockName, market, exchange, isPublic: aiIsPublic }),
       });
-      if (!res.ok) throw new Error("분석 실패");
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.message || "분석 실패");
+      }
       const data = await res.json();
       setAiAnalysisResult(data.analysis);
       refetchAiAnalyses();
@@ -192,6 +233,65 @@ export default function StockDetailPanel({
       toast({ title: "AI 분석 실패: " + (err.message || "알 수 없는 오류"), variant: "destructive" });
     } finally {
       setAiAnalysisLoading(false);
+    }
+  };
+
+  // AI API 키 저장
+  const saveAiKey = async () => {
+    setAiKeySaving(true);
+    try {
+      const res = await fetch("/api/user/ai-config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          aiProvider: aiKeyProvider,
+          geminiApiKey: aiKeyProvider === "gemini" ? aiKeyGemini : null,
+          openaiApiKey: aiKeyProvider === "openai" ? aiKeyOpenai : null,
+        }),
+      });
+      if (!res.ok) throw new Error("저장 실패");
+      await refetchAiConfig();
+      toast({ title: "AI API 키가 저장되었습니다" });
+      setShowAiKeyDialog(false);
+      setAiKeyGemini("");
+      setAiKeyOpenai("");
+      // 키 등록 후 분석이 보류 중이면 자동 실행
+      if (pendingAiAnalysis) {
+        setPendingAiAnalysis(false);
+        setTimeout(() => runAiAnalysis(), 500);
+      }
+    } catch (err: any) {
+      toast({ title: "API 키 저장 실패: " + (err.message || ""), variant: "destructive" });
+    } finally {
+      setAiKeySaving(false);
+    }
+  };
+
+  // AI API 키 테스트
+  const testAiKey = async () => {
+    setAiKeyTesting(true);
+    try {
+      const res = await fetch("/api/user/ai-config/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          aiProvider: aiKeyProvider,
+          geminiApiKey: aiKeyProvider === "gemini" ? aiKeyGemini : null,
+          openaiApiKey: aiKeyProvider === "openai" ? aiKeyOpenai : null,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast({ title: "✅ API 키 테스트 성공", description: data.response });
+      } else {
+        toast({ title: "❌ 키 테스트 실패", description: data.message, variant: "destructive" });
+      }
+    } catch (err: any) {
+      toast({ title: "테스트 실패", description: err.message, variant: "destructive" });
+    } finally {
+      setAiKeyTesting(false);
     }
   };
 
@@ -282,8 +382,9 @@ export default function StockDetailPanel({
   // 최근 N일 차트 표시
   const displayChartData = useMemo(() => {
     if (!chartData?.chartData) return [];
-    return chartData.chartData.slice(-90);
-  }, [chartData]);
+    const sliceCount = chartPeriod === "day" ? 90 : chartPeriod === "week" ? 104 : 60;
+    return chartData.chartData.slice(-sliceCount);
+  }, [chartData, chartPeriod]);
 
   return (
     <div className="w-full">
@@ -293,19 +394,41 @@ export default function StockDetailPanel({
           <span>{stockName}</span>
           <span className="text-sm text-muted-foreground font-mono">({stockCode})</span>
           {exchange && <span className="text-xs text-muted-foreground">{exchange}</span>}
-          <Button
-            size="sm"
-            variant={aiAnalysisLoading ? "secondary" : "default"}
-            className="ml-auto text-xs h-7 px-3"
-            disabled={aiAnalysisLoading}
-            onClick={runAiAnalysis}
-          >
-            {aiAnalysisLoading ? (
-              <><Loader2 className="h-3 w-3 animate-spin mr-1" />AI 분석중...</>
-            ) : (
-              <><Sparkles className="h-3 w-3 mr-1" />AI 종합분석</>
+          <div className="ml-auto flex items-center gap-1">
+            {hasAiKey && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-[10px] h-6 px-2"
+                onClick={() => { setPendingAiAnalysis(false); setShowAiKeyDialog(true); }}
+                title="AI API 키 설정"
+              >
+                <Settings className="h-3 w-3" />
+              </Button>
             )}
-          </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className={`text-[10px] h-6 px-2 ${aiIsPublic ? "text-blue-600" : "text-orange-600"}`}
+              onClick={() => setAiIsPublic(!aiIsPublic)}
+              title={aiIsPublic ? "공개 분석 (모든 사용자에게 표시)" : "비공개 분석 (본인에게만 표시)"}
+            >
+              {aiIsPublic ? <><Globe className="h-3 w-3 mr-0.5" />공개</> : <><Lock className="h-3 w-3 mr-0.5" />비공개</>}
+            </Button>
+            <Button
+              size="sm"
+              variant={aiAnalysisLoading ? "secondary" : "default"}
+              className="text-xs h-7 px-3"
+              disabled={aiAnalysisLoading}
+              onClick={handleAiAnalysisClick}
+            >
+              {aiAnalysisLoading ? (
+                <><Loader2 className="h-3 w-3 animate-spin mr-1" />AI 분석중...</>
+              ) : (
+                <><Sparkles className="h-3 w-3 mr-1" />AI 종합분석</>
+              )}
+            </Button>
+          </div>
         </div>
       </div>
       <div className="px-4 pb-4 pt-2">
@@ -391,6 +514,161 @@ export default function StockDetailPanel({
                     <p className="text-sm leading-relaxed">{detailData.description}</p>
                   </div>
                 )}
+
+                {/* AI 종합분석 결과 (현재) */}
+                {(aiAnalysisResult || aiAnalysisLoading) && (
+                  <div className={`border rounded-lg p-4 ${
+                    aiAnalysisResult?.isPublic === false
+                      ? "bg-gradient-to-br from-orange-50/50 to-amber-50/50 dark:from-orange-950/20 dark:to-amber-950/20 border-orange-200 dark:border-orange-900/30"
+                      : "bg-gradient-to-br from-blue-50/50 to-purple-50/50 dark:from-blue-950/20 dark:to-purple-950/20"
+                  }`}>
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-sm font-bold flex items-center gap-1">
+                        <Sparkles className="h-4 w-4 text-purple-500" />
+                        AI 종합분석 결과
+                        {aiAnalysisResult?.isPublic === false ? (
+                          <span className="ml-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-600 flex items-center gap-0.5">
+                            <Lock className="h-2.5 w-2.5" />비공개
+                          </span>
+                        ) : aiAnalysisResult?.isPublic === true ? (
+                          <span className="ml-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-100 text-blue-600 flex items-center gap-0.5">
+                            <Globe className="h-2.5 w-2.5" />공개
+                          </span>
+                        ) : null}
+                        {aiAnalysisResult?.userName && (
+                          <span className="ml-1 text-[10px] font-normal text-muted-foreground">
+                            by {aiAnalysisResult.userName.slice(0, 3)}***
+                          </span>
+                        )}
+                        {aiAnalysisResult?.rating && (
+                          <span className={`ml-2 px-2 py-0.5 rounded text-xs font-bold ${
+                            aiAnalysisResult.rating === "강력매수" ? "bg-red-100 text-red-700" :
+                            aiAnalysisResult.rating === "매수" ? "bg-orange-100 text-orange-700" :
+                            aiAnalysisResult.rating === "중립" ? "bg-gray-100 text-gray-700" :
+                            aiAnalysisResult.rating === "매도" ? "bg-blue-100 text-blue-700" :
+                            "bg-blue-200 text-blue-800"
+                          }`}>{aiAnalysisResult.rating}</span>
+                        )}
+                      </h3>
+                      <div className="flex items-center gap-1">
+                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setAiAnalysisFontSize(s => Math.max(10, s - 1))}>
+                          <ZoomOut className="h-3 w-3" />
+                        </Button>
+                        <span className="text-[10px] text-muted-foreground">{aiAnalysisFontSize}</span>
+                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setAiAnalysisFontSize(s => Math.min(24, s + 1))}>
+                          <ZoomIn className="h-3 w-3" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => {
+                          const text = aiAnalysisResult?.analysisResult || "";
+                          navigator.clipboard.writeText(text);
+                          toast({ title: "분석 결과가 복사되었습니다" });
+                        }}>
+                          <Copy className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                    {aiAnalysisLoading ? (
+                      <div className="flex items-center justify-center py-8 gap-2">
+                        <Loader2 className="h-5 w-5 animate-spin text-purple-500" />
+                        <span className="text-sm text-muted-foreground">AI가 종합분석 리포트를 작성 중입니다...</span>
+                      </div>
+                    ) : aiAnalysisResult?.analysisResult ? (
+                      <div
+                        className="prose prose-sm max-w-none"
+                        style={{ fontSize: `${aiAnalysisFontSize}px`, lineHeight: "1.7" }}
+                        dangerouslySetInnerHTML={{ __html: markdownToHtml(aiAnalysisResult.analysisResult) }}
+                      />
+                    ) : null}
+                    {aiAnalysisResult?.summary && (
+                      <div className="mt-3 p-2 bg-yellow-50 dark:bg-yellow-950/30 rounded text-sm font-medium">
+                        💡 {aiAnalysisResult.summary}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* AI 분석 히스토리 리스트 */}
+                <div>
+                  <button
+                    className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                    onClick={() => setShowAnalysisList(!showAnalysisList)}
+                  >
+                    <FileText className="h-3 w-3" />
+                    이전 AI 분석 리포트 ({aiAnalysesList?.analyses?.length || 0}건)
+                    <span className="text-[10px]">{showAnalysisList ? "▲" : "▼"}</span>
+                  </button>
+
+                  {showAnalysisList && (
+                    <div className="mt-2 space-y-2">
+                      {isAiAnalysesLoading ? (
+                        <div className="flex justify-center py-4"><Loader2 className="h-4 w-4 animate-spin" /></div>
+                      ) : aiAnalysesList?.analyses?.length > 0 ? (
+                        aiAnalysesList.analyses.map((item: any) => {
+                          const isMine = item.userId === aiAnalysesList.currentUserId;
+                          const canDelete = isMine || isAdmin;
+                          return (
+                          <div key={item.id} className={`border rounded-lg p-3 hover:bg-muted/30 transition-colors ${
+                            !item.isPublic ? "border-orange-200 bg-orange-50/30 dark:border-orange-900/30 dark:bg-orange-950/10" : ""
+                          }`}>
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2 flex-1 min-w-0">
+                                {item.isPublic ? (
+                                  <Globe className="h-3 w-3 text-blue-500 shrink-0" title="공개" />
+                                ) : (
+                                  <Lock className="h-3 w-3 text-orange-500 shrink-0" title="비공개" />
+                                )}
+                                <span className="text-xs text-muted-foreground">
+                                  {new Date(item.createdAt).toLocaleString("ko-KR")}
+                                </span>
+                                {item.userName && (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-muted-foreground">
+                                    {item.userName.slice(0, 3)}***
+                                  </span>
+                                )}
+                                {item.rating && (
+                                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                    item.rating === "강력매수" ? "bg-red-100 text-red-700" :
+                                    item.rating === "매수" ? "bg-orange-100 text-orange-700" :
+                                    item.rating === "중립" ? "bg-gray-100 text-gray-700" :
+                                    item.rating === "매도" ? "bg-blue-100 text-blue-700" :
+                                    "bg-blue-200 text-blue-800"
+                                  }`}>{item.rating}</span>
+                                )}
+                                {item.summary && (
+                                  <span className="text-xs truncate">{item.summary}</span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1 shrink-0">
+                                <Button
+                                  variant="ghost" size="sm" className="h-6 text-[10px] px-2"
+                                  onClick={() => {
+                                    setAiAnalysisResult(item);
+                                    setShowAnalysisList(false);
+                                  }}
+                                >
+                                  보기
+                                </Button>
+                                {canDelete && (
+                                <Button
+                                  variant="ghost" size="icon" className="h-6 w-6 text-destructive"
+                                  onClick={() => {
+                                    if (confirm("이 분석 결과를 삭제하시겠습니까?")) deleteAiAnalysis(item.id);
+                                  }}
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          );
+                        })
+                      ) : (
+                        <p className="text-xs text-muted-foreground py-2">아직 분석 기록이 없습니다.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             ) : (
               <p className="text-sm text-muted-foreground text-center py-4">데이터를 불러올 수 없습니다.</p>
@@ -403,17 +681,47 @@ export default function StockDetailPanel({
               <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin" /></div>
             ) : displayChartData.length > 0 ? (
               <div className="space-y-4">
-                {/* 봉차트 + 이동평균선 */}
+                {/* 캔들스틱 차트 + 이동평균선 */}
                 <div>
-                  <div className="text-xs text-muted-foreground mb-2 flex items-center gap-3 flex-wrap">
-                    <span className="font-medium">📈 일봉차트 (최근 90일)</span>
-                    <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-yellow-500 inline-block"></span>MA5</span>
-                    <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-green-500 inline-block"></span>MA20</span>
-                    <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-purple-500 inline-block"></span>MA60</span>
-                    <span className="flex items-center gap-1"><span className="w-2 h-2 bg-red-500/60 inline-block rounded-sm"></span>상승</span>
-                    <span className="flex items-center gap-1"><span className="w-2 h-2 bg-blue-500/80 inline-block rounded-sm"></span>하락</span>
+                  <div className="text-xs text-muted-foreground mb-2 space-y-1.5">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-medium">📈 캔들차트</span>
+                      {/* 일/주/월봉 전환 버튼 */}
+                      <div className="inline-flex rounded-md border bg-muted/40 p-0.5 gap-0.5">
+                        {([
+                          { key: "day" as const, label: "일봉" },
+                          { key: "week" as const, label: "주봉" },
+                          { key: "month" as const, label: "월봉" },
+                        ]).map((p) => (
+                          <button
+                            key={p.key}
+                            className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${
+                              chartPeriod === p.key
+                                ? "bg-primary text-primary-foreground shadow-sm"
+                                : "hover:bg-muted"
+                            }`}
+                            onClick={() => setChartPeriod(p.key)}
+                          >
+                            {p.label}
+                          </button>
+                        ))}
+                      </div>
+                      <span className="text-[10px] text-muted-foreground/70">
+                        {chartPeriod === "day" ? "(최근 90일)" : chartPeriod === "week" ? "(최근 2년)" : "(최근 5년)"}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-yellow-500 inline-block"></span>MA5</span>
+                      <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-green-500 inline-block"></span>MA20</span>
+                      <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-purple-500 inline-block"></span>MA60</span>
+                      <span className="flex items-center gap-1"><span className="w-2 h-2 bg-red-500 inline-block rounded-sm border border-red-500"></span>양봉</span>
+                      <span className="flex items-center gap-1"><span className="w-2 h-2 bg-blue-500 inline-block rounded-sm"></span>음봉</span>
+                      {chartData?.volumeProfile && chartData.volumeProfile.length > 0 && (
+                        <span className="flex items-center gap-1"><span className="w-3 h-2 bg-purple-400/40 inline-block rounded-sm"></span>매물대</span>
+                      )}
+                    </div>
                   </div>
-                  <ResponsiveContainer width="100%" height={320}>
+                  <ResponsiveContainer width="100%" height={380}>
                     <ComposedChart data={displayChartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
                       <XAxis
@@ -423,6 +731,7 @@ export default function StockDetailPanel({
                         interval={Math.floor(displayChartData.length / 8)}
                       />
                       <YAxis
+                        yAxisId="price"
                         domain={chartDomain}
                         tick={{ fontSize: 10 }}
                         tickFormatter={(v) => isOverseas ? `$${v}` : v >= 10000 ? `${(v/10000).toFixed(0)}만` : v.toLocaleString()}
@@ -430,26 +739,103 @@ export default function StockDetailPanel({
                       />
                       <Tooltip
                         contentStyle={{ fontSize: "12px", borderRadius: "8px" }}
-                        formatter={(value: any, name: string) => {
-                          const labels: Record<string, string> = {
-                            close: "종가", ma5: "MA5", ma20: "MA20", ma60: "MA60",
-                          };
+                        content={({ active, payload, label }: any) => {
+                          if (!active || !payload || payload.length === 0) return null;
+                          const d = payload[0]?.payload;
+                          if (!d) return null;
                           const prefix = isOverseas ? "$" : "";
-                          return [typeof value === "number" ? `${prefix}${value.toLocaleString()}` : value, labels[name] || name];
+                          const isRising = d.close >= d.open;
+                          return (
+                            <div className="bg-background border rounded-lg p-2 shadow-lg text-xs">
+                              <p className="font-medium mb-1">📅 {label}</p>
+                              <p>시가: <span className="font-mono">{prefix}{d.open?.toLocaleString()}</span></p>
+                              <p>고가: <span className="font-mono text-red-500">{prefix}{d.high?.toLocaleString()}</span></p>
+                              <p>저가: <span className="font-mono text-blue-500">{prefix}{d.low?.toLocaleString()}</span></p>
+                              <p>종가: <span className={`font-mono font-bold ${isRising ? "text-red-500" : "text-blue-500"}`}>{prefix}{d.close?.toLocaleString()}</span></p>
+                              {d.ma5 && <p className="text-yellow-600">MA5: {prefix}{d.ma5.toLocaleString()}</p>}
+                              {d.ma20 && <p className="text-green-600">MA20: {prefix}{d.ma20.toLocaleString()}</p>}
+                              {d.ma60 && <p className="text-purple-600">MA60: {prefix}{d.ma60.toLocaleString()}</p>}
+                            </div>
+                          );
                         }}
-                        labelFormatter={(label) => `📅 ${label}`}
                       />
-                      {/* 봉차트 - 종가 바 */}
-                      <Bar dataKey="close" barSize={5}>
-                        {displayChartData.map((entry, index) => {
-                          const isRising = entry.close >= entry.open;
-                          return <Cell key={index} fill={isRising ? "#ef4444" : "#3b82f6"} fillOpacity={isRising ? 0.6 : 0.85} />;
-                        })}
-                      </Bar>
+                      {/* 투명 바 (Tooltip 트리거용, 보이지 않음) */}
+                      <Bar yAxisId="price" dataKey="close" barSize={6} fill="transparent" stroke="transparent" isAnimationActive={false} />
+                      {/* 캔들스틱 + 매물대 SVG 렌더링 */}
+                      <Customized component={(props: any) => {
+                        const xAxis = props.xAxisMap && (Object.values(props.xAxisMap) as any[])[0];
+                        const yAxis = props.yAxisMap && (Object.values(props.yAxisMap) as any[])[0];
+                        if (!xAxis || !yAxis || !xAxis.scale || !yAxis.scale) return null;
+                        const xScale = xAxis.scale;
+                        const yScale = yAxis.scale;
+                        const bandwidth = typeof xScale.bandwidth === "function" ? xScale.bandwidth() : 8;
+                        const barW = Math.max(Math.min(bandwidth * 0.7, 12), 2);
+                        // 매물대 계산: 차트 오른쪽에서 왼쪽으로 수평 바 표시
+                        const vp = chartData?.volumeProfile || [];
+                        const vpMaxVol = vp.length > 0 ? Math.max(...vp.map((v: any) => v.volume)) : 0;
+                        // 차트 영역 우측 끝 ~ 좌측 30% 영역까지 매물대 바를 그림
+                        const chartRight = (xAxis.x || 55) + (xAxis.width || 300);
+                        const vpMaxWidth = (xAxis.width || 300) * 0.25; // 차트 너비의 25%
+                        const vpBarHeight = vp.length > 1
+                          ? Math.max(Math.abs(yScale(vp[0].price) - yScale(vp[1].price)) * 0.8, 2)
+                          : 6;
+                        return (
+                          <g>
+                            {/* 매물대 (Volume Profile) - 배경 레이어 */}
+                            {vp.length > 0 && vp.map((v: any, i: number) => {
+                              const yPos = yScale(v.price);
+                              if (yPos === undefined || isNaN(yPos)) return null;
+                              const barWidth = vpMaxVol > 0 ? (v.volume / vpMaxVol) * vpMaxWidth : 0;
+                              return (
+                                <rect
+                                  key={`vp-${i}`}
+                                  x={chartRight - barWidth}
+                                  y={yPos - vpBarHeight / 2}
+                                  width={barWidth}
+                                  height={vpBarHeight}
+                                  fill="#a78bfa"
+                                  fillOpacity={0.25}
+                                  rx={1}
+                                />
+                              );
+                            })}
+                            {/* 캔들스틱 */}
+                            {displayChartData.map((d, i) => {
+                              const xVal = xScale(d.date);
+                              if (xVal === undefined || xVal === null) return null;
+                              const cx = xVal + bandwidth / 2;
+                              const yO = yScale(d.open);
+                              const yC = yScale(d.close);
+                              const yH = yScale(d.high);
+                              const yL = yScale(d.low);
+                              if ([yO, yC, yH, yL].some((v) => v === undefined || isNaN(v))) return null;
+                              const rising = d.close >= d.open;
+                              const color = rising ? "#ef4444" : "#3b82f6";
+                              const bodyTop = Math.min(yO, yC);
+                              const bodyH = Math.max(Math.abs(yO - yC), 1);
+                              return (
+                                <g key={`candle-${i}`}>
+                                  <line x1={cx} y1={yH} x2={cx} y2={bodyTop} stroke={color} strokeWidth={1} />
+                                  <line x1={cx} y1={bodyTop + bodyH} x2={cx} y2={yL} stroke={color} strokeWidth={1} />
+                                  <rect
+                                    x={cx - barW / 2}
+                                    y={bodyTop}
+                                    width={barW}
+                                    height={bodyH}
+                                    fill={rising ? "transparent" : color}
+                                    stroke={color}
+                                    strokeWidth={1}
+                                  />
+                                </g>
+                              );
+                            })}
+                          </g>
+                        );
+                      }} />
                       {/* 이동평균선 */}
-                      <Line type="monotone" dataKey="ma5" stroke="#eab308" strokeWidth={1.5} dot={false} connectNulls />
-                      <Line type="monotone" dataKey="ma20" stroke="#22c55e" strokeWidth={1.5} dot={false} connectNulls />
-                      <Line type="monotone" dataKey="ma60" stroke="#a855f7" strokeWidth={1.5} dot={false} connectNulls />
+                      <Line yAxisId="price" type="monotone" dataKey="ma5" stroke="#eab308" strokeWidth={1.5} dot={false} connectNulls />
+                      <Line yAxisId="price" type="monotone" dataKey="ma20" stroke="#22c55e" strokeWidth={1.5} dot={false} connectNulls />
+                      <Line yAxisId="price" type="monotone" dataKey="ma60" stroke="#a855f7" strokeWidth={1.5} dot={false} connectNulls />
                     </ComposedChart>
                   </ResponsiveContainer>
                 </div>
@@ -468,46 +854,12 @@ export default function StockDetailPanel({
                       />
                       <Bar dataKey="volume" barSize={3}>
                         {displayChartData.map((entry, index) => (
-                          <Cell key={index} fill={entry.close >= entry.open ? "#ef444480" : "#3b82f680"} />
+                          <Cell key={index} fill={entry.close >= entry.open ? "#ef444490" : "#3b82f690"} />
                         ))}
                       </Bar>
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
-
-                {/* 매물대 차트 */}
-                {chartData?.volumeProfile && chartData.volumeProfile.length > 0 && (
-                  <div>
-                    <div className="text-xs text-muted-foreground mb-1 font-medium">매물대 (가격대별 거래량)</div>
-                    <ResponsiveContainer width="100%" height={200}>
-                      <BarChart
-                        data={chartData.volumeProfile}
-                        layout="vertical"
-                        margin={{ top: 5, right: 10, left: 0, bottom: 0 }}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                        <XAxis
-                          type="number"
-                          tick={{ fontSize: 9 }}
-                          tickFormatter={(v) => v >= 1000000 ? `${(v/1000000).toFixed(1)}M` : v >= 1000 ? `${(v/1000).toFixed(0)}K` : String(v)}
-                        />
-                        <YAxis
-                          dataKey="price"
-                          type="category"
-                          tick={{ fontSize: 9 }}
-                          width={60}
-                          tickFormatter={(v) => isOverseas ? `$${v}` : v >= 10000 ? `${(v/10000).toFixed(0)}만` : v.toLocaleString()}
-                        />
-                        <Tooltip
-                          contentStyle={{ fontSize: "11px" }}
-                          formatter={(v: any) => [Number(v).toLocaleString(), "거래량"]}
-                          labelFormatter={(l) => `💰 ${isOverseas ? "$" : ""}${Number(l).toLocaleString()}`}
-                        />
-                        <Bar dataKey="volume" fill="#8b5cf6" fillOpacity={0.6} barSize={8} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                )}
               </div>
             ) : (
               <p className="text-sm text-muted-foreground text-center py-4">차트 데이터를 불러올 수 없습니다.</p>
@@ -813,7 +1165,14 @@ export default function StockDetailPanel({
               <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin" /></div>
             ) : research?.reports?.length > 0 ? (
               <div className="space-y-1">
-                <h4 className="text-sm font-bold mb-2">📑 종목 리서치 리포트</h4>
+                <h4 className="text-sm font-bold mb-2">
+                  📑 {isOverseas ? "Morningstar 리서치 리포트" : "종목 리서치 리포트"}
+                </h4>
+                {isOverseas && (
+                  <p className="text-[11px] text-muted-foreground mb-2">
+                    Morningstar의 종목 분석 리포트입니다. PDF 링크를 클릭하면 원문 보고서를 확인할 수 있습니다.
+                  </p>
+                )}
                 {research.reports.map((item: any, idx: number) => (
                   <a
                     key={idx}
@@ -830,7 +1189,34 @@ export default function StockDetailPanel({
                             <span className="text-[10px] px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded">{item.source}</span>
                           )}
                           {item.targetPrice && item.targetPrice !== "-" && (
-                            <span className="text-[10px] px-1.5 py-0.5 bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-300 rounded">목표가 {item.targetPrice}</span>
+                            <span className="text-[10px] px-1.5 py-0.5 bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-300 rounded">
+                              {isOverseas ? "적정가" : "목표가"} {item.targetPrice}
+                            </span>
+                          )}
+                          {/* 해외주식 Morningstar 추가 필드 */}
+                          {item.rating && item.rating !== "-" && (
+                            <span className="text-[10px] px-1.5 py-0.5 bg-yellow-100 dark:bg-yellow-900 text-yellow-700 dark:text-yellow-300 rounded">
+                              {item.rating}
+                            </span>
+                          )}
+                          {item.moat && item.moat !== "-" && (
+                            <span className="text-[10px] px-1.5 py-0.5 bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 rounded">
+                              해자: {item.moat}
+                            </span>
+                          )}
+                          {item.valuation && (
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                              item.valuation === "과소평가" ? "bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-300" :
+                              item.valuation === "과대평가" ? "bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300" :
+                              "bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300"
+                            }`}>
+                              {item.valuation}
+                            </span>
+                          )}
+                          {item.uncertainty && item.uncertainty !== "-" && (
+                            <span className="text-[10px] px-1.5 py-0.5 bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300 rounded">
+                              불확실성: {item.uncertainty}
+                            </span>
                           )}
                           <span className="text-[10px] text-muted-foreground">{item.date}</span>
                         </div>
@@ -961,126 +1347,145 @@ export default function StockDetailPanel({
             </div>
           </TabsContent>
         </Tabs>
+      </div>
 
-        {/* AI 종합분석 결과 (현재) */}
-        {(aiAnalysisResult || aiAnalysisLoading) && (
-          <div className="mt-4 border rounded-lg p-4 bg-gradient-to-br from-blue-50/50 to-purple-50/50 dark:from-blue-950/20 dark:to-purple-950/20">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-bold flex items-center gap-1">
-                <Sparkles className="h-4 w-4 text-purple-500" />
-                AI 종합분석 결과
-                {aiAnalysisResult?.rating && (
-                  <span className={`ml-2 px-2 py-0.5 rounded text-xs font-bold ${
-                    aiAnalysisResult.rating === "강력매수" ? "bg-red-100 text-red-700" :
-                    aiAnalysisResult.rating === "매수" ? "bg-orange-100 text-orange-700" :
-                    aiAnalysisResult.rating === "중립" ? "bg-gray-100 text-gray-700" :
-                    aiAnalysisResult.rating === "매도" ? "bg-blue-100 text-blue-700" :
-                    "bg-blue-200 text-blue-800"
-                  }`}>{aiAnalysisResult.rating}</span>
-                )}
-              </h3>
-              <div className="flex items-center gap-1">
-                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setAiAnalysisFontSize(s => Math.max(10, s - 1))}>
-                  <ZoomOut className="h-3 w-3" />
-                </Button>
-                <span className="text-[10px] text-muted-foreground">{aiAnalysisFontSize}</span>
-                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setAiAnalysisFontSize(s => Math.min(24, s + 1))}>
-                  <ZoomIn className="h-3 w-3" />
-                </Button>
-                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => {
-                  const text = aiAnalysisResult?.analysisResult || "";
-                  navigator.clipboard.writeText(text);
-                  toast({ title: "분석 결과가 복사되었습니다" });
-                }}>
-                  <Copy className="h-3 w-3" />
-                </Button>
+      {/* AI API 키 등록 다이얼로그 */}
+      <Dialog open={showAiKeyDialog} onOpenChange={(open) => {
+        setShowAiKeyDialog(open);
+        if (!open) setPendingAiAnalysis(false);
+      }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Key className="h-5 w-5 text-purple-500" />
+              AI API 키 설정
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* 안내문 */}
+            <div className="bg-blue-50 dark:bg-blue-950/30 rounded-lg p-3 text-sm space-y-2">
+              <p className="font-medium text-blue-700 dark:text-blue-300">🔑 AI 분석을 위해 API 키가 필요합니다</p>
+              <p className="text-blue-600/80 dark:text-blue-400/80 text-xs leading-relaxed">
+                AI 종합분석 기능은 Google Gemini 또는 OpenAI의 API를 사용합니다.
+                아래 링크에서 무료 API 키를 발급받아 등록해주세요.
+                등록된 키는 본인의 계정에서만 사용됩니다.
+              </p>
+              <div className="flex flex-col gap-1 text-xs">
+                <a
+                  href="https://aistudio.google.com/apikey"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-600 hover:underline flex items-center gap-1"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  Google Gemini API 키 발급 (무료)
+                </a>
+                <a
+                  href="https://platform.openai.com/api-keys"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-600 hover:underline flex items-center gap-1"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  OpenAI API 키 발급 (유료)
+                </a>
               </div>
             </div>
-            {aiAnalysisLoading ? (
-              <div className="flex items-center justify-center py-8 gap-2">
-                <Loader2 className="h-5 w-5 animate-spin text-purple-500" />
-                <span className="text-sm text-muted-foreground">AI가 종합분석 리포트를 작성 중입니다...</span>
-              </div>
-            ) : aiAnalysisResult?.analysisResult ? (
-              <div
-                className="prose prose-sm max-w-none"
-                style={{ fontSize: `${aiAnalysisFontSize}px`, lineHeight: "1.7" }}
-                dangerouslySetInnerHTML={{ __html: markdownToHtml(aiAnalysisResult.analysisResult) }}
-              />
-            ) : null}
-            {aiAnalysisResult?.summary && (
-              <div className="mt-3 p-2 bg-yellow-50 dark:bg-yellow-950/30 rounded text-sm font-medium">
-                💡 {aiAnalysisResult.summary}
+
+            {/* 현재 등록 상태 */}
+            {hasAiKey && (
+              <div className="bg-green-50 dark:bg-green-950/30 rounded-lg p-2.5 flex items-center gap-2">
+                <CheckCircle className="h-4 w-4 text-green-500" />
+                <span className="text-xs text-green-700 dark:text-green-300">
+                  현재 등록된 키: {aiConfigData?.config?.aiProvider === "openai" ? "OpenAI" : "Gemini"}
+                  ({aiConfigData?.config?.aiProvider === "openai"
+                    ? aiConfigData?.config?.openaiApiKey
+                    : aiConfigData?.config?.geminiApiKey})
+                </span>
               </div>
             )}
-          </div>
-        )}
 
-        {/* AI 분석 히스토리 리스트 */}
-        <div className="mt-4">
-          <button
-            className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-            onClick={() => setShowAnalysisList(!showAnalysisList)}
-          >
-            <FileText className="h-3 w-3" />
-            이전 AI 분석 리포트 ({aiAnalysesList?.analyses?.length || 0}건)
-            <span className="text-[10px]">{showAnalysisList ? "▲" : "▼"}</span>
-          </button>
-
-          {showAnalysisList && (
-            <div className="mt-2 space-y-2">
-              {isAiAnalysesLoading ? (
-                <div className="flex justify-center py-4"><Loader2 className="h-4 w-4 animate-spin" /></div>
-              ) : aiAnalysesList?.analyses?.length > 0 ? (
-                aiAnalysesList.analyses.map((item: any) => (
-                  <div key={item.id} className="border rounded-lg p-3 hover:bg-muted/30 transition-colors">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2 flex-1 min-w-0">
-                        <span className="text-xs text-muted-foreground">
-                          {new Date(item.createdAt).toLocaleString("ko-KR")}
-                        </span>
-                        {item.rating && (
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                            item.rating === "강력매수" ? "bg-red-100 text-red-700" :
-                            item.rating === "매수" ? "bg-orange-100 text-orange-700" :
-                            item.rating === "중립" ? "bg-gray-100 text-gray-700" :
-                            item.rating === "매도" ? "bg-blue-100 text-blue-700" :
-                            "bg-blue-200 text-blue-800"
-                          }`}>{item.rating}</span>
-                        )}
-                        {item.summary && (
-                          <span className="text-xs truncate">{item.summary}</span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-1 shrink-0">
-                        <Button
-                          variant="ghost" size="sm" className="h-6 text-[10px] px-2"
-                          onClick={() => {
-                            setAiAnalysisResult(item);
-                            setShowAnalysisList(false);
-                          }}
-                        >
-                          보기
-                        </Button>
-                        <Button
-                          variant="ghost" size="icon" className="h-6 w-6 text-destructive"
-                          onClick={() => {
-                            if (confirm("이 분석 결과를 삭제하시겠습니까?")) deleteAiAnalysis(item.id);
-                          }}
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <p className="text-xs text-muted-foreground py-2">아직 분석 기록이 없습니다.</p>
-              )}
+            {/* AI 제공자 선택 */}
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">AI 제공자</label>
+              <div className="flex gap-2">
+                <Button
+                  variant={aiKeyProvider === "gemini" ? "default" : "outline"}
+                  size="sm"
+                  className="flex-1 text-xs"
+                  onClick={() => setAiKeyProvider("gemini")}
+                >
+                  Google Gemini (추천)
+                </Button>
+                <Button
+                  variant={aiKeyProvider === "openai" ? "default" : "outline"}
+                  size="sm"
+                  className="flex-1 text-xs"
+                  onClick={() => setAiKeyProvider("openai")}
+                >
+                  OpenAI
+                </Button>
+              </div>
             </div>
-          )}
-        </div>
-      </div>
+
+            {/* API 키 입력 */}
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                {aiKeyProvider === "gemini" ? "Gemini API Key" : "OpenAI API Key"}
+              </label>
+              {aiKeyProvider === "gemini" ? (
+                <Input
+                  type="password"
+                  placeholder="AIzaSy..."
+                  value={aiKeyGemini}
+                  onChange={(e) => setAiKeyGemini(e.target.value)}
+                  className="text-sm font-mono"
+                />
+              ) : (
+                <Input
+                  type="password"
+                  placeholder="sk-..."
+                  value={aiKeyOpenai}
+                  onChange={(e) => setAiKeyOpenai(e.target.value)}
+                  className="text-sm font-mono"
+                />
+              )}
+              <p className="text-[10px] text-muted-foreground mt-1">
+                API 키는 서버에 안전하게 저장되며 본인의 AI 분석에만 사용됩니다.
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter className="flex gap-2 sm:gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs"
+              disabled={aiKeyTesting || (!aiKeyGemini && !aiKeyOpenai)}
+              onClick={testAiKey}
+            >
+              {aiKeyTesting ? (
+                <><Loader2 className="h-3 w-3 animate-spin mr-1" />테스트 중...</>
+              ) : (
+                "키 테스트"
+              )}
+            </Button>
+            <Button
+              size="sm"
+              className="text-xs"
+              disabled={aiKeySaving || (!aiKeyGemini && !aiKeyOpenai)}
+              onClick={saveAiKey}
+            >
+              {aiKeySaving ? (
+                <><Loader2 className="h-3 w-3 animate-spin mr-1" />저장 중...</>
+              ) : (
+                <><Key className="h-3 w-3 mr-1" />{pendingAiAnalysis ? "저장 후 분석 시작" : "저장"}</>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

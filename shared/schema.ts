@@ -331,6 +331,8 @@ export const watchlistStocks = pgTable("watchlist_stocks", {
   memo: text("memo"),
   listType: text("list_type").default("common"), // 'common' (공통관심) | 'personal' (개인관심)
   userId: integer("user_id"),                     // 개인관심일 때 사용자 ID (null이면 공통)
+  isShared: boolean("is_shared").default(false),  // 개인관심 종목 공유 여부 (true면 모든 계정에 공유 목록으로 표시)
+  sharedBy: text("shared_by"),                    // 공유한 사용자 이름
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
@@ -416,6 +418,8 @@ export const tenbaggerStocks = pgTable("tenbagger_stocks", {
   aiAnalyzedAt: timestamp("ai_analyzed_at"),   // AI 분석 일시
   listType: text("list_type").default("common"), // 'common' (공통관심) | 'personal' (개인관심)
   userId: integer("user_id"),                     // 개인관심일 때 사용자 ID (null이면 공통)
+  isShared: boolean("is_shared").default(false),  // 개인관심 종목 공유 여부 (true면 모든 계정에 공유 목록으로 표시)
+  sharedBy: text("shared_by"),                    // 공유한 사용자 이름
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
@@ -436,8 +440,41 @@ export const stockAiAnalyses = pgTable("stock_ai_analyses", {
   rating: text("rating"),                    // '강력매수' | '매수' | '중립' | '매도' | '강력매도'
   userId: integer("user_id"),
   userName: text("user_name"),
+  isPublic: boolean("is_public").default(true), // true: 공개(모두 볼 수 있음), false: 비공개(본인만)
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
 export type StockAiAnalysis = typeof stockAiAnalyses.$inferSelect;
 export type InsertStockAiAnalysis = typeof stockAiAnalyses.$inferInsert;
+
+// ========== 사용자별 AI API 설정 ==========
+export const userAiConfigs = pgTable("user_ai_configs", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().unique(),
+  aiProvider: text("ai_provider").default("gemini"),    // "gemini" | "openai"
+  geminiApiKey: text("gemini_api_key"),
+  openaiApiKey: text("openai_api_key"),
+  useOwnKey: boolean("use_own_key").default(true),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export type UserAiConfig = typeof userAiConfigs.$inferSelect;
+export type InsertUserAiConfig = typeof userAiConfigs.$inferInsert;
+
+// ========== AI 프롬프트 ==========
+export const aiPrompts = pgTable("ai_prompts", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull(),
+  content: text("content").notNull(),
+  category: text("category").default("일반"),       // 프롬프트 카테고리
+  isDefault: boolean("is_default").default(false),  // 기본(공통) 프롬프트 여부
+  isShared: boolean("is_shared").default(false),    // 공유 프롬프트 여부
+  sharedBy: text("shared_by"),                      // 공유한 사용자 이름
+  userId: integer("user_id"),                       // 개인 프롬프트일 때 사용자 ID
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export type AiPrompt = typeof aiPrompts.$inferSelect;
+export type InsertAiPrompt = typeof aiPrompts.$inferInsert;

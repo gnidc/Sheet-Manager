@@ -66,6 +66,12 @@ import {
   stockAiAnalyses,
   type StockAiAnalysis,
   type InsertStockAiAnalysis,
+  userAiConfigs,
+  type UserAiConfig,
+  type InsertUserAiConfig,
+  aiPrompts,
+  type AiPrompt,
+  type InsertAiPrompt,
 } from "../shared/schema.js";
 import { eq, and, or, desc, isNull, inArray, sql } from "drizzle-orm";
 
@@ -148,6 +154,7 @@ export interface IStorage {
 
   // Watchlist Stocks (관심종목)
   getWatchlistStocks(market?: string, listType?: string, userId?: number): Promise<WatchlistStock[]>;
+  getWatchlistStocksShared(market?: string): Promise<WatchlistStock[]>;
   getWatchlistStock(id: number): Promise<WatchlistStock | undefined>;
   createWatchlistStock(data: InsertWatchlistStock): Promise<WatchlistStock>;
   updateWatchlistStock(id: number, updates: Partial<InsertWatchlistStock>): Promise<WatchlistStock>;
@@ -188,16 +195,29 @@ export interface IStorage {
 
   // 10X (Ten Bagger) 종목
   getTenbaggerStocks(listType?: string, userId?: number): Promise<TenbaggerStock[]>;
+  getTenbaggerStocksShared(): Promise<TenbaggerStock[]>;
   getTenbaggerStock(id: number): Promise<TenbaggerStock | undefined>;
   createTenbaggerStock(data: InsertTenbaggerStock): Promise<TenbaggerStock>;
   updateTenbaggerStock(id: number, updates: Partial<InsertTenbaggerStock>): Promise<TenbaggerStock>;
   deleteTenbaggerStock(id: number): Promise<void>;
 
   // 종목 AI 종합분석
-  getStockAiAnalyses(stockCode?: string, market?: string): Promise<StockAiAnalysis[]>;
+  getStockAiAnalyses(stockCode?: string, market?: string, currentUserId?: number | null): Promise<StockAiAnalysis[]>;
   getStockAiAnalysis(id: number): Promise<StockAiAnalysis | undefined>;
   createStockAiAnalysis(data: InsertStockAiAnalysis): Promise<StockAiAnalysis>;
   deleteStockAiAnalysis(id: number): Promise<void>;
+
+  // 사용자별 AI API 설정
+  getUserAiConfig(userId: number): Promise<UserAiConfig | undefined>;
+  upsertUserAiConfig(data: InsertUserAiConfig): Promise<UserAiConfig>;
+  deleteUserAiConfig(userId: number): Promise<void>;
+
+  // AI 프롬프트
+  getAiPrompts(userId?: number): Promise<AiPrompt[]>;
+  getAiPrompt(id: number): Promise<AiPrompt | undefined>;
+  createAiPrompt(data: InsertAiPrompt): Promise<AiPrompt>;
+  updateAiPrompt(id: number, updates: Partial<InsertAiPrompt>): Promise<AiPrompt>;
+  deleteAiPrompt(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1097,6 +1117,22 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(watchlistStocks).orderBy(desc(watchlistStocks.createdAt));
   }
 
+  async getWatchlistStocksShared(market?: string): Promise<WatchlistStock[]> {
+    const conditions: any[] = [
+      eq(watchlistStocks.listType, "personal"),
+      eq(watchlistStocks.isShared, true),
+    ];
+    if (market) conditions.push(eq(watchlistStocks.market, market));
+    const whereClause = and(...conditions);
+
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(watchlistStocks).where(whereClause).orderBy(desc(watchlistStocks.createdAt));
+      });
+    }
+    return await db.select().from(watchlistStocks).where(whereClause).orderBy(desc(watchlistStocks.createdAt));
+  }
+
   async getWatchlistStock(id: number): Promise<WatchlistStock | undefined> {
     if (process.env.VERCEL) {
       return await executeWithClient(async (db) => {
@@ -1298,6 +1334,19 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(tenbaggerStocks).orderBy(desc(tenbaggerStocks.createdAt));
   }
 
+  async getTenbaggerStocksShared(): Promise<TenbaggerStock[]> {
+    const whereClause = and(
+      eq(tenbaggerStocks.listType, "personal"),
+      eq(tenbaggerStocks.isShared, true)
+    );
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(tenbaggerStocks).where(whereClause).orderBy(desc(tenbaggerStocks.createdAt));
+      });
+    }
+    return await db.select().from(tenbaggerStocks).where(whereClause).orderBy(desc(tenbaggerStocks.createdAt));
+  }
+
   async getTenbaggerStock(id: number): Promise<TenbaggerStock | undefined> {
     if (process.env.VERCEL) {
       return await executeWithClient(async (db) => {
@@ -1341,23 +1390,32 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ========== 종목 AI 종합분석 ==========
-  async getStockAiAnalyses(stockCode?: string, market?: string): Promise<StockAiAnalysis[]> {
-    const conditions: any[] = [];
-    if (stockCode) conditions.push(eq(stockAiAnalyses.stockCode, stockCode));
-    if (market) conditions.push(eq(stockAiAnalyses.market, market));
+  async getStockAiAnalyses(stockCode?: string, market?: string, currentUserId?: number | null): Promise<StockAiAnalysis[]> {
+    // 공개 분석 + 본인 비공개 분석만 조회
+    const baseConditions: any[] = [];
+    if (stockCode) baseConditions.push(eq(stockAiAnalyses.stockCode, stockCode));
+    if (market) baseConditions.push(eq(stockAiAnalyses.market, market));
+
+    // 공개(isPublic=true) OR 본인 작성(userId=currentUserId)
+    const visibilityCondition = currentUserId
+      ? or(
+          eq(stockAiAnalyses.isPublic, true),
+          eq(stockAiAnalyses.userId, currentUserId)
+        )
+      : eq(stockAiAnalyses.isPublic, true);
+
+    const allConditions = [...baseConditions, visibilityCondition];
 
     if (process.env.VERCEL) {
       return await executeWithClient(async (db) => {
-        if (conditions.length > 0) {
-          return await db.select().from(stockAiAnalyses).where(and(...conditions)).orderBy(desc(stockAiAnalyses.createdAt));
-        }
-        return await db.select().from(stockAiAnalyses).orderBy(desc(stockAiAnalyses.createdAt));
+        return await db.select().from(stockAiAnalyses)
+          .where(and(...allConditions))
+          .orderBy(desc(stockAiAnalyses.createdAt));
       });
     }
-    if (conditions.length > 0) {
-      return await db.select().from(stockAiAnalyses).where(and(...conditions)).orderBy(desc(stockAiAnalyses.createdAt));
-    }
-    return await db.select().from(stockAiAnalyses).orderBy(desc(stockAiAnalyses.createdAt));
+    return await db.select().from(stockAiAnalyses)
+      .where(and(...allConditions))
+      .orderBy(desc(stockAiAnalyses.createdAt));
   }
 
   async getStockAiAnalysis(id: number): Promise<StockAiAnalysis | undefined> {
@@ -1389,6 +1447,116 @@ export class DatabaseStorage implements IStorage {
       });
     }
     await db.delete(stockAiAnalyses).where(eq(stockAiAnalyses.id, id));
+  }
+
+  // ========== 사용자별 AI API 설정 ==========
+
+  async getUserAiConfig(userId: number): Promise<UserAiConfig | undefined> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [config] = await db.select().from(userAiConfigs).where(eq(userAiConfigs.userId, userId));
+        return config;
+      });
+    }
+    const [config] = await db.select().from(userAiConfigs).where(eq(userAiConfigs.userId, userId));
+    return config;
+  }
+
+  async upsertUserAiConfig(data: InsertUserAiConfig): Promise<UserAiConfig> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const existing = await db.select().from(userAiConfigs).where(eq(userAiConfigs.userId, data.userId));
+        if (existing.length > 0) {
+          const [updated] = await db.update(userAiConfigs)
+            .set({ ...data, updatedAt: new Date() })
+            .where(eq(userAiConfigs.userId, data.userId))
+            .returning();
+          return updated;
+        }
+        const [created] = await db.insert(userAiConfigs).values(data).returning();
+        return created;
+      });
+    }
+    const existing = await db.select().from(userAiConfigs).where(eq(userAiConfigs.userId, data.userId));
+    if (existing.length > 0) {
+      const [updated] = await db.update(userAiConfigs)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(userAiConfigs.userId, data.userId))
+        .returning();
+      return updated;
+    }
+    const [created] = await db.insert(userAiConfigs).values(data).returning();
+    return created;
+  }
+
+  async deleteUserAiConfig(userId: number): Promise<void> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        await db.delete(userAiConfigs).where(eq(userAiConfigs.userId, userId));
+      });
+    }
+    await db.delete(userAiConfigs).where(eq(userAiConfigs.userId, userId));
+  }
+
+  // ========== AI 프롬프트 ==========
+  async getAiPrompts(userId?: number): Promise<AiPrompt[]> {
+    // 기본 프롬프트 + 공유 프롬프트 + 본인 프롬프트
+    const conditions = userId
+      ? or(
+          eq(aiPrompts.isDefault, true),
+          eq(aiPrompts.isShared, true),
+          eq(aiPrompts.userId, userId)
+        )
+      : or(eq(aiPrompts.isDefault, true), eq(aiPrompts.isShared, true));
+
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(aiPrompts).where(conditions).orderBy(desc(aiPrompts.isDefault), desc(aiPrompts.createdAt));
+      });
+    }
+    return await db.select().from(aiPrompts).where(conditions).orderBy(desc(aiPrompts.isDefault), desc(aiPrompts.createdAt));
+  }
+
+  async getAiPrompt(id: number): Promise<AiPrompt | undefined> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [prompt] = await db.select().from(aiPrompts).where(eq(aiPrompts.id, id));
+        return prompt;
+      });
+    }
+    const [prompt] = await db.select().from(aiPrompts).where(eq(aiPrompts.id, id));
+    return prompt;
+  }
+
+  async createAiPrompt(data: InsertAiPrompt): Promise<AiPrompt> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [prompt] = await db.insert(aiPrompts).values(data).returning();
+        return prompt;
+      });
+    }
+    const [prompt] = await db.insert(aiPrompts).values(data).returning();
+    return prompt;
+  }
+
+  async updateAiPrompt(id: number, updates: Partial<InsertAiPrompt>): Promise<AiPrompt> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [prompt] = await db.update(aiPrompts).set({ ...updates, updatedAt: new Date() }).where(eq(aiPrompts.id, id)).returning();
+        return prompt;
+      });
+    }
+    const [prompt] = await db.update(aiPrompts).set({ ...updates, updatedAt: new Date() }).where(eq(aiPrompts.id, id)).returning();
+    return prompt;
+  }
+
+  async deleteAiPrompt(id: number): Promise<void> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        await db.delete(aiPrompts).where(eq(aiPrompts.id, id));
+      });
+    }
+    await db.delete(aiPrompts).where(eq(aiPrompts.id, id));
   }
 }
 

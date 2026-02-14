@@ -13,8 +13,9 @@ import { Badge } from "@/components/ui/badge";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
-  Plus, Trash2, Loader2, Search, Sparkles, Brain, Rocket, Copy, ZoomIn, ZoomOut, ExternalLink, Users, User,
+  Plus, Trash2, Loader2, Search, Sparkles, Brain, Rocket, Copy, ZoomIn, ZoomOut, ExternalLink, Users, User, Share2,
 } from "lucide-react";
 
 interface TenbaggerStock {
@@ -32,6 +33,8 @@ interface TenbaggerStock {
   aiAnalyzedAt: string | null;
   listType: string | null;
   userId: number | null;
+  isShared: boolean | null;
+  sharedBy: string | null;
   createdAt: string;
 }
 
@@ -51,6 +54,7 @@ export default function TenBaggerStocks() {
   const [targetPrice, setTargetPrice] = useState("");
   const [buyPrice, setBuyPrice] = useState("");
   const [reason, setReason] = useState("");
+  const [isShared, setIsShared] = useState(false);
   const [searchCode, setSearchCode] = useState("");
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchResults, setSearchResults] = useState<{ code: string; name: string; exchange: string; typeName: string }[]>([]);
@@ -81,7 +85,17 @@ export default function TenBaggerStocks() {
     enabled: isLoggedIn || isAdmin,
   });
 
-  const allStocks = [...commonStocks, ...personalStocks];
+  // 공유 관심 목록 (개인관심이지만 isShared=true인 종목)
+  const { data: sharedStocks = [], isLoading: isSharedLoading } = useQuery<TenbaggerStock[]>({
+    queryKey: ["/api/tenbagger-stocks", "shared"],
+    queryFn: async () => {
+      const res = await fetch("/api/tenbagger-stocks?listType=shared", { credentials: "include" });
+      if (!res.ok) throw new Error("조회 실패");
+      return res.json();
+    },
+  });
+
+  const allStocks = [...commonStocks, ...personalStocks, ...sharedStocks];
 
   // 종목 삭제
   const deleteMutation = useMutation({
@@ -119,6 +133,7 @@ export default function TenBaggerStocks() {
     setTargetPrice("");
     setBuyPrice("");
     setReason("");
+    setIsShared(false);
     setSearchCode("");
     setSearchResults([]);
   };
@@ -188,9 +203,10 @@ export default function TenBaggerStocks() {
       targetPrice: targetPrice || null,
       buyPrice: buyPrice || null,
       reason: reason || null,
+      ...(addListType === "personal" ? { isShared } : {}),
     }).then(r => r.json()).then(() => {
       queryClient.invalidateQueries({ queryKey: ["/api/tenbagger-stocks"] });
-      toast({ title: `${addListType === "common" ? "공통" : "개인"} 10X 종목이 등록되었습니다` });
+      toast({ title: `${addListType === "common" ? "공통" : "개인"} 10X 종목이 등록되었습니다${isShared && addListType === "personal" ? " (공유)" : ""}` });
       setAddDialogOpen(false);
       resetForm();
     }).catch((err: any) => {
@@ -231,6 +247,12 @@ export default function TenBaggerStocks() {
                   <TableCell className="text-xs font-medium">
                     <div className="flex items-center gap-1.5">
                       {stock.stockName}
+                      {stock.isShared && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-50 dark:bg-orange-950/30 text-orange-600 dark:text-orange-400 border border-orange-200 dark:border-orange-800 inline-flex items-center gap-0.5">
+                          <Share2 className="h-2.5 w-2.5" />
+                          {stock.sharedBy ? `${stock.sharedBy.substring(0, 3)}***` : "공유"}
+                        </span>
+                      )}
                       {stock.aiAnalysis && (
                         <Badge variant="outline" className="text-[10px] px-1 py-0 border-purple-300 text-purple-600">AI</Badge>
                       )}
@@ -387,12 +409,12 @@ export default function TenBaggerStocks() {
           </Button>
         )}
         <span className="text-sm text-muted-foreground ml-auto">
-          공통: <strong>{commonStocks.length}</strong> · 개인: <strong>{personalStocks.length}</strong>
+          공통: <strong>{commonStocks.length}</strong> · 공유: <strong>{sharedStocks.length}</strong> · 개인: <strong>{personalStocks.length}</strong>
         </span>
       </div>
 
       {/* 로딩 */}
-      {(isCommonLoading || isPersonalLoading) && (
+      {(isCommonLoading || isPersonalLoading || isSharedLoading) && (
         <div className="flex items-center justify-center py-10">
           <Loader2 className="w-8 h-8 animate-spin text-primary" />
         </div>
@@ -410,6 +432,23 @@ export default function TenBaggerStocks() {
           </CardHeader>
           <CardContent className="px-2 pb-2">
             {renderStockTable(commonStocks, isAdmin, "공통")}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* 공유 관심 10X 종목 섹션 */}
+      {!isSharedLoading && sharedStocks.length > 0 && (
+        <Card className="border-orange-200 dark:border-orange-800">
+          <CardHeader className="py-3 px-4">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Share2 className="h-4 w-4 text-orange-500" />
+              공유 10X 관심종목
+              <span className="text-xs text-muted-foreground font-normal">({sharedStocks.length}종목)</span>
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-orange-300 text-orange-600">사용자 공유</Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-2 pb-2">
+            {renderStockTable(sharedStocks, false, "공유")}
           </CardContent>
         </Card>
       )}
@@ -553,6 +592,22 @@ export default function TenBaggerStocks() {
               <Label className="text-xs">메모</Label>
               <Textarea value={memo} onChange={(e) => setMemo(e.target.value)} className="text-sm mt-1 h-16" placeholder="추가 메모 (선택)" />
             </div>
+
+            {/* 개인관심 등록 시 공유 옵션 */}
+            {addListType === "personal" && (
+              <div className="flex items-center gap-2 p-3 rounded-lg border border-dashed border-blue-300 bg-blue-50/50 dark:bg-blue-950/20 dark:border-blue-700">
+                <Checkbox
+                  id="isShared"
+                  checked={isShared}
+                  onCheckedChange={(checked) => setIsShared(checked === true)}
+                />
+                <label htmlFor="isShared" className="text-sm cursor-pointer flex items-center gap-1.5">
+                  <Share2 className="h-3.5 w-3.5 text-blue-500" />
+                  <span className="font-medium">공유하기</span>
+                  <span className="text-xs text-muted-foreground">(체크하면 모든 계정에 공유 관심종목으로 표시됩니다)</span>
+                </label>
+              </div>
+            )}
 
             <Button onClick={handleSubmit} className="w-full gap-2">
               <Plus className="h-4 w-4" />

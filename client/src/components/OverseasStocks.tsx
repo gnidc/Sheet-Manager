@@ -10,11 +10,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
-  Plus, Trash2, Loader2, RefreshCw, TrendingUp, TrendingDown, Minus, Search, Globe, Users, User, ShoppingCart, Eye,
+  Plus, Trash2, Loader2, RefreshCw, TrendingUp, TrendingDown, Minus, Search, Globe, Users, User, ShoppingCart, Eye, Share2,
 } from "lucide-react";
 // StockDetailPanel is now shown in a new window via /stock-detail route
 
@@ -28,6 +29,8 @@ interface WatchlistStock {
   memo: string | null;
   listType: string | null;
   userId: number | null;
+  isShared: boolean | null;
+  sharedBy: string | null;
   createdAt: string;
 }
 
@@ -121,6 +124,11 @@ function StockTable({
                       <TableCell className="font-medium">
                         <div className="flex items-center gap-1">
                           {stock.stockName}
+                          {stock.isShared && stock.sharedBy && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-50 dark:bg-orange-950/30 text-orange-600 dark:text-orange-400 border border-orange-200 dark:border-orange-800 shrink-0">
+                              {stock.sharedBy.substring(0, 3)}***
+                            </span>
+                          )}
                           <Button
                             variant="ghost"
                             size="icon"
@@ -201,6 +209,7 @@ export default function OverseasStocks() {
   const [exchange, setExchange] = useState("NASDAQ");
   const [sector, setSector] = useState("기본");
   const [memo, setMemo] = useState("");
+  const [isShared, setIsShared] = useState(false);
   const [searchCode, setSearchCode] = useState("");
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchResults, setSearchResults] = useState<{ code: string; name: string; exchange: string; typeName: string; nationName: string }[]>([]);
@@ -250,6 +259,28 @@ export default function OverseasStocks() {
     refetchInterval: 120000,
   });
 
+  // 공유 관심 목록
+  const { data: sharedStocks = [], isLoading: isSharedLoading } = useQuery<WatchlistStock[]>({
+    queryKey: ["/api/watchlist-stocks", "overseas", "shared"],
+    queryFn: async () => {
+      const res = await fetch("/api/watchlist-stocks?market=overseas&listType=shared", { credentials: "include" });
+      if (!res.ok) throw new Error("조회 실패");
+      return res.json();
+    },
+  });
+
+  // 공유 관심 실시간 시세
+  const { data: sharedRealtime = [], isLoading: isSharedRealtimeLoading, refetch: refetchSharedRealtime } = useQuery<RealtimeStock[]>({
+    queryKey: ["/api/watchlist-stocks/overseas/realtime", "shared"],
+    queryFn: async () => {
+      const res = await fetch("/api/watchlist-stocks/overseas/realtime?listType=shared", { credentials: "include" });
+      if (!res.ok) throw new Error("시세 조회 실패");
+      return res.json();
+    },
+    enabled: sharedStocks.length > 0,
+    refetchInterval: 120000,
+  });
+
   // 종목 등록
   const addMutation = useMutation({
     mutationFn: async (data: { stockCode: string; stockName: string; market: string; exchange: string; sector: string; memo: string }) => {
@@ -283,7 +314,7 @@ export default function OverseasStocks() {
   });
 
   const resetForm = () => {
-    setStockCode(""); setStockName(""); setExchange("NASDAQ"); setSector("기본"); setMemo(""); setSearchCode(""); setSearchResults([]);
+    setStockCode(""); setStockName(""); setExchange("NASDAQ"); setSector("기본"); setMemo(""); setIsShared(false); setSearchCode(""); setSearchResults([]);
   };
 
   // 해외 종목 검색 (복수 결과)
@@ -320,7 +351,7 @@ export default function OverseasStocks() {
   };
 
   // 기존 섹터 목록
-  const allStocks = [...commonStocks, ...personalStocks];
+  const allStocks = [...commonStocks, ...personalStocks, ...sharedStocks];
   const existingSectors = Array.from(new Set(allStocks.map((s) => s.sector).filter(Boolean))) as string[];
 
   const handleAdd = () => {
@@ -340,7 +371,8 @@ export default function OverseasStocks() {
       exchange,
       sector: sector.trim() || "기본",
       memo: memo.trim(),
-    });
+      ...(addListType === "personal" ? { isShared } : {}),
+    } as any);
   };
 
   const handleDelete = (id: number, name: string) => {
@@ -389,7 +421,7 @@ export default function OverseasStocks() {
     }
   };
 
-  const isAnyRealtimeLoading = isCommonRealtimeLoading || isPersonalRealtimeLoading;
+  const isAnyRealtimeLoading = isCommonRealtimeLoading || isPersonalRealtimeLoading || isSharedRealtimeLoading;
 
   return (
     <div className="space-y-6">
@@ -416,8 +448,8 @@ export default function OverseasStocks() {
           )}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          {(commonStocks.length > 0 || personalStocks.length > 0) && (
-            <Button variant="outline" size="sm" onClick={() => { refetchCommonRealtime(); refetchPersonalRealtime(); }} disabled={isAnyRealtimeLoading}>
+          {(commonStocks.length > 0 || personalStocks.length > 0 || sharedStocks.length > 0) && (
+            <Button variant="outline" size="sm" onClick={() => { refetchCommonRealtime(); refetchPersonalRealtime(); refetchSharedRealtime(); }} disabled={isAnyRealtimeLoading}>
               <RefreshCw className={`h-4 w-4 mr-1 ${isAnyRealtimeLoading ? "animate-spin" : ""}`} />
               시세 갱신
             </Button>
@@ -444,7 +476,7 @@ export default function OverseasStocks() {
       </div>
 
       {/* 로딩 */}
-      {(isCommonLoading || isPersonalLoading) && (
+      {(isCommonLoading || isPersonalLoading || isSharedLoading) && (
         <div className="flex items-center justify-center py-10">
           <Loader2 className="w-8 h-8 animate-spin text-primary" />
         </div>
@@ -478,6 +510,35 @@ export default function OverseasStocks() {
                 }}
               />
             )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* 공유 관심종목 섹션 */}
+      {!isSharedLoading && sharedStocks.length > 0 && (
+        <Card className="border-orange-200 dark:border-orange-800">
+          <CardHeader className="py-3 px-4">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Share2 className="h-4 w-4 text-orange-500" />
+              공유 관심종목
+              <span className="text-xs text-muted-foreground font-normal">({sharedStocks.length}종목)</span>
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-orange-300 text-orange-600">사용자 공유</Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-2 pb-2">
+            <StockTable
+              stocks={sharedStocks}
+              realtimeData={sharedRealtime}
+              canDelete={false}
+              onDelete={handleDelete}
+              getStockDetailUrl={getStockDetailUrl}
+              checkedStocks={checkedStocks}
+              onToggleCheck={toggleCheck}
+              onShowDetail={(s) => {
+                const url = `/stock-detail?code=${s.stockCode}&name=${encodeURIComponent(s.stockName)}&market=overseas&exchange=${s.exchange || "NASDAQ"}`;
+                window.open(url, `stock_${s.stockCode}`, "width=1000,height=800,scrollbars=yes,resizable=yes");
+              }}
+            />
           </CardContent>
         </Card>
       )}
@@ -614,6 +675,22 @@ export default function OverseasStocks() {
               <Label>메모 (선택)</Label>
               <Input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="관심 사유 등" />
             </div>
+
+            {/* 개인관심 등록 시 공유 옵션 */}
+            {addListType === "personal" && (
+              <div className="flex items-center gap-2 p-3 rounded-lg border border-dashed border-blue-300 bg-blue-50/50 dark:bg-blue-950/20 dark:border-blue-700">
+                <Checkbox
+                  id="isSharedOverseas"
+                  checked={isShared}
+                  onCheckedChange={(checked) => setIsShared(checked === true)}
+                />
+                <label htmlFor="isSharedOverseas" className="text-sm cursor-pointer flex items-center gap-1.5">
+                  <Share2 className="h-3.5 w-3.5 text-blue-500" />
+                  <span className="font-medium">공유하기</span>
+                  <span className="text-xs text-muted-foreground">(체크하면 모든 계정에 공유 관심종목으로 표시됩니다)</span>
+                </label>
+              </div>
+            )}
 
             <div className="flex gap-2 justify-end">
               <Button variant="outline" onClick={() => { setAddDialogOpen(false); resetForm(); }}>취소</Button>
