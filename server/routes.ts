@@ -205,7 +205,7 @@ export async function registerRoutes(
     // 모든 세션 정보 초기화 (admin + user)
     if (process.env.VERCEL) {
       // Vercel: cookie-session → null 할당으로 쿠키 제거
-      req.session = null;
+      (req as any).session = null;
       return res.json({ success: true });
     }
     // 로컬: express-session → destroy()로 세션 제거
