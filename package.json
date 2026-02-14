@@ -126,8 +126,5 @@
   },
   "optionalDependencies": {
     "bufferutil": "^4.0.8"
-  },
-  "engines": {
-    "node": "20.x"
   }
 }
