@@ -5464,7 +5464,7 @@ ${newsSummary}`;
     }
   });
 
-  // ETF 검색 (네이버 금융 전체 ETF 목록에서 검색)
+  // ETF 검색 (네이버 금융 전체 ETF 목록에서 검색) - 풍부한 데이터 포함
   app.get("/api/etf/search", async (req, res) => {
     try {
       const query = (req.query.q as string || "").trim();
@@ -5475,7 +5475,6 @@ ${newsSummary}`;
       const allEtfs = await getEtfFullList();
       const lowerQuery = query.toLowerCase();
 
-      // 코드 또는 이름에 검색어가 포함된 ETF 필터링
       const results = allEtfs
         .filter((etf: any) =>
           etf.code.includes(query) ||
@@ -5485,12 +5484,565 @@ ${newsSummary}`;
         .map((etf: any) => ({
           code: etf.code,
           name: etf.name,
+          nowVal: etf.nowVal,
+          changeVal: etf.changeVal,
+          changeRate: etf.changeRate,
+          risefall: etf.risefall,
+          nav: etf.nav,
+          quant: etf.quant,
+          amount: etf.amount,
+          marketCap: etf.marketCap,
+          threeMonthEarnRate: etf.threeMonthEarnRate,
         }));
 
       res.json({ results, total: results.length });
     } catch (error: any) {
       console.error("Failed to search ETFs:", error);
       res.status(500).json({ message: error.message || "ETF 검색 실패" });
+    }
+  });
+
+  // ========== ETF 스크리너 (조건 필터 검색) ==========
+  app.get("/api/etf/screener", async (req, res) => {
+    try {
+      const allEtfs = await getEtfFullList();
+      
+      // 필터 파라미터
+      const minChangeRate = parseFloat(req.query.minChangeRate as string) || -Infinity;
+      const maxChangeRate = parseFloat(req.query.maxChangeRate as string) || Infinity;
+      const minMarketCap = parseFloat(req.query.minMarketCap as string) || 0;
+      const minVolume = parseFloat(req.query.minVolume as string) || 0;
+      const min3mReturn = parseFloat(req.query.min3mReturn as string) || -Infinity;
+      const max3mReturn = parseFloat(req.query.max3mReturn as string) || Infinity;
+      const excludeLeverage = req.query.excludeLeverage === "true";
+      const excludeInverse = req.query.excludeInverse === "true";
+      const keyword = (req.query.keyword as string || "").trim().toLowerCase();
+      const sortBy = (req.query.sortBy as string) || "changeRate";
+      const sortOrder = (req.query.sortOrder as string) || "desc";
+      const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+
+      const LEVERAGE_KEYWORDS = ["레버리지", "2X", "울트라"];
+      const INVERSE_KEYWORDS = ["인버스", "bear", "BEAR", "곱버스", "숏", "SHORT"];
+
+      let filtered = allEtfs.filter((etf) => {
+        if (etf.changeRate < minChangeRate || etf.changeRate > maxChangeRate) return false;
+        if (etf.marketCap < minMarketCap) return false;
+        if (etf.quant < minVolume) return false;
+        if (etf.threeMonthEarnRate < min3mReturn || etf.threeMonthEarnRate > max3mReturn) return false;
+        if (excludeLeverage && LEVERAGE_KEYWORDS.some(kw => etf.name.includes(kw))) return false;
+        if (excludeInverse && INVERSE_KEYWORDS.some(kw => etf.name.includes(kw))) return false;
+        if (keyword && !etf.name.toLowerCase().includes(keyword) && !etf.code.includes(keyword)) return false;
+        return true;
+      });
+
+      // 정렬
+      const sortField = sortBy as keyof EtfListItem;
+      filtered.sort((a: any, b: any) => {
+        const aVal = a[sortField] || 0;
+        const bVal = b[sortField] || 0;
+        return sortOrder === "desc" ? bVal - aVal : aVal - bVal;
+      });
+
+      const results = filtered.slice(0, limit).map((etf) => ({
+        code: etf.code,
+        name: etf.name,
+        nowVal: etf.nowVal,
+        changeVal: etf.changeVal,
+        changeRate: etf.changeRate,
+        risefall: etf.risefall,
+        nav: etf.nav,
+        quant: etf.quant,
+        amount: etf.amount,
+        marketCap: etf.marketCap,
+        threeMonthEarnRate: etf.threeMonthEarnRate,
+      }));
+
+      res.json({ results, total: filtered.length, filtered: results.length });
+    } catch (error: any) {
+      console.error("Failed to screen ETFs:", error);
+      res.status(500).json({ message: error.message || "ETF 스크리너 실패" });
+    }
+  });
+
+  // ========== ETF 상세 정보 (네이버 모바일 API) ==========
+  app.get("/api/etf/detail/:code", async (req, res) => {
+    try {
+      const code = req.params.code;
+      const [basicRes, indicatorRes] = await Promise.all([
+        axios.get(`https://m.stock.naver.com/api/stock/${code}/basic`, {
+          timeout: 5000, headers: { "User-Agent": "Mozilla/5.0" }
+        }).catch(() => null),
+        axios.get(`https://m.stock.naver.com/api/stock/${code}/integration`, {
+          timeout: 5000, headers: { "User-Agent": "Mozilla/5.0" }
+        }).catch(() => null),
+      ]);
+      
+      const basic = basicRes?.data || {};
+      const integration = indicatorRes?.data || {};
+      const etfIndicator = integration?.etfKeyIndicator || {};
+
+      res.json({
+        code,
+        name: basic.stockName || code,
+        currentPrice: basic.closePrice,
+        changePrice: basic.compareToPreviousClosePrice,
+        changeRate: basic.fluctuationsRatio,
+        highPrice: basic.highPrice,
+        lowPrice: basic.lowPrice,
+        volume: basic.accumulatedTradingVolume,
+        marketCap: basic.marketCap,
+        nav: etfIndicator.nav,
+        trackingError: etfIndicator.trackingError,
+        dividendYield: etfIndicator.dividendYieldTtm,
+        totalExpenseRatio: etfIndicator.totalExpenseRatio,
+        listingDate: etfIndicator.listingDate,
+        indexName: etfIndicator.indexName,
+        managementCompany: etfIndicator.managementCompany,
+        totalAssets: etfIndicator.totalAssets,
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "ETF 상세 조회 실패" });
+    }
+  });
+
+  // ========== ETF 차트 데이터 ==========
+  app.get("/api/etf/chart/:code", async (req, res) => {
+    try {
+      const code = req.params.code;
+      const period = (req.query.period as string) || "3m"; // 1m, 3m, 6m, 1y, 3y
+      const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)";
+      
+      // 기간 -> requestCount 맵핑
+      const countMap: Record<string, number> = { "1m": 21, "3m": 63, "6m": 126, "1y": 252, "3y": 756 };
+      const count = countMap[period] || 63;
+
+      // Naver 차트 API
+      const chartRes = await axios.get(
+        `https://api.stock.naver.com/chart/domestic/item/${code}/day?startDateTime=20200101&endDateTime=20990101&requestCount=${count}`,
+        { headers: { "User-Agent": UA }, timeout: 8000 }
+      ).catch(() => null);
+
+      if (!chartRes?.data) {
+        return res.json({ chartData: [] });
+      }
+
+      const items = Array.isArray(chartRes.data) ? chartRes.data : (chartRes.data?.priceInfos || []);
+      const chartData = items.map((item: any) => ({
+        date: item.localDate || item.dt,
+        open: Number(item.openPrice || item.open || 0),
+        high: Number(item.highPrice || item.high || 0),
+        low: Number(item.lowPrice || item.low || 0),
+        close: Number(item.closePrice || item.close || 0),
+        volume: Number(item.accumulatedTradingVolume || item.volume || 0),
+      }));
+
+      res.json({ chartData });
+    } catch (error: any) {
+      console.error("[ETF Chart] Error:", error.message);
+      res.json({ chartData: [] });
+    }
+  });
+
+  // ========== ETF 구성종목 ==========
+  app.get("/api/etf/holdings/:code", async (req, res) => {
+    try {
+      const code = req.params.code;
+
+      // KIS API (WiseReport 스크래핑 포함)로 구성종목 가져오기
+      try {
+        const kisResult = await kisApi.getEtfComponents(code).catch(() => null);
+        if (kisResult?.components?.length) {
+          const holdings = kisResult.components.slice(0, 30).map((s: any) => ({
+            stockCode: s.stockCode || "",
+            name: s.stockName || "",
+            weight: typeof s.weight === "number" ? s.weight : (parseFloat(s.weight || "0") || 0),
+            quantity: s.quantity || 0,
+            price: Number(s.price) || 0,
+            changeRate: Number(s.changePercent) || 0,
+          }));
+          return res.json({ holdings });
+        }
+      } catch {
+        // KIS API 실패시 아래로 진행
+      }
+
+      // fallback: Naver mobile API 시도
+      const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)";
+      const holdingsRes = await axios.get(
+        `https://m.stock.naver.com/api/stock/${code}/etfHoldings`,
+        { headers: { "User-Agent": UA }, timeout: 8000 }
+      ).catch(() => null);
+
+      if (!holdingsRes?.data || (typeof holdingsRes.data === 'string' && holdingsRes.data.includes('<!doctype'))) {
+        return res.json({ holdings: [] });
+      }
+
+      const raw = holdingsRes.data;
+      const list = Array.isArray(raw) ? raw : (raw?.etfHoldings || raw?.stocks || []);
+      const holdings = list.map((item: any) => ({
+        stockCode: item.itemCode || item.stockCode || "",
+        name: item.itemName || item.stockName || item.name || "",
+        weight: Number(item.weight || item.weightPercent || 0),
+        quantity: Number(item.quantity || item.stockCount || 0),
+        price: Number(item.closePrice || item.price || 0),
+        changeRate: Number(item.fluctuationsRatio || item.changeRate || 0),
+      })).slice(0, 30);
+
+      res.json({ holdings });
+    } catch (error: any) {
+      console.error("[ETF Holdings] Error:", error.message);
+      res.json({ holdings: [] });
+    }
+  });
+
+  // ========== ETF 수익률 정보 ==========
+  app.get("/api/etf/performance/:code", async (req, res) => {
+    try {
+      const code = req.params.code;
+      const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)";
+
+      // 네이버 모바일 API에서 ETF 수익률 정보
+      const [perfRes, integrationRes] = await Promise.all([
+        axios.get(`https://m.stock.naver.com/api/stock/${code}/basic`, {
+          headers: { "User-Agent": UA }, timeout: 5000
+        }).catch(() => null),
+        axios.get(`https://m.stock.naver.com/api/stock/${code}/integration`, {
+          headers: { "User-Agent": UA }, timeout: 5000
+        }).catch(() => null),
+      ]);
+
+      const basic = perfRes?.data || {};
+      const integration = integrationRes?.data || {};
+      const etfIndicator = integration?.etfKeyIndicator || {};
+      const returnRates = integration?.etfReturnRate || {};
+
+      res.json({
+        // 기간별 수익률
+        return1w: returnRates?.["1주"] || returnRates?.oneWeek || null,
+        return1m: returnRates?.["1개월"] || returnRates?.oneMonth || null,
+        return3m: returnRates?.["3개월"] || returnRates?.threeMonths || null,
+        return6m: returnRates?.["6개월"] || returnRates?.sixMonths || null,
+        return1y: returnRates?.["1년"] || returnRates?.oneYear || null,
+        returnYtd: returnRates?.["연초이후"] || returnRates?.ytd || null,
+        // 지표
+        nav: etfIndicator?.nav,
+        trackingError: etfIndicator?.trackingError,
+        premiumDiscount: etfIndicator?.premiumDiscount || etfIndicator?.premium,
+        dividendYield: etfIndicator?.dividendYieldTtm,
+        totalExpenseRatio: etfIndicator?.totalExpenseRatio,
+        // 52주 고저
+        highPrice52w: basic?.highPrice52w || basic?.yearHighPrice,
+        lowPrice52w: basic?.lowPrice52w || basic?.yearLowPrice,
+      });
+    } catch (error: any) {
+      console.error("[ETF Performance] Error:", error.message);
+      res.json({});
+    }
+  });
+
+  // ========== ETF 비교 ==========
+  app.get("/api/etf/compare", async (req, res) => {
+    try {
+      const codesStr = req.query.codes as string;
+      if (!codesStr) return res.status(400).json({ message: "비교할 ETF 코드를 입력하세요." });
+      
+      const codes = codesStr.split(",").map(c => c.trim()).filter(Boolean).slice(0, 5);
+      if (codes.length < 2) return res.status(400).json({ message: "2개 이상의 ETF를 선택해주세요." });
+
+      const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+      // 전체 목록에서 기본 데이터
+      const allEtfs = await getEtfFullList();
+      
+      const results = await Promise.all(codes.map(async (code) => {
+        const listData = allEtfs.find((e: any) => e.code === code);
+        
+        // 상세 데이터 + 수익률 + 구성종목 병렬 조회
+        let detail: any = {};
+        let performance: any = {};
+        let holdings: any[] = [];
+        let costDetail: any = {};
+
+        try {
+          // integration API에서 etfKeyIndicator + totalInfos 가져오기
+          const integRes = await axios.get(`https://m.stock.naver.com/api/stock/${code}/integration`, {
+            timeout: 8000, headers: { "User-Agent": UA }
+          }).catch(() => null);
+
+          const integration = integRes?.data || {};
+          const indic = integration?.etfKeyIndicator || {};
+          const totalInfos: any[] = integration?.totalInfos || [];
+
+          // totalInfos에서 key-value 매핑 헬퍼
+          const getInfoVal = (key: string): string | null => {
+            const item = totalInfos.find((t: any) => t.key === key);
+            return item?.value || null;
+          };
+          // 수익률 문자열에서 숫자 추출 ("+21.38%" → 21.38)
+          const parseRate = (str: string | null): number | null => {
+            if (!str) return null;
+            const m = str.match(/([+-]?\d+\.?\d*)/);
+            return m ? parseFloat(m[1]) * (str.includes('-') ? -1 : 1) : null;
+          };
+
+          // 숫자 문자열 파싱 헬퍼 ("83,120" → 83120)
+          const parseNumStr = (s: string | null): number | null => {
+            if (!s) return null;
+            const n = parseFloat(s.replace(/,/g, ''));
+            return isNaN(n) ? null : n;
+          };
+
+          // 실제 API 필드명에 맞게 매핑
+          detail = {
+            dividendYield: indic.dividendYieldTtm ?? null,
+            totalExpenseRatio: indic.totalFee ?? null,
+            indexName: getInfoVal("기초지수"),
+            managementCompany: indic.issuerName || getInfoVal("운용사") || null,
+            totalAssets: indic.marketValue || null, // "16조 691억" 형태 문자열
+            totalNav: indic.totalNav || null,
+            nav: indic.nav || null,
+            trackingError: indic.deviationRate != null ? `${indic.deviationSign || ""}${indic.deviationRate}%` : null,
+            highPrice52w: parseNumStr(getInfoVal("52주 최고")),
+            lowPrice52w: parseNumStr(getInfoVal("52주 최저")),
+            listingDate: null,
+            riskGrade: null,
+            stockType: null,
+          };
+
+          // 수익률 정보 (etfKeyIndicator + totalInfos에서 추출)
+          performance = {
+            week1: null,
+            month1: indic.returnRate1m ?? parseRate(getInfoVal("최근 1개월 수익률")),
+            month3: indic.returnRate3m ?? parseRate(getInfoVal("최근 3개월 수익률")),
+            month6: parseRate(getInfoVal("최근 6개월 수익률")),
+            year1: indic.returnRate1y ?? parseRate(getInfoVal("최근 1년 수익률")),
+            year3: null,
+            year5: null,
+            ytd: null,
+          };
+
+          // 비용 상세
+          const feeStr = getInfoVal("펀드보수");
+          const totalFeeVal = indic.totalFee ?? (feeStr ? parseFloat(feeStr.replace('%', '')) : null);
+          costDetail = {
+            managementFee: null,
+            sellingFee: null,
+            trustFee: null,
+            officeFee: null,
+            totalFee: totalFeeVal,
+            syntheticTotalFee: null,
+            realExpenseRatio: null,
+            monthlyDividend: indic.monthlyDividend ? "O" : "X",
+            annualDividendRate: indic.dividendYieldTtm ?? null,
+            annualDividendCount: null,
+          };
+
+          // 구성종목 TOP10 - KIS API (WiseReport 스크래핑 포함) 사용
+          try {
+            const kisResult = await kisApi.getEtfComponents(code).catch(() => null);
+            if (kisResult?.components?.length) {
+              holdings = kisResult.components
+                .filter((s: any) => {
+                  // 설정현금액 등 비종목 항목 제외
+                  const name = s.stockName || s.name || "";
+                  return !name.includes("설정현금") && !name.includes("현금및기타");
+                })
+                .slice(0, 10)
+                .map((s: any) => ({
+                  name: s.stockName || s.name || "",
+                  code: s.stockCode || s.code || "",
+                  weight: typeof s.weight === "number" ? s.weight : (parseFloat(s.weight || "0") || 0),
+                  price: s.price || "",
+                  changePercent: s.changePercent || "",
+                }));
+            }
+          } catch {
+            // 구성종목 실패해도 계속 진행
+          }
+        } catch (e) {
+          console.error(`[ETF Compare] Error fetching details for ${code}:`, e);
+        }
+
+        return {
+          code,
+          name: listData?.name || code,
+          nowVal: listData?.nowVal || 0,
+          changeVal: listData?.changeVal || 0,
+          changeRate: listData?.changeRate || 0,
+          nav: listData?.nav || detail.nav || 0,
+          quant: listData?.quant || 0,
+          amount: listData?.amount || 0,
+          marketCap: listData?.marketCap || 0,
+          threeMonthEarnRate: listData?.threeMonthEarnRate || 0,
+          ...detail,
+          performance,
+          costDetail,
+          holdings,
+        };
+      }));
+
+      // 하단 요약 문구 생성
+      let summary: string[] = [];
+      
+      // 1년 수익률 최고
+      const validYear1 = results.filter(r => r.performance?.year1 != null && !isNaN(parseFloat(String(r.performance.year1))));
+      if (validYear1.length > 0) {
+        const best1Y = validYear1.reduce((a, b) => (parseFloat(String(a.performance.year1)) > parseFloat(String(b.performance.year1)) ? a : b));
+        summary.push(`비교하신 상품 중, 1년 수익률이 가장 높은 상품은 ${best1Y.name} 이며`);
+      }
+      
+      // 구성종목 TOP3
+      const firstWithHoldings = results.find(r => r.holdings?.length >= 3);
+      if (firstWithHoldings) {
+        const top3 = firstWithHoldings.holdings.slice(0, 3).map((h: any) => h.name).join(", ");
+        summary.push(`해당 상품의 구성 종목 TOP3는 ${top3} 입니다.`);
+      }
+      
+      // 총보수 최저
+      const validFee = results.filter(r => r.totalExpenseRatio != null && parseFloat(String(r.totalExpenseRatio)) > 0);
+      if (validFee.length > 0) {
+        const lowestFee = validFee.reduce((a, b) => (parseFloat(String(a.totalExpenseRatio)) < parseFloat(String(b.totalExpenseRatio)) ? a : b));
+        const biggestSize = results.reduce((a, b) => ((a.marketCap || 0) > (b.marketCap || 0) ? a : b));
+        summary.push(`총보수가 가장 저렴한 상품은 ${lowestFee.name}(${lowestFee.totalExpenseRatio}%) 이며 기준 규모가 가장 큰 상품은 ${biggestSize.name} 입니다.`);
+      }
+      
+      // 3개월 수익률 비교
+      const validMonth3 = results.filter(r => r.performance?.month3 != null);
+      if (validMonth3.length > 0) {
+        const best3M = validMonth3.reduce((a, b) => ((a.performance.month3 || 0) > (b.performance.month3 || 0) ? a : b));
+        summary.push(`3개월 수익률이 가장 높은 상품은 ${best3M.name}(${best3M.performance.month3}%) 입니다.`);
+      }
+
+      res.json({ etfs: results, summary });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "ETF 비교 실패" });
+    }
+  });
+
+  // ========== ETF 테마 분류 ==========
+  app.get("/api/etf/themes", async (req, res) => {
+    try {
+      const allEtfs = await getEtfFullList();
+      
+      // 테마 키워드 분류
+      const themeMap: Record<string, { keywords: string[]; icon: string }> = {
+        "반도체/AI": { keywords: ["반도체", "AI", "인공지능", "GPU", "HBM"], icon: "🤖" },
+        "2차전지/배터리": { keywords: ["2차전지", "배터리", "리튬", "전기차", "EV"], icon: "🔋" },
+        "바이오/헬스케어": { keywords: ["바이오", "헬스케어", "제약", "의약", "의료"], icon: "💊" },
+        "금융": { keywords: ["금융", "은행", "보험", "증권", "리츠"], icon: "🏦" },
+        "에너지/원자재": { keywords: ["에너지", "원유", "천연가스", "금", "은", "원자재", "구리"], icon: "⛽" },
+        "미국주식": { keywords: ["미국", "나스닥", "S&P", "다우", "필라델피아"], icon: "🇺🇸" },
+        "중국/신흥국": { keywords: ["중국", "CSI", "항셍", "신흥국", "인도", "베트남", "일본"], icon: "🌏" },
+        "채권": { keywords: ["채권", "국채", "회사채", "하이일드", "국고채"], icon: "📜" },
+        "배당": { keywords: ["배당", "고배당", "월배당", "커버드콜"], icon: "💰" },
+        "레버리지/인버스": { keywords: ["레버리지", "인버스", "2X", "곱버스", "숏", "bear", "BEAR", "울트라"], icon: "⚡" },
+        "코스피/코스닥": { keywords: ["코스피200", "코스닥150", "KRX", "KOSPI", "KOSDAQ", "TOP10"], icon: "📊" },
+        "IT/소프트웨어": { keywords: ["IT", "소프트웨어", "클라우드", "사이버", "디지털", "플랫폼", "메타버스"], icon: "💻" },
+        "ESG/친환경": { keywords: ["ESG", "친환경", "그린", "탄소", "신재생", "수소", "태양광"], icon: "🌱" },
+        "부동산/인프라": { keywords: ["부동산", "리츠", "인프라", "건설"], icon: "🏗️" },
+      };
+
+      const themes: Record<string, any[]> = {};
+      const themeStats: any[] = [];
+
+      for (const [themeName, config] of Object.entries(themeMap)) {
+        const themeEtfs = allEtfs.filter(etf => 
+          config.keywords.some(kw => etf.name.includes(kw))
+        );
+        
+        if (themeEtfs.length > 0) {
+          // 등락률 기준 상위 5개만
+          const topEtfs = [...themeEtfs]
+            .sort((a, b) => b.changeRate - a.changeRate)
+            .slice(0, 5)
+            .map(etf => ({
+              code: etf.code,
+              name: etf.name,
+              nowVal: etf.nowVal,
+              changeRate: etf.changeRate,
+              marketCap: etf.marketCap,
+              threeMonthEarnRate: etf.threeMonthEarnRate,
+            }));
+
+          const avgChangeRate = themeEtfs.reduce((s, e) => s + e.changeRate, 0) / themeEtfs.length;
+          const avg3mReturn = themeEtfs.reduce((s, e) => s + e.threeMonthEarnRate, 0) / themeEtfs.length;
+          
+          themes[themeName] = topEtfs;
+          themeStats.push({
+            name: themeName,
+            icon: config.icon,
+            count: themeEtfs.length,
+            avgChangeRate: Math.round(avgChangeRate * 100) / 100,
+            avg3mReturn: Math.round(avg3mReturn * 100) / 100,
+            topEtfs,
+          });
+        }
+      }
+
+      // 평균 등락률 기준 정렬
+      themeStats.sort((a, b) => b.avgChangeRate - a.avgChangeRate);
+
+      res.json({ themes: themeStats, totalEtfs: allEtfs.length });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "ETF 테마 조회 실패" });
+    }
+  });
+
+  // ========== ETF AI 추천 ==========
+  app.post("/api/etf/ai-recommend", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      const { purpose, riskLevel, keywords } = req.body;
+      
+      // 사용자 AI 키 가져오기
+      let userKey: UserAiKeyOption | undefined;
+      if (userId) {
+        const userAiConfig = await storage.getUserAiConfig(userId);
+        if (userAiConfig && userAiConfig.useOwnKey) {
+          userKey = {
+            provider: userAiConfig.aiProvider || "gemini",
+            geminiApiKey: userAiConfig.geminiApiKey || undefined,
+            openaiApiKey: userAiConfig.openaiApiKey || undefined,
+          };
+        }
+      }
+
+      // 현재 ETF 데이터 수집
+      const allEtfs = await getEtfFullList();
+      
+      // 키워드로 관련 ETF 필터
+      const relevantEtfs = keywords 
+        ? allEtfs.filter(etf => {
+            const name = etf.name.toLowerCase();
+            return keywords.split(",").some((kw: string) => name.includes(kw.trim().toLowerCase()));
+          }).slice(0, 30)
+        : allEtfs.sort((a, b) => b.changeRate - a.changeRate).slice(0, 30);
+      
+      const etfListStr = relevantEtfs.map(e => 
+        `${e.name}(${e.code}): 현재가 ${e.nowVal.toLocaleString()}원, 등락률 ${e.changeRate}%, 3개월수익률 ${e.threeMonthEarnRate}%, 시총 ${Math.round(e.marketCap/100000000).toLocaleString()}억`
+      ).join("\n");
+
+      const prompt = `당신은 ETF 투자 전문가입니다. 아래 조건에 맞는 ETF를 추천해주세요.
+
+투자 목적: ${purpose || "수익률 극대화"}
+위험 성향: ${riskLevel || "중간"}
+관심 키워드: ${keywords || "전체"}
+
+현재 시장에서 관련 ETF 목록:
+${etfListStr}
+
+위 데이터를 기반으로:
+1. TOP 3~5개 ETF를 추천하고 각각 추천 이유를 설명
+2. 각 ETF의 장점과 리스크를 간단히 분석
+3. 포트폴리오 배분 비율 제안
+4. 투자 시 주의사항
+
+전문적이면서도 이해하기 쉽게 답변해주세요.`;
+
+      const analysis = await callAI(prompt, userKey);
+      res.json({ recommendation: analysis });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "ETF 추천 실패" });
     }
   });
 
@@ -6927,6 +7479,73 @@ ${newsSummary}`;
     }
   })();
 
+  // ========== Admin Dashboard - 방문자 통계 ==========
+
+  // 방문 기록 (프론트에서 페이지 전환 시 호출)
+  app.post("/api/visit/track", async (req, res) => {
+    try {
+      const { page } = req.body;
+      const ip = req.headers["x-forwarded-for"] as string || req.socket.remoteAddress || "unknown";
+      const userAgent = req.headers["user-agent"] || "unknown";
+      
+      await storage.createVisitLog({
+        userId: req.session?.userId || null,
+        userEmail: req.session?.userEmail || null,
+        userName: req.session?.userName || null,
+        ipAddress: typeof ip === "string" ? ip.split(",")[0].trim() : "unknown",
+        userAgent: typeof userAgent === "string" ? userAgent.substring(0, 300) : "unknown",
+        page: page || "/",
+        sessionId: req.sessionID || null,
+      });
+      
+      res.json({ success: true });
+    } catch (error: any) {
+      // 방문 기록 실패는 무시 (사용자 경험에 영향 주지 않음)
+      console.error("[Visit] Track failed:", error.message);
+      res.json({ success: false });
+    }
+  });
+
+  // 방문 통계 조회 (admin only)
+  app.get("/api/admin/dashboard/stats", requireAdmin, async (req, res) => {
+    try {
+      const days = parseInt(req.query.days as string) || 30;
+      const stats = await storage.getVisitStats(days);
+      res.json(stats);
+    } catch (error: any) {
+      console.error("[Dashboard] Stats failed:", error.message);
+      res.status(500).json({ message: error.message || "통계 조회 실패" });
+    }
+  });
+
+  // 최근 방문 로그 조회 (admin only)
+  app.get("/api/admin/dashboard/logs", requireAdmin, async (req, res) => {
+    try {
+      const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
+      const logs = await storage.getVisitLogs(limit);
+      res.json(logs);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "로그 조회 실패" });
+    }
+  });
+
+  // 등록된 사용자 목록 (admin only)
+  app.get("/api/admin/users", requireAdmin, async (req, res) => {
+    try {
+      const allUsers = await storage.getUsers();
+      const safeUsers = allUsers.map((u: any) => ({
+        id: u.id,
+        email: u.email,
+        name: u.name,
+        isAdmin: u.isAdmin,
+        createdAt: u.createdAt,
+      }));
+      res.json(safeUsers);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "사용자 목록 조회 실패" });
+    }
+  });
+
   // ========== AI Agent 시스템 ==========
 
   // Agent에서 사용 가능한 Action 정의
@@ -6943,7 +7562,7 @@ ${newsSummary}`;
 
 ### 메뉴 이동 (navigate)
 - 화면을 특정 탭/메뉴로 전환합니다
-- target 값: "home", "etf-components", "new-etf", "watchlist-etf", "satellite-etf", "markets-domestic", "markets-global", "markets-research", "daily-strategy", "domestic-stocks", "overseas-stocks", "tenbagger", "steem-report", "steem-reader", "ai-agent", "bookmarks"
+- target 값: "home", "etf-components", "new-etf", "watchlist-etf", "satellite-etf", "etf-search", "markets-domestic", "markets-global", "markets-research", "daily-strategy", "domestic-stocks", "overseas-stocks", "tenbagger", "steem-report", "steem-reader", "ai-agent", "bookmarks"
 - trading 페이지: target을 "/trading"으로 지정
 예시: {"action":"navigate","params":{"target":"etf-components"}}
 예시: {"action":"navigate","params":{"target":"/trading"}}
@@ -7033,6 +7652,31 @@ ${newsSummary}`;
 ### 리서치 보고서 조회 (fetch_research)
 - 최신 증권사 리서치 보고서를 조회합니다
 예시: {"action":"fetch_research","params":{}}
+
+### ETF 키워드 검색 (search_etf)
+- 키워드로 ETF를 검색합니다 (이름/코드)
+예시: {"action":"search_etf","params":{"keyword":"반도체"}}
+
+### ETF 스크리너 (screen_etf)
+- 조건으로 ETF를 필터링합니다
+- 가능한 필터: keyword, minChangeRate, maxChangeRate, minMarketCap(억원), min3mReturn, excludeLeverage(true/false), excludeInverse(true/false), sortBy(changeRate/threeMonthEarnRate/marketCap/quant), sortOrder(desc/asc), limit
+예시: {"action":"screen_etf","params":{"minChangeRate":"2","excludeLeverage":true,"excludeInverse":true,"sortBy":"changeRate","limit":"10"}}
+
+### ETF 테마 분석 (fetch_etf_themes)
+- 테마별 ETF 분류와 평균 등락률을 조회합니다
+예시: {"action":"fetch_etf_themes","params":{}}
+
+### ETF 비교 (compare_etf)
+- 2~4개 ETF를 비교합니다 (코드를 쉼표로 구분)
+예시: {"action":"compare_etf","params":{"codes":"069500,229200,360750"}}
+
+### ETF 상세 정보 조회 (fetch_etf_detail)
+- 특정 ETF의 상세 정보(배당수익률, 총보수, 추적지수 등)를 조회합니다
+예시: {"action":"fetch_etf_detail","params":{"code":"069500"}}
+
+### ETF 검색/비교/AI추천 화면 이동 (navigate_etf_search)
+- ETF 통합 검색 화면으로 이동합니다
+예시: {"action":"navigate_etf_search","params":{}}
 `;
 
   // Agent Action 실행 함수
@@ -7446,6 +8090,150 @@ ${newsSummary}`;
           } catch (e: any) {
             return { type: "error", message: `리서치 조회 실패: ${e.message}` };
           }
+        }
+
+        case "search_etf": {
+          try {
+            const keyword = params.keyword;
+            if (!keyword) return { type: "error", message: "ETF 검색 키워드가 필요합니다." };
+            const allEtfs = await getEtfFullList();
+            const lw = keyword.toLowerCase();
+            const results = allEtfs
+              .filter((etf: any) => etf.code.includes(keyword) || etf.name.toLowerCase().includes(lw))
+              .slice(0, 15)
+              .map((etf: any) => ({
+                code: etf.code, name: etf.name, nowVal: etf.nowVal,
+                changeRate: etf.changeRate, threeMonthEarnRate: etf.threeMonthEarnRate,
+                marketCap: Math.round(etf.marketCap / 100000000),
+              }));
+            return { type: "data", dataType: "etf_search", data: results, total: results.length, success: true };
+          } catch (e: any) {
+            return { type: "error", message: `ETF 검색 실패: ${e.message}` };
+          }
+        }
+
+        case "screen_etf": {
+          try {
+            const allEtfs = await getEtfFullList();
+            const minCR = parseFloat(params.minChangeRate) || -Infinity;
+            const maxCR = parseFloat(params.maxChangeRate) || Infinity;
+            const minMC = (parseFloat(params.minMarketCap) || 0) * 100000000;
+            const min3m = parseFloat(params.min3mReturn) || -Infinity;
+            const exLev = params.excludeLeverage === true || params.excludeLeverage === "true";
+            const exInv = params.excludeInverse === true || params.excludeInverse === "true";
+            const kw = (params.keyword || "").toLowerCase();
+            const sBy = params.sortBy || "changeRate";
+            const sOrd = params.sortOrder || "desc";
+            const lmt = parseInt(params.limit) || 15;
+            const LEV = ["레버리지", "2X", "울트라"];
+            const INV = ["인버스", "bear", "BEAR", "곱버스", "숏", "SHORT"];
+            let filtered = allEtfs.filter((etf: any) => {
+              if (etf.changeRate < minCR || etf.changeRate > maxCR) return false;
+              if (etf.marketCap < minMC) return false;
+              if (etf.threeMonthEarnRate < min3m) return false;
+              if (exLev && LEV.some(k => etf.name.includes(k))) return false;
+              if (exInv && INV.some(k => etf.name.includes(k))) return false;
+              if (kw && !etf.name.toLowerCase().includes(kw) && !etf.code.includes(kw)) return false;
+              return true;
+            });
+            filtered.sort((a: any, b: any) => {
+              const aV = a[sBy] || 0; const bV = b[sBy] || 0;
+              return sOrd === "desc" ? bV - aV : aV - bV;
+            });
+            const results = filtered.slice(0, lmt).map((etf: any) => ({
+              code: etf.code, name: etf.name, nowVal: etf.nowVal,
+              changeRate: etf.changeRate, threeMonthEarnRate: etf.threeMonthEarnRate,
+              marketCap: Math.round(etf.marketCap / 100000000), quant: etf.quant,
+            }));
+            return { type: "data", dataType: "etf_screener", data: results, total: filtered.length, success: true };
+          } catch (e: any) {
+            return { type: "error", message: `ETF 스크리너 실패: ${e.message}` };
+          }
+        }
+
+        case "fetch_etf_themes": {
+          try {
+            const allEtfs = await getEtfFullList();
+            const themeMapAgent: Record<string, { keywords: string[]; icon: string }> = {
+              "반도체/AI": { keywords: ["반도체", "AI", "인공지능", "GPU", "HBM"], icon: "🤖" },
+              "2차전지": { keywords: ["2차전지", "배터리", "리튬", "전기차"], icon: "🔋" },
+              "바이오": { keywords: ["바이오", "헬스케어", "제약"], icon: "💊" },
+              "에너지": { keywords: ["에너지", "원유", "금", "원자재"], icon: "⛽" },
+              "미국주식": { keywords: ["미국", "나스닥", "S&P"], icon: "🇺🇸" },
+              "채권": { keywords: ["채권", "국채", "회사채"], icon: "📜" },
+              "배당": { keywords: ["배당", "고배당", "커버드콜"], icon: "💰" },
+              "ESG/친환경": { keywords: ["ESG", "친환경", "그린", "수소"], icon: "🌱" },
+            };
+            const summary: any[] = [];
+            for (const [name, cfg] of Object.entries(themeMapAgent)) {
+              const themeEtfs = allEtfs.filter(e => cfg.keywords.some(k => e.name.includes(k)));
+              if (themeEtfs.length > 0) {
+                const avg = themeEtfs.reduce((s, e) => s + e.changeRate, 0) / themeEtfs.length;
+                const avg3m = themeEtfs.reduce((s, e) => s + e.threeMonthEarnRate, 0) / themeEtfs.length;
+                summary.push({ name, icon: cfg.icon, count: themeEtfs.length,
+                  avgChangeRate: Math.round(avg * 100) / 100,
+                  avg3mReturn: Math.round(avg3m * 100) / 100,
+                  topEtf: themeEtfs.sort((a, b) => b.changeRate - a.changeRate)[0]?.name || "-" });
+              }
+            }
+            summary.sort((a, b) => b.avgChangeRate - a.avgChangeRate);
+            return { type: "data", dataType: "etf_themes", data: summary, success: true };
+          } catch (e: any) {
+            return { type: "error", message: `ETF 테마 조회 실패: ${e.message}` };
+          }
+        }
+
+        case "compare_etf": {
+          try {
+            const codes = params.codes;
+            if (!codes) return { type: "error", message: "비교할 ETF 코드를 입력하세요 (쉼표 구분)." };
+            const codeList = codes.split(",").map((c: string) => c.trim()).filter(Boolean).slice(0, 4);
+            const allEtfs = await getEtfFullList();
+            const results = await Promise.all(codeList.map(async (code: string) => {
+              const listData = allEtfs.find(e => e.code === code);
+              let detail: any = {};
+              try {
+                const integRes = await axios.get(`https://m.stock.naver.com/api/stock/${code}/integration`, {
+                  timeout: 5000, headers: { "User-Agent": "Mozilla/5.0" }
+                }).catch(() => null);
+                const indic = integRes?.data?.etfKeyIndicator || {};
+                detail = { dividendYield: indic.dividendYieldTtm, totalExpenseRatio: indic.totalExpenseRatio, indexName: indic.indexName, managementCompany: indic.managementCompany };
+              } catch {}
+              return {
+                code, name: listData?.name || code, nowVal: listData?.nowVal || 0,
+                changeRate: listData?.changeRate || 0, threeMonthEarnRate: listData?.threeMonthEarnRate || 0,
+                marketCap: Math.round((listData?.marketCap || 0) / 100000000), ...detail,
+              };
+            }));
+            return { type: "data", dataType: "etf_compare", data: results, success: true };
+          } catch (e: any) {
+            return { type: "error", message: `ETF 비교 실패: ${e.message}` };
+          }
+        }
+
+        case "fetch_etf_detail": {
+          try {
+            const code = params.code;
+            if (!code) return { type: "error", message: "ETF 코드가 필요합니다." };
+            const [basicRes, integRes] = await Promise.all([
+              axios.get(`https://m.stock.naver.com/api/stock/${code}/basic`, { timeout: 5000, headers: { "User-Agent": "Mozilla/5.0" } }).catch(() => null),
+              axios.get(`https://m.stock.naver.com/api/stock/${code}/integration`, { timeout: 5000, headers: { "User-Agent": "Mozilla/5.0" } }).catch(() => null),
+            ]);
+            const basic = basicRes?.data || {};
+            const indic = integRes?.data?.etfKeyIndicator || {};
+            return { type: "data", dataType: "etf_detail", data: {
+              code, name: basic.stockName || code, currentPrice: basic.closePrice,
+              changeRate: basic.fluctuationsRatio, dividendYield: indic.dividendYieldTtm,
+              totalExpenseRatio: indic.totalExpenseRatio, indexName: indic.indexName,
+              managementCompany: indic.managementCompany, nav: indic.nav,
+            }, success: true };
+          } catch (e: any) {
+            return { type: "error", message: `ETF 상세 조회 실패: ${e.message}` };
+          }
+        }
+
+        case "navigate_etf_search": {
+          return { type: "navigate", target: "etf-search", success: true };
         }
 
         default:

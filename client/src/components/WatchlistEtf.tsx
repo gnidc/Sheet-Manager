@@ -629,7 +629,7 @@ export default function WatchlistEtfComponent({ listType = "core" }: WatchlistEt
                       items={items}
                       marketData={marketData}
                       listType={listType}
-                      showCheckbox={!isAdmin}
+                      showCheckbox={true}
                       showManage={isAdmin}
                       checkedIds={checkedIds}
                       onToggleCheck={handleToggleCheck}
@@ -641,12 +641,17 @@ export default function WatchlistEtfComponent({ listType = "core" }: WatchlistEt
                   </div>
                 ))}
 
-                {!isAdmin && checkedIds.size > 0 && (
+                {checkedIds.size > 0 && (
                   <div className="flex items-center justify-between p-3 bg-red-50 dark:bg-red-950/30 rounded-lg border border-red-200 dark:border-red-800">
                     <span className="text-sm font-medium">{checkedIds.size}개 ETF 선택됨</span>
-                    <Button size="sm" onClick={handleBuyChecked} className="gap-1.5 bg-red-500 hover:bg-red-600 text-white">
-                      <ShoppingCart className="w-4 h-4" />선택 ETF 매수하기
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button size="sm" variant="ghost" onClick={() => setCheckedIds(new Set())} className="text-xs">
+                        선택해제
+                      </Button>
+                      <Button size="sm" onClick={handleBuyChecked} className="gap-1.5 bg-red-500 hover:bg-red-600 text-white">
+                        <ShoppingCart className="w-4 h-4" />선택 ETF 매수하기
+                      </Button>
+                    </div>
                   </div>
                 )}
               </div>

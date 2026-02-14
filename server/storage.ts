@@ -72,6 +72,9 @@ import {
   aiPrompts,
   type AiPrompt,
   type InsertAiPrompt,
+  visitLogs,
+  type VisitLog,
+  type InsertVisitLog,
 } from "../shared/schema.js";
 import { eq, and, or, desc, isNull, inArray, sql } from "drizzle-orm";
 
@@ -107,6 +110,7 @@ export interface IStorage {
   getUserByGoogleId(googleId: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   getUser(id: number): Promise<User | undefined>;
+  getUsers(): Promise<User[]>;
 
   // User Trading Configs
   getUserTradingConfig(userId: number): Promise<UserTradingConfig | undefined>;
@@ -218,6 +222,11 @@ export interface IStorage {
   createAiPrompt(data: InsertAiPrompt): Promise<AiPrompt>;
   updateAiPrompt(id: number, updates: Partial<InsertAiPrompt>): Promise<AiPrompt>;
   deleteAiPrompt(id: number): Promise<void>;
+
+  // Visit Logs (Dashboard)
+  createVisitLog(data: InsertVisitLog): Promise<VisitLog>;
+  getVisitLogs(limit?: number): Promise<VisitLog[]>;
+  getVisitStats(days?: number): Promise<any>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -493,6 +502,15 @@ export class DatabaseStorage implements IStorage {
     }
     const [user] = await db.select().from(users).where(eq(users.id, id));
     return user;
+  }
+
+  async getUsers(): Promise<User[]> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(users).orderBy(desc(users.createdAt));
+      });
+    }
+    return await db.select().from(users).orderBy(desc(users.createdAt));
   }
 
   // ========== User Trading Configs ==========
@@ -1557,6 +1575,160 @@ export class DatabaseStorage implements IStorage {
       });
     }
     await db.delete(aiPrompts).where(eq(aiPrompts.id, id));
+  }
+
+  // ========== Visit Logs (Dashboard) ==========
+
+  async createVisitLog(data: InsertVisitLog): Promise<VisitLog> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [log] = await db.insert(visitLogs).values(data).returning();
+        return log;
+      });
+    }
+    const [log] = await db.insert(visitLogs).values(data).returning();
+    return log;
+  }
+
+  async getVisitLogs(limit: number = 100): Promise<VisitLog[]> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(visitLogs).orderBy(desc(visitLogs.visitedAt)).limit(limit);
+      });
+    }
+    return await db.select().from(visitLogs).orderBy(desc(visitLogs.visitedAt)).limit(limit);
+  }
+
+  async getVisitStats(days: number = 30): Promise<any> {
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    
+    const query = async (database: any) => {
+      // 전체 방문 로그 (기간 내)
+      const allLogs = await database
+        .select()
+        .from(visitLogs)
+        .where(sql`${visitLogs.visitedAt} >= ${since}`)
+        .orderBy(desc(visitLogs.visitedAt));
+
+      // 총 방문 수
+      const totalVisits = allLogs.length;
+
+      // 고유 방문자 수 (userId 기준 + 비로그인은 ip 기준)
+      const uniqueVisitors = new Set<string>();
+      allLogs.forEach((log: VisitLog) => {
+        if (log.userId) {
+          uniqueVisitors.add(`user:${log.userId}`);
+        } else if (log.ipAddress) {
+          uniqueVisitors.add(`ip:${log.ipAddress}`);
+        }
+      });
+
+      // 일별 방문 통계
+      const dailyMap = new Map<string, { total: number; unique: Set<string> }>();
+      allLogs.forEach((log: VisitLog) => {
+        const dateStr = new Date(log.visitedAt).toISOString().split("T")[0];
+        if (!dailyMap.has(dateStr)) {
+          dailyMap.set(dateStr, { total: 0, unique: new Set() });
+        }
+        const entry = dailyMap.get(dateStr)!;
+        entry.total++;
+        if (log.userId) entry.unique.add(`user:${log.userId}`);
+        else if (log.ipAddress) entry.unique.add(`ip:${log.ipAddress}`);
+      });
+
+      const dailyStats = Array.from(dailyMap.entries())
+        .map(([date, stat]) => ({
+          date,
+          totalVisits: stat.total,
+          uniqueVisitors: stat.unique.size,
+        }))
+        .sort((a, b) => a.date.localeCompare(b.date));
+
+      // 계정별 방문 통계
+      const userMap = new Map<string, { email: string; name: string; count: number; lastVisit: Date }>();
+      allLogs.forEach((log: VisitLog) => {
+        if (log.userId && log.userEmail) {
+          const key = String(log.userId);
+          if (!userMap.has(key)) {
+            userMap.set(key, {
+              email: log.userEmail,
+              name: log.userName || log.userEmail,
+              count: 0,
+              lastVisit: log.visitedAt,
+            });
+          }
+          const entry = userMap.get(key)!;
+          entry.count++;
+          if (log.visitedAt > entry.lastVisit) entry.lastVisit = log.visitedAt;
+        }
+      });
+
+      const userStats = Array.from(userMap.values())
+        .sort((a, b) => b.count - a.count);
+
+      // 시간대별 방문 통계
+      const hourlyMap = new Map<number, number>();
+      for (let i = 0; i < 24; i++) hourlyMap.set(i, 0);
+      allLogs.forEach((log: VisitLog) => {
+        const hour = new Date(log.visitedAt).getHours();
+        hourlyMap.set(hour, (hourlyMap.get(hour) || 0) + 1);
+      });
+      const hourlyStats = Array.from(hourlyMap.entries())
+        .map(([hour, count]) => ({ hour, count }))
+        .sort((a, b) => a.hour - b.hour);
+
+      // 페이지별 방문 통계
+      const pageMap = new Map<string, number>();
+      allLogs.forEach((log: VisitLog) => {
+        const page = log.page || "/";
+        pageMap.set(page, (pageMap.get(page) || 0) + 1);
+      });
+      const pageStats = Array.from(pageMap.entries())
+        .map(([page, count]) => ({ page, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 20);
+
+      // 최근 방문 로그 (50개)
+      const recentLogs = allLogs.slice(0, 50).map((log: VisitLog) => ({
+        id: log.id,
+        userEmail: log.userEmail,
+        userName: log.userName,
+        ipAddress: log.ipAddress,
+        page: log.page,
+        visitedAt: log.visitedAt,
+      }));
+
+      // 오늘 방문 통계
+      const todayStr = new Date().toISOString().split("T")[0];
+      const todayLogs = allLogs.filter((l: VisitLog) => new Date(l.visitedAt).toISOString().split("T")[0] === todayStr);
+      const todayUniqueSet = new Set<string>();
+      todayLogs.forEach((log: VisitLog) => {
+        if (log.userId) todayUniqueSet.add(`user:${log.userId}`);
+        else if (log.ipAddress) todayUniqueSet.add(`ip:${log.ipAddress}`);
+      });
+
+      return {
+        summary: {
+          totalVisits,
+          uniqueVisitors: uniqueVisitors.size,
+          todayVisits: todayLogs.length,
+          todayUniqueVisitors: todayUniqueSet.size,
+          totalUsers: userMap.size,
+          period: `${days}일`,
+        },
+        dailyStats,
+        userStats,
+        hourlyStats,
+        pageStats,
+        recentLogs,
+      };
+    };
+
+    if (process.env.VERCEL) {
+      return await executeWithClient(query);
+    }
+    return await query(db);
   }
 }
 

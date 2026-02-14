@@ -478,3 +478,19 @@ export const aiPrompts = pgTable("ai_prompts", {
 
 export type AiPrompt = typeof aiPrompts.$inferSelect;
 export type InsertAiPrompt = typeof aiPrompts.$inferInsert;
+
+// ========== Admin Dashboard - 방문자 로그 ==========
+export const visitLogs = pgTable("visit_logs", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id"),
+  userEmail: text("user_email"),
+  userName: text("user_name"),
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+  page: text("page").default("/"),            // 접속 페이지
+  sessionId: text("session_id"),              // 세션 식별자
+  visitedAt: timestamp("visited_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export type VisitLog = typeof visitLogs.$inferSelect;
+export type InsertVisitLog = typeof visitLogs.$inferInsert;

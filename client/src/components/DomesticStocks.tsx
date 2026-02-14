@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
@@ -397,6 +397,39 @@ export default function DomesticStocks() {
     }
   };
 
+  // 주식 검색 상태
+  const [stockSearchQuery, setStockSearchQuery] = useState("");
+  const [stockSearchResults, setStockSearchResults] = useState<{code: string; name: string; exchange: string; typeName: string; nationCode?: string}[]>([]);
+  const [isStockSearching, setIsStockSearching] = useState(false);
+  const stockSearchRef = useRef<ReturnType<typeof setTimeout>>();
+
+  const handleStockSearch = async (query: string) => {
+    setStockSearchQuery(query);
+    if (stockSearchRef.current) clearTimeout(stockSearchRef.current);
+    if (!query || query.length < 2) {
+      setStockSearchResults([]);
+      return;
+    }
+    stockSearchRef.current = setTimeout(async () => {
+      setIsStockSearching(true);
+      try {
+        const res = await fetch(`/api/stock/search-autocomplete?query=${encodeURIComponent(query)}`, { credentials: "include" });
+        if (res.ok) {
+          const data = await res.json();
+          // 국내주식만 필터링
+          const domestic = (data.items || []).filter((item: any) => item.nationCode === "KOR" || !item.nationCode);
+          setStockSearchResults(domestic);
+        }
+      } catch { /* ignore */ }
+      setIsStockSearching(false);
+    }, 300);
+  };
+
+  const openStockDetail = (code: string, name: string, exch: string) => {
+    const url = `/stock-detail?code=${code}&name=${encodeURIComponent(name)}&market=domestic&exchange=${exch || "KOSPI"}`;
+    window.open(url, `stock_${code}`, "width=1000,height=800,scrollbars=yes,resizable=yes");
+  };
+
   const isAnyRealtimeLoading = isCommonRealtimeLoading || isPersonalRealtimeLoading || isSharedRealtimeLoading;
 
   return (
@@ -450,6 +483,70 @@ export default function DomesticStocks() {
           )}
         </div>
       </div>
+
+      {/* 주식 검색 */}
+      <Card>
+        <CardHeader className="py-3 px-4">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Search className="h-4 w-4 text-primary" />
+            국내 주식 검색
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="px-4 pb-4">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              value={stockSearchQuery}
+              onChange={(e) => handleStockSearch(e.target.value)}
+              placeholder="종목명 또는 코드를 입력하세요 (예: 삼성전자, 005930)"
+              className="pl-9"
+            />
+            {isStockSearching && (
+              <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
+            )}
+          </div>
+          {stockSearchResults.length > 0 && (
+            <div className="mt-2 border rounded-lg overflow-hidden">
+              <div className="overflow-x-auto max-h-[300px] overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-muted/80 backdrop-blur">
+                    <tr className="border-b">
+                      <th className="text-left px-3 py-2 font-medium">종목명</th>
+                      <th className="text-left px-3 py-2 font-medium">코드</th>
+                      <th className="text-left px-3 py-2 font-medium">거래소</th>
+                      <th className="text-left px-3 py-2 font-medium hidden sm:table-cell">유형</th>
+                      <th className="text-center px-3 py-2 font-medium">상세</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stockSearchResults.map((item) => (
+                      <tr key={item.code}
+                        className="border-b hover:bg-muted/50 cursor-pointer transition-colors"
+                        onClick={() => openStockDetail(item.code, item.name, item.exchange)}>
+                        <td className="px-3 py-2 font-medium">{item.name}</td>
+                        <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{item.code}</td>
+                        <td className="px-3 py-2">
+                          <Badge variant="outline" className="text-[10px] px-1.5">{item.exchange}</Badge>
+                        </td>
+                        <td className="px-3 py-2 text-xs text-muted-foreground hidden sm:table-cell">{item.typeName || "-"}</td>
+                        <td className="text-center px-3 py-2">
+                          <Button variant="ghost" size="sm" className="h-6 text-xs gap-1"
+                            onClick={(e) => { e.stopPropagation(); openStockDetail(item.code, item.name, item.exchange); }}>
+                            <Eye className="h-3 w-3" /> 상세
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+          {stockSearchQuery.length >= 2 && !isStockSearching && stockSearchResults.length === 0 && (
+            <p className="text-center text-sm text-muted-foreground py-3">검색 결과가 없습니다.</p>
+          )}
+        </CardContent>
+      </Card>
 
       {/* 로딩 */}
       {(isCommonLoading || isPersonalLoading || isSharedLoading) && (

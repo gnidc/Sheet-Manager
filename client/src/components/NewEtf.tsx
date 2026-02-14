@@ -12,7 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import {
   Loader2, Search, Plus, Pencil, Trash2, X, ExternalLink, Save,
   TrendingUp, TrendingDown, Minus, Link as LinkIcon, FileText,
-  ChevronDown, ChevronUp, BarChart3, PieChart, RefreshCw,
+  ChevronDown, ChevronUp, BarChart3, PieChart, RefreshCw, ShoppingCart,
 } from "lucide-react";
 
 // ========== Types ==========
@@ -131,51 +131,79 @@ export default function NewEtf() {
     });
   };
 
+  // 매수 버튼 핸들러 - 선택된 ETF를 자동매매로 이동
+  const handleBuy = () => {
+    if (selectedIds.size === 0) {
+      toast({ title: "알림", description: "매수할 ETF를 선택해주세요.", variant: "destructive" });
+      return;
+    }
+    const firstId = Array.from(selectedIds)[0];
+    const etf = savedEtfs?.find(e => e.id === firstId);
+    if (etf) {
+      window.location.href = `/trading?code=${etf.etfCode}&name=${encodeURIComponent(etf.etfName)}`;
+    }
+  };
+
   return (
     <div className="space-y-4">
       {/* 상단 버튼 */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold flex items-center gap-2">
-          <FileText className="w-5 h-5 text-blue-500" />
-          {isAdmin ? "신규ETF 관리" : "ETF 리스트"}
-        </h2>
-        {isAdmin && (
-          <div className="flex gap-2">
-            <Button size="sm" onClick={() => setRegisterDialogOpen(true)}>
-              <Plus className="w-4 h-4 mr-1" />
-              신규등록
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-2">
+          <h2 className="text-lg font-bold flex items-center gap-2">
+            <FileText className="w-5 h-5 text-blue-500" />
+            {isAdmin ? "신규ETF 관리" : "ETF 리스트"}
+          </h2>
+          {selectedIds.size > 0 && (
+            <Button size="sm" variant="default" className="bg-red-500 hover:bg-red-600 text-white" onClick={handleBuy}>
+              <ShoppingCart className="w-4 h-4 mr-1" />
+              매수 ({selectedIds.size})
             </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                if (selectedIds.size === 1) {
-                  const id = Array.from(selectedIds)[0];
-                  const etf = savedEtfs?.find(e => e.id === id);
-                  if (etf) {
-                    setSelectedEtf(etf);
-                    setIsEditing(true);
-                    setDetailDialogOpen(true);
+          )}
+        </div>
+        <div className="flex gap-2">
+          {isAdmin && (
+            <>
+              <Button size="sm" onClick={() => setRegisterDialogOpen(true)}>
+                <Plus className="w-4 h-4 mr-1" />
+                신규등록
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  if (selectedIds.size === 1) {
+                    const id = Array.from(selectedIds)[0];
+                    const etf = savedEtfs?.find(e => e.id === id);
+                    if (etf) {
+                      setSelectedEtf(etf);
+                      setIsEditing(true);
+                      setDetailDialogOpen(true);
+                    }
+                  } else {
+                    toast({ title: "알림", description: "변경할 ETF 1개를 선택해주세요.", variant: "destructive" });
                   }
-                } else {
-                  toast({ title: "알림", description: "변경할 ETF 1개를 선택해주세요.", variant: "destructive" });
-                }
-              }}
-            >
-              <Pencil className="w-4 h-4 mr-1" />
-              변경등록
+                }}
+              >
+                <Pencil className="w-4 h-4 mr-1" />
+                변경등록
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={handleBulkDelete}
+                disabled={deleteMutation.isPending}
+              >
+                <Trash2 className="w-4 h-4 mr-1" />
+                삭제
+              </Button>
+            </>
+          )}
+          {selectedIds.size > 0 && (
+            <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>
+              선택해제
             </Button>
-            <Button
-              size="sm"
-              variant="destructive"
-              onClick={handleBulkDelete}
-              disabled={deleteMutation.isPending}
-            >
-              <Trash2 className="w-4 h-4 mr-1" />
-              삭제
-            </Button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* ETF 목록 */}
@@ -208,22 +236,20 @@ export default function NewEtf() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    {isAdmin && (
-                      <TableHead className="w-10">
-                        <input
-                          type="checkbox"
-                          className="rounded"
-                          checked={selectedIds.size === savedEtfs.length && savedEtfs.length > 0}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedIds(new Set(savedEtfs.map(e => e.id)));
-                            } else {
-                              setSelectedIds(new Set());
-                            }
-                          }}
-                        />
-                      </TableHead>
-                    )}
+                    <TableHead className="w-10">
+                      <input
+                        type="checkbox"
+                        className="rounded"
+                        checked={selectedIds.size === savedEtfs.length && savedEtfs.length > 0}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedIds(new Set(savedEtfs.map(e => e.id)));
+                          } else {
+                            setSelectedIds(new Set());
+                          }
+                        }}
+                      />
+                    </TableHead>
                     <TableHead>ETF코드</TableHead>
                     <TableHead>ETF명</TableHead>
                     <TableHead>카테고리</TableHead>
@@ -244,16 +270,14 @@ export default function NewEtf() {
                         className="cursor-pointer hover:bg-muted/50"
                         onClick={() => handleEtfClick(etf)}
                       >
-                        {isAdmin && (
-                          <TableCell onClick={(e) => e.stopPropagation()}>
-                            <input
-                              type="checkbox"
-                              className="rounded"
-                              checked={selectedIds.has(etf.id)}
-                              onChange={() => toggleSelect(etf.id)}
-                            />
-                          </TableCell>
-                        )}
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            className="rounded"
+                            checked={selectedIds.has(etf.id)}
+                            onChange={() => toggleSelect(etf.id)}
+                          />
+                        </TableCell>
                         <TableCell className="font-mono text-sm">{etf.etfCode}</TableCell>
                         <TableCell className="font-medium">{etf.etfName}</TableCell>
                         <TableCell className="text-sm text-muted-foreground">{etf.category || "-"}</TableCell>

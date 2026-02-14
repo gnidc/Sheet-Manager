@@ -9,6 +9,7 @@ export default function StockDetail() {
   const stockName = decodeURIComponent(params.get("name") || "");
   const market = (params.get("market") || "domestic") as "domestic" | "overseas";
   const exchange = params.get("exchange") || undefined;
+  const isEtf = params.get("type") === "etf";
 
   if (!stockCode) {
     return (
@@ -37,6 +38,7 @@ export default function StockDetail() {
           stockName={stockName}
           market={market}
           exchange={exchange}
+          isEtf={isEtf}
           onClose={() => window.close()}
         />
       </main>

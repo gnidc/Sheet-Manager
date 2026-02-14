@@ -1,4 +1,4 @@
-import { useState, useEffect, Suspense, lazy } from "react";
+import { useState, useEffect, useRef, Suspense, lazy } from "react";
 import { Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { Input } from "@/components/ui/input";
@@ -35,6 +35,8 @@ const DomesticStocks = lazy(() => import("@/components/DomesticStocks"));
 const OverseasStocks = lazy(() => import("@/components/OverseasStocks"));
 const TenBaggerStocks = lazy(() => import("@/components/TenBaggerStocks"));
 const AiAgent = lazy(() => import("@/components/AiAgent"));
+const EtfSearch = lazy(() => import("@/components/EtfSearch"));
+const AdminDashboard = lazy(() => import("@/components/AdminDashboard"));
 
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -44,6 +46,20 @@ export default function Home() {
   
   const { toast } = useToast();
   const { isAdmin, isLoggedIn } = useAuth();
+
+  // 방문 추적: 탭 전환 시 기록
+  useEffect(() => {
+    const trackVisit = async () => {
+      try {
+        await fetch("/api/visit/track", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ page: activeTab }),
+        });
+      } catch {}
+    };
+    trackVisit();
+  }, [activeTab]);
 
   return (
     <div className="min-h-screen bg-background pb-20">
@@ -102,7 +118,7 @@ export default function Home() {
               <DropdownMenuTrigger asChild>
                 <button
                     className={`flex items-center gap-2 w-full rounded-md px-3 py-2 text-sm font-medium transition-all text-left ${
-                    activeTab === "etf-components" || activeTab === "new-etf" || activeTab === "watchlist-etf" || activeTab === "satellite-etf"
+                    activeTab === "etf-components" || activeTab === "new-etf" || activeTab === "watchlist-etf" || activeTab === "satellite-etf" || activeTab === "etf-search"
                       ? "bg-background text-foreground shadow-sm"
                         : "text-muted-foreground hover:text-foreground hover:bg-background/50"
                   }`}
@@ -125,13 +141,8 @@ export default function Home() {
                   <DropdownMenuItem onClick={() => setActiveTab("satellite-etf")} className="gap-2 cursor-pointer">
                   🛰️ 관심ETF(Satellite)
                 </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => window.open("https://www.funetf.co.kr/product/etf/filter", "_blank", "noopener,noreferrer")} className="gap-2 cursor-pointer">
-                  🔍 ETF검색
-                  <ExternalLink className="w-3 h-3 ml-auto opacity-50" />
-                </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => window.open("https://www.funetf.co.kr/product/comparison/etf", "_blank", "noopener,noreferrer")} className="gap-2 cursor-pointer">
-                  ⚖️ ETF비교
-                  <ExternalLink className="w-3 h-3 ml-auto opacity-50" />
+                  <DropdownMenuItem onClick={() => setActiveTab("etf-search")} className="gap-2 cursor-pointer">
+                  🔍 ETF검색/비교/AI추천
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -284,6 +295,21 @@ export default function Home() {
                 <Star className="h-4 w-4 text-yellow-500 shrink-0" />
                 즐겨찾기
               </button>
+
+              {/* Admin Dashboard */}
+              {isAdmin && (
+              <button
+                onClick={() => setActiveTab("admin-dashboard")}
+                className={`flex items-center gap-2 w-full rounded-md px-3 py-2 text-sm font-medium transition-all text-left ${
+                  activeTab === "admin-dashboard"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-background/50"
+                }`}
+              >
+                <BarChart3 className="h-4 w-4 shrink-0 text-emerald-500" />
+                Dashboard
+              </button>
+              )}
             </nav>
           </div>
 
@@ -377,6 +403,11 @@ export default function Home() {
               <TabsTrigger value="bookmarks" className="gap-1 text-xs shrink-0">
                 <Star className="h-3.5 w-3.5 text-yellow-500" /> 즐겨찾기
             </TabsTrigger>
+              {isAdmin && (
+                <TabsTrigger value="admin-dashboard" className="gap-1 text-xs shrink-0">
+                  <BarChart3 className="h-3.5 w-3.5 text-emerald-500" /> Dashboard
+                </TabsTrigger>
+              )}
           </TabsList>
           </div>
 
@@ -388,13 +419,17 @@ export default function Home() {
           </TabsContent>
 
           <TabsContent value="etf-components">
-            <Suspense fallback={
-              <div className="flex items-center justify-center py-20">
-                <Loader2 className="w-8 h-8 animate-spin text-primary" />
-                  </div>
-            }>
-              <EtfComponents />
-            </Suspense>
+            {isLoggedIn ? (
+              <Suspense fallback={
+                <div className="flex items-center justify-center py-20">
+                  <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                </div>
+              }>
+                <EtfComponents />
+              </Suspense>
+            ) : (
+              <LoginRequiredMessage />
+            )}
           </TabsContent>
 
           <TabsContent value="new-etf">
@@ -408,22 +443,40 @@ export default function Home() {
           </TabsContent>
 
           <TabsContent value="watchlist-etf">
-            <Suspense fallback={
-              <div className="flex items-center justify-center py-20">
-                <Loader2 className="w-8 h-8 animate-spin text-primary" />
-              </div>
-            }>
-              <WatchlistEtfComp listType="core" />
-            </Suspense>
+            {isLoggedIn ? (
+              <Suspense fallback={
+                <div className="flex items-center justify-center py-20">
+                  <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                </div>
+              }>
+                <WatchlistEtfComp listType="core" />
+              </Suspense>
+            ) : (
+              <LoginRequiredMessage />
+            )}
           </TabsContent>
 
           <TabsContent value="satellite-etf">
+            {isLoggedIn ? (
+              <Suspense fallback={
+                <div className="flex items-center justify-center py-20">
+                  <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                </div>
+              }>
+                <WatchlistEtfComp listType="satellite" />
+              </Suspense>
+            ) : (
+              <LoginRequiredMessage />
+            )}
+          </TabsContent>
+
+          <TabsContent value="etf-search">
             <Suspense fallback={
               <div className="flex items-center justify-center py-20">
                 <Loader2 className="w-8 h-8 animate-spin text-primary" />
               </div>
             }>
-              <WatchlistEtfComp listType="satellite" />
+              <EtfSearch isAdmin={isAdmin} onNavigate={setActiveTab} />
             </Suspense>
           </TabsContent>
 
@@ -481,9 +534,13 @@ export default function Home() {
 
           {/* 10X (Ten Bagger) */}
           <TabsContent value="stocks-10x">
-            <Suspense fallback={<div className="flex items-center justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>}>
-              <TenBaggerStocks />
-            </Suspense>
+            {isLoggedIn ? (
+              <Suspense fallback={<div className="flex items-center justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>}>
+                <TenBaggerStocks />
+              </Suspense>
+            ) : (
+              <LoginRequiredMessage />
+            )}
           </TabsContent>
 
           {/* ETC (Commodity, Forex, Crypto, Bond) */}
@@ -536,9 +593,13 @@ export default function Home() {
           )}
 
           <TabsContent value="ai-agent">
-            <Suspense fallback={<div className="flex items-center justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>}>
-              <AiAgent isAdmin={isAdmin} onNavigate={setActiveTab} />
-            </Suspense>
+            {isLoggedIn ? (
+              <Suspense fallback={<div className="flex items-center justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>}>
+                <AiAgent isAdmin={isAdmin} onNavigate={setActiveTab} />
+              </Suspense>
+            ) : (
+              <LoginRequiredMessage />
+            )}
           </TabsContent>
 
           <TabsContent value="bookmarks">
@@ -550,10 +611,144 @@ export default function Home() {
               <BookmarksComp />
             </Suspense>
           </TabsContent>
+
+          {/* Admin Dashboard */}
+          {isAdmin && (
+          <TabsContent value="admin-dashboard">
+            <Suspense fallback={
+              <div className="flex items-center justify-center py-20">
+                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+              </div>
+            }>
+              <AdminDashboard />
+            </Suspense>
+          </TabsContent>
+          )}
           </div>
           </div>
         </Tabs>
       </main>
+    </div>
+  );
+}
+
+// ===== 로그인 필요 안내 컴포넌트 =====
+function LoginRequiredMessage() {
+  const [showLogin, setShowLogin] = useState(false);
+  const { login, googleLogin, isLoggingIn, isGoogleLoggingIn } = useAuth();
+  const { toast } = useToast();
+  const [rememberMe, setRememberMe] = useState(false);
+  const [googleReady, setGoogleReady] = useState(false);
+  const googleBtnRef = useRef<HTMLDivElement>(null);
+  const rememberMeRef = useRef(rememberMe);
+
+  useEffect(() => {
+    rememberMeRef.current = rememberMe;
+  }, [rememberMe]);
+
+  useEffect(() => {
+    if (!showLogin) return;
+    const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+    if (!GOOGLE_CLIENT_ID || !window.google) return;
+
+    const timer = setTimeout(() => {
+      try {
+        window.google?.accounts.id.initialize({
+          client_id: GOOGLE_CLIENT_ID,
+          callback: async (response: any) => {
+            try {
+              await googleLogin({ credential: response.credential, rememberMe: rememberMeRef.current });
+              setShowLogin(false);
+              toast({ title: "로그인 성공", description: "환영합니다!" });
+            } catch (err: any) {
+              toast({ title: "로그인 실패", description: err.message, variant: "destructive" });
+            }
+          },
+          auto_select: false,
+          cancel_on_tap_outside: false,
+        });
+        if (googleBtnRef.current) {
+          googleBtnRef.current.innerHTML = "";
+          window.google?.accounts.id.renderButton(googleBtnRef.current, {
+            type: "standard",
+            theme: "outline",
+            size: "large",
+            text: "signin_with",
+            width: 300,
+            logo_alignment: "left",
+          });
+          setGoogleReady(true);
+        }
+      } catch {}
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [showLogin]);
+
+  return (
+    <div className="flex flex-col items-center justify-center py-20 space-y-6">
+      <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-xl p-8 text-center max-w-md w-full shadow-sm">
+        <div className="flex justify-center mb-4">
+          <div className="bg-amber-100 dark:bg-amber-900/50 rounded-full p-3">
+            <LogIn className="w-8 h-8 text-amber-600 dark:text-amber-400" />
+          </div>
+        </div>
+        <h3 className="text-lg font-bold text-amber-800 dark:text-amber-300 mb-2">
+          로그인이 필요합니다
+        </h3>
+        <p className="text-sm text-amber-700 dark:text-amber-400 mb-6">
+          구글계정 로그인이 필요합니다.
+        </p>
+        <Button
+          onClick={() => setShowLogin(true)}
+          className="gap-2 bg-amber-600 hover:bg-amber-700 text-white"
+        >
+          <LogIn className="w-4 h-4" />
+          로그인하기
+        </Button>
+      </div>
+
+      {/* 로그인 다이얼로그 */}
+      <Dialog open={showLogin} onOpenChange={setShowLogin}>
+        <DialogContent className="sm:max-w-[380px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <LogIn className="w-5 h-5" />
+              로그인
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {import.meta.env.VITE_GOOGLE_CLIENT_ID ? (
+              <div className="flex flex-col items-center gap-3">
+                <p className="text-sm text-muted-foreground">
+                  Google 계정으로 간편 로그인
+                </p>
+                <div ref={googleBtnRef} className="flex justify-center" />
+                {!googleReady && (
+                  <p className="text-xs text-muted-foreground">Google SDK 로딩 중...</p>
+                )}
+              </div>
+            ) : (
+              <div className="text-center text-sm text-muted-foreground p-4 bg-muted/30 rounded-lg">
+                Google OAuth가 설정되지 않았습니다.
+              </div>
+            )}
+
+            {/* 로그인 유지 체크박스 */}
+            <div className="flex items-center space-x-2 justify-center">
+              <input
+                type="checkbox"
+                id="rememberMe-required"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+                className="rounded border-gray-300"
+              />
+              <label htmlFor="rememberMe-required" className="text-sm font-normal cursor-pointer select-none">
+                로그인 유지 (24시간)
+              </label>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -1061,7 +1256,7 @@ interface NoticeItem {
 function QuickLinks({ onNavigate }: { onNavigate: (tab: string) => void }) {
   const shortcuts = [
     { label: "ETF실시간", tab: "etf-components", icon: "📈" },
-    { label: "ETF검색", tab: "new-etf", icon: "🔍" },
+    { label: "ETF검색", tab: "etf-search", icon: "🔍" },
     { label: "국내증시", tab: "markets-domestic", icon: "🇰🇷" },
     { label: "해외증시", tab: "markets-global", icon: "🌍" },
     { label: "일간보고서", tab: "strategy-daily", icon: "📋" },

@@ -16,7 +16,7 @@ import {
   Loader2, TrendingUp, TrendingDown, Minus, BarChart3,
   FileText, Building2, MessageCircle, Send, Trash2, ExternalLink, Info,
   Sparkles, Copy, ZoomIn, ZoomOut, Newspaper, Key, Settings, CheckCircle,
-  Globe, Lock,
+  Globe, Lock, ShoppingCart, PieChart, ArrowUpDown, ArrowUp, ArrowDown,
 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -29,7 +29,35 @@ interface StockDetailPanelProps {
   stockName: string;
   market: "domestic" | "overseas";
   exchange?: string | null;
+  isEtf?: boolean;
   onClose: () => void;
+}
+
+// ETF 구성종목 인터페이스
+interface EtfComponentStock {
+  stockCode: string;
+  stockName: string;
+  weight: number;
+  quantity: number;
+  evalAmount: number;
+  price?: string;
+  change?: string;
+  changePercent?: string;
+  changeSign?: string;
+  volume?: string;
+  high?: string;
+  low?: string;
+  open?: string;
+}
+
+interface EtfComponentResult {
+  etfCode: string;
+  etfName: string;
+  nav?: string;
+  marketCap?: string;
+  components: EtfComponentStock[];
+  totalComponentCount: number;
+  updatedAt: string;
 }
 
 // 차트 데이터 항목 타입
@@ -50,6 +78,7 @@ export default function StockDetailPanel({
   stockName,
   market,
   exchange,
+  isEtf = false,
 }: StockDetailPanelProps) {
   const { isLoggedIn, isAdmin } = useAuth();
   const { toast } = useToast();
@@ -126,7 +155,7 @@ export default function StockDetailPanel({
     staleTime: 120000,
   });
 
-  // 실적
+  // 실적 (일반 주식만)
   const { data: financials, isLoading: isFinancialsLoading } = useQuery<any>({
     queryKey: ["stock-financials", stockCode, market],
     queryFn: async () => {
@@ -134,9 +163,62 @@ export default function StockDetailPanel({
       if (!res.ok) throw new Error("조회 실패");
       return res.json();
     },
-    enabled: activeTab === "financials",
+    enabled: activeTab === "financials" && !isEtf,
     staleTime: 300000,
   });
+
+  // ETF 구성종목 (ETF만)
+  const { data: etfComponents, isLoading: isEtfComponentsLoading, refetch: refetchEtfComponents } = useQuery<EtfComponentResult>({
+    queryKey: ["etf-components", stockCode],
+    queryFn: async () => {
+      const res = await fetch(`/api/etf/components/${stockCode}`, { credentials: "include" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "구성종목 조회 실패");
+      }
+      return res.json();
+    },
+    enabled: activeTab === "holdings" && isEtf,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // ETF 구성종목 정렬
+  const [holdingSortField, setHoldingSortField] = useState<"weight" | "changePercent" | null>(null);
+  const [holdingSortDirection, setHoldingSortDirection] = useState<"asc" | "desc">("desc");
+
+  const sortedEtfComponents = useMemo(() => {
+    if (!etfComponents?.components) return [];
+    if (!holdingSortField) return etfComponents.components;
+    return [...etfComponents.components].sort((a, b) => {
+      let valA: number, valB: number;
+      if (holdingSortField === "weight") {
+        valA = a.weight;
+        valB = b.weight;
+      } else {
+        const getSignedPct = (c: EtfComponentStock) => {
+          if (!c.changePercent) return -Infinity;
+          const pct = parseFloat(c.changePercent);
+          if (c.changeSign === "4" || c.changeSign === "5") return -pct;
+          return pct;
+        };
+        valA = getSignedPct(a);
+        valB = getSignedPct(b);
+      }
+      if (valA === -Infinity && valB === -Infinity) return 0;
+      if (valA === -Infinity) return 1;
+      if (valB === -Infinity) return -1;
+      return holdingSortDirection === "desc" ? valB - valA : valA - valB;
+    });
+  }, [etfComponents?.components, holdingSortField, holdingSortDirection]);
+
+  const toggleHoldingSort = (field: "weight" | "changePercent") => {
+    if (holdingSortField === field) {
+      setHoldingSortDirection(prev => prev === "desc" ? "asc" : "desc");
+    } else {
+      setHoldingSortField(field);
+      setHoldingSortDirection("desc");
+    }
+  };
 
   // 공시
   const { data: disclosures, isLoading: isDisclosuresLoading } = useQuery<any>({
@@ -428,6 +510,27 @@ export default function StockDetailPanel({
                 <><Sparkles className="h-3 w-3 mr-1" />AI 종합분석</>
               )}
             </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-xs h-7 px-3 bg-red-50 hover:bg-red-100 text-red-600 border-red-200 hover:border-red-300"
+              onClick={() => {
+                const tradingUrl = `/trading?code=${encodeURIComponent(stockCode)}&name=${encodeURIComponent(stockName)}&orderType=buy`;
+                // 부모 창이 있으면 부모 창에서 자동매매 페이지로 이동
+                if (window.opener) {
+                  try {
+                    window.opener.location.href = tradingUrl;
+                    window.opener.focus();
+                  } catch {
+                    window.open(tradingUrl, "_blank");
+                  }
+                } else {
+                  window.open(tradingUrl, "_blank");
+                }
+              }}
+            >
+              <ShoppingCart className="h-3 w-3 mr-1" />매수
+            </Button>
           </div>
         </div>
       </div>
@@ -440,9 +543,15 @@ export default function StockDetailPanel({
             <TabsTrigger value="chart" className="flex-1 min-w-[60px] text-xs">
               <BarChart3 className="h-3 w-3 mr-1" />차트
             </TabsTrigger>
-            <TabsTrigger value="financials" className="flex-1 min-w-[60px] text-xs">
-              <Building2 className="h-3 w-3 mr-1" />실적
-            </TabsTrigger>
+            {isEtf ? (
+              <TabsTrigger value="holdings" className="flex-1 min-w-[60px] text-xs">
+                <PieChart className="h-3 w-3 mr-1" />구성종목
+              </TabsTrigger>
+            ) : (
+              <TabsTrigger value="financials" className="flex-1 min-w-[60px] text-xs">
+                <Building2 className="h-3 w-3 mr-1" />실적
+              </TabsTrigger>
+            )}
             <TabsTrigger value="disclosures" className="flex-1 min-w-[60px] text-xs">
               <FileText className="h-3 w-3 mr-1" />{isOverseas ? "SEC" : "공시"}
             </TabsTrigger>
@@ -960,6 +1069,162 @@ export default function StockDetailPanel({
               <p className="text-sm text-muted-foreground text-center py-4">실적 데이터를 불러올 수 없습니다.</p>
             )}
           </TabsContent>
+
+          {/* ETF 구성종목 */}
+          {isEtf && (
+            <TabsContent value="holdings" className="mt-3">
+              {isEtfComponentsLoading ? (
+                <div className="flex flex-col items-center justify-center py-8 gap-2">
+                  <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                  <p className="text-xs text-muted-foreground">구성종목 및 실시간 시세를 조회하고 있습니다...</p>
+                </div>
+              ) : etfComponents ? (
+                <div className="space-y-4">
+                  {/* ETF 정보 요약 */}
+                  <div className="flex items-center justify-between flex-wrap gap-3 p-3 bg-muted/30 rounded-lg">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                        <span className="font-mono font-medium">{etfComponents.etfCode}</span>
+                        <span>구성종목 <strong>{etfComponents.totalComponentCount}</strong>개</span>
+                        {etfComponents.nav && <span>NAV: {etfComponents.nav}</span>}
+                        {etfComponents.marketCap && <span>시총: {etfComponents.marketCap}</span>}
+                      </div>
+                      <div className="flex gap-3 text-xs">
+                        <span className="text-red-500 font-medium">
+                          ▲ 상승 {etfComponents.components.filter(c => c.changeSign === "1" || c.changeSign === "2").length}
+                        </span>
+                        <span className="text-muted-foreground">
+                          ━ 보합 {etfComponents.components.filter(c => c.changeSign === "3").length}
+                        </span>
+                        <span className="text-blue-500 font-medium">
+                          ▼ 하락 {etfComponents.components.filter(c => c.changeSign === "4" || c.changeSign === "5").length}
+                        </span>
+                      </div>
+                    </div>
+                    <Button variant="outline" size="sm" onClick={() => refetchEtfComponents()} className="text-xs h-7">
+                      새로고침
+                    </Button>
+                  </div>
+
+                  {/* 비중 상위 5개 비주얼 바 */}
+                  {etfComponents.components.length > 0 && (
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium text-muted-foreground">비중 상위 종목</p>
+                      <div className="flex rounded-lg overflow-hidden h-6">
+                        {(() => {
+                          const totalWeight = etfComponents.components.reduce((s, c) => s + c.weight, 0) || 1;
+                          const top5 = etfComponents.components.slice(0, 5);
+                          const colors = ["bg-primary", "bg-blue-400", "bg-emerald-400", "bg-amber-400", "bg-purple-400"];
+                          const top5Pct = top5.reduce((s, c) => s + (c.weight / totalWeight) * 100, 0);
+                          return (
+                            <>
+                              {top5.map((comp, i) => {
+                                const widthPct = (comp.weight / totalWeight) * 100;
+                                return (
+                                  <div
+                                    key={comp.stockCode || i}
+                                    className={`${colors[i]} flex items-center justify-center text-white text-[10px] font-medium truncate px-1`}
+                                    style={{ width: `${widthPct}%`, minWidth: "40px" }}
+                                    title={`${comp.stockName} ${comp.weight.toFixed(1)}%`}
+                                  >
+                                    {comp.stockName.length > 6 ? comp.stockName.slice(0, 6) + ".." : comp.stockName}
+                                    {" "}{comp.weight.toFixed(1)}%
+                                  </div>
+                                );
+                              })}
+                              <div
+                                className="bg-muted flex items-center justify-center text-muted-foreground text-[10px] font-medium"
+                                style={{ width: `${Math.max(0, 100 - top5Pct)}%`, minWidth: "30px" }}
+                              >
+                                기타
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 구성종목 테이블 */}
+                  {sortedEtfComponents.length > 0 ? (
+                    <div className="overflow-x-auto border rounded-lg">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="bg-muted/30">
+                            <TableHead className="text-[11px] text-center w-10">#</TableHead>
+                            <TableHead className="text-[11px]">종목명</TableHead>
+                            <TableHead className="text-[11px] text-right cursor-pointer select-none" onClick={() => toggleHoldingSort("weight")}>
+                              <span className="inline-flex items-center gap-0.5">
+                                비중(%)
+                                {holdingSortField === "weight" ? (
+                                  holdingSortDirection === "desc" ? <ArrowDown className="w-3 h-3 text-primary" /> : <ArrowUp className="w-3 h-3 text-primary" />
+                                ) : (
+                                  <ArrowUpDown className="w-3 h-3 text-muted-foreground/50" />
+                                )}
+                              </span>
+                            </TableHead>
+                            <TableHead className="text-[11px] text-right">현재가</TableHead>
+                            <TableHead className="text-[11px] text-right cursor-pointer select-none" onClick={() => toggleHoldingSort("changePercent")}>
+                              <span className="inline-flex items-center gap-0.5">
+                                등락률
+                                {holdingSortField === "changePercent" ? (
+                                  holdingSortDirection === "desc" ? <ArrowDown className="w-3 h-3 text-primary" /> : <ArrowUp className="w-3 h-3 text-primary" />
+                                ) : (
+                                  <ArrowUpDown className="w-3 h-3 text-muted-foreground/50" />
+                                )}
+                              </span>
+                            </TableHead>
+                            <TableHead className="text-[11px] text-right">전일비</TableHead>
+                            <TableHead className="text-[11px] text-right hidden sm:table-cell">거래량</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {sortedEtfComponents.map((comp, idx) => {
+                            const isUp = comp.changeSign === "1" || comp.changeSign === "2";
+                            const isDown = comp.changeSign === "4" || comp.changeSign === "5";
+                            const colorClass = isUp ? "text-red-500" : isDown ? "text-blue-500" : "text-muted-foreground";
+                            const arrow = isUp ? "▲" : isDown ? "▼" : "";
+                            return (
+                              <TableRow key={comp.stockCode || idx} className="hover:bg-muted/20">
+                                <TableCell className="text-[11px] text-center text-muted-foreground">{idx + 1}</TableCell>
+                                <TableCell className="text-[11px]">
+                                  <div className="font-medium">{comp.stockName}</div>
+                                  <div className="text-[10px] text-muted-foreground">{comp.stockCode}</div>
+                                </TableCell>
+                                <TableCell className="text-[11px] text-right font-medium">
+                                  {comp.weight.toFixed(2)}%
+                                </TableCell>
+                                <TableCell className="text-[11px] text-right font-mono">
+                                  {comp.price ? Number(comp.price).toLocaleString() : "-"}
+                                </TableCell>
+                                <TableCell className={`text-[11px] text-right font-medium ${colorClass}`}>
+                                  {comp.changePercent ? `${arrow} ${comp.changePercent}%` : "-"}
+                                </TableCell>
+                                <TableCell className={`text-[11px] text-right ${colorClass}`}>
+                                  {comp.change ? `${arrow} ${Number(comp.change).toLocaleString()}` : "-"}
+                                </TableCell>
+                                <TableCell className="text-[11px] text-right text-muted-foreground hidden sm:table-cell">
+                                  {comp.volume ? Number(comp.volume).toLocaleString() : "-"}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground text-center py-4">구성종목 데이터가 없습니다.</p>
+                  )}
+
+                  <p className="text-[10px] text-muted-foreground text-right">
+                    업데이트: {etfComponents.updatedAt}
+                  </p>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground text-center py-4">구성종목 데이터를 불러올 수 없습니다.</p>
+              )}
+            </TabsContent>
+          )}
 
           {/* 공시자료 (국내: DART / 해외: SEC EDGAR) */}
           <TabsContent value="disclosures" className="mt-3">

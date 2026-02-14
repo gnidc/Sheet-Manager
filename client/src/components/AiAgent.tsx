@@ -15,7 +15,7 @@ import {
   Bot, Send, Loader2, Plus, Trash2, Pencil, Key, MessageSquare,
   Share2, Star, Copy, Check, Settings, Sparkles, ChevronDown, ChevronUp,
   AlertTriangle, ExternalLink, TrendingUp, TrendingDown, BarChart3,
-  Search, ShoppingCart, ArrowRight, Eye, Zap, Activity,
+  Search, ShoppingCart, ArrowRight, Eye, Zap, Activity, Mic, MicOff, Volume2,
 } from "lucide-react";
 
 interface AiPrompt {
@@ -128,6 +128,120 @@ export default function AiAgent({ isAdmin, onNavigate }: { isAdmin: boolean; onN
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   const [pendingConfirmAction, setPendingConfirmAction] = useState<any>(null);
   const [confirmMessage, setConfirmMessage] = useState("");
+
+  // 음성인식 상태
+  const [isListening, setIsListening] = useState(false);
+  const [speechSupported, setSpeechSupported] = useState(false);
+  const recognitionRef = useRef<any>(null);
+  const autoSendRef = useRef(false); // "오버" 감지 시 자동전송 플래그
+  const handleSendRef = useRef<() => void>(() => {});
+
+  // 음성인식 초기화
+  useEffect(() => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      setSpeechSupported(true);
+      const recognition = new SpeechRecognition();
+      recognition.lang = "ko-KR"; // 한국어
+      recognition.interimResults = true; // 중간 결과 표시
+      recognition.continuous = false; // 한 문장씩 인식
+      recognition.maxAlternatives = 1;
+
+      recognition.onresult = (event: any) => {
+        let finalTranscript = "";
+        let interimTranscript = "";
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            finalTranscript += transcript;
+          } else {
+            interimTranscript += transcript;
+          }
+        }
+        if (finalTranscript) {
+          // "오버"로 끝나면 "오버"를 제거하고 자동 전송 플래그 설정
+          const overPattern = /\s*오버\s*$/;
+          if (overPattern.test(finalTranscript)) {
+            const cleaned = finalTranscript.replace(overPattern, "").trim();
+            if (cleaned) {
+              setUserInput(prev => prev + cleaned);
+            }
+            autoSendRef.current = true;
+            // 음성인식 중지 → onend에서 자동 전송 처리
+            try { recognition.stop(); } catch (e) {}
+          } else {
+            setUserInput(prev => prev + finalTranscript);
+          }
+        } else if (interimTranscript) {
+          // 중간 결과는 별도 처리 가능 (현재는 최종 결과만 입력)
+        }
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+        // "오버" 감지로 자동전송 플래그가 설정된 경우 전송 실행
+        if (autoSendRef.current) {
+          autoSendRef.current = false;
+          // 약간의 딜레이를 두어 setUserInput이 반영된 후 전송
+          setTimeout(() => {
+            handleSendRef.current?.();
+          }, 200);
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        console.error("Speech recognition error:", event.error);
+        setIsListening(false);
+        autoSendRef.current = false;
+        if (event.error === "not-allowed") {
+          toast({
+            title: "마이크 권한 필요",
+            description: "브라우저 설정에서 마이크 권한을 허용해주세요.",
+            variant: "destructive",
+          });
+        } else if (event.error === "no-speech") {
+          toast({
+            title: "음성이 감지되지 않았습니다",
+            description: "다시 시도해주세요.",
+          });
+        }
+      };
+
+      recognitionRef.current = recognition;
+    }
+
+    return () => {
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch (e) {}
+      }
+    };
+  }, [toast]);
+
+  // 음성인식 토글
+  const toggleListening = useCallback(() => {
+    if (!recognitionRef.current) return;
+
+    if (isListening) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+    } else {
+      try {
+        recognitionRef.current.start();
+        setIsListening(true);
+      } catch (e) {
+        // 이미 시작된 경우 stop 후 재시작
+        recognitionRef.current.stop();
+        setTimeout(() => {
+          try {
+            recognitionRef.current.start();
+            setIsListening(true);
+          } catch (e2) {
+            console.error("Speech recognition start error:", e2);
+          }
+        }, 100);
+      }
+    }
+  }, [isListening]);
 
   // API 키 조회
   const { data: aiConfig, isLoading: isConfigLoading } = useQuery<UserAiConfig>({
@@ -301,6 +415,11 @@ export default function AiAgent({ isAdmin, onNavigate }: { isAdmin: boolean; onN
     chatMutation.mutate(updated);
   };
 
+  // handleSendMessage를 ref에 저장 (음성인식 콜백에서 최신 함수 참조용)
+  useEffect(() => {
+    handleSendRef.current = handleSendMessage;
+  });
+
   // 스크롤
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -441,8 +560,11 @@ export default function AiAgent({ isAdmin, onNavigate }: { isAdmin: boolean; onN
               {hasApiKey ? "🟢 API 연결됨" : "🔴 API 미연결"}
             </Badge>
           </div>
-          <p className="text-[11px] text-muted-foreground ml-7">
+          <p className="text-sm text-muted-foreground ml-7">
             💡 LLM 모델 Query뿐만 아니라, 홈페이지의 <span className="font-semibold text-purple-600 dark:text-purple-400">각종 정보검색</span>·<span className="font-semibold text-blue-600 dark:text-blue-400">메뉴실행</span>·<span className="font-semibold text-amber-600 dark:text-amber-400">주문실행</span> 기능도 수행할 수 있습니다.
+          </p>
+          <p className="text-sm text-muted-foreground mt-1">
+            🎙️ 음성인식 기능 사용시 말 끝에 <span className="font-semibold text-red-500">"오버"</span>라고 하면 저절로 입력됩니다.
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -707,9 +829,29 @@ export default function AiAgent({ isAdmin, onNavigate }: { isAdmin: boolean; onN
 
             {/* 입력 영역 */}
             <div className="border-t p-3">
+              {/* 음성인식 상태 표시 */}
+              {isListening && (
+                <div className="flex items-center gap-2 mb-2 px-2 py-1.5 bg-red-50 dark:bg-red-900/20 rounded-md border border-red-200 dark:border-red-800">
+                  <div className="relative flex h-3 w-3">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                  </div>
+                  <span className="text-xs text-red-600 dark:text-red-400 font-medium">
+                    🎙️ 음성 인식 중... 말씀해주세요 <span className="text-muted-foreground font-normal">(끝에 "오버"라고 말하면 자동 전송)</span>
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="ml-auto h-5 text-[10px] text-red-500 hover:text-red-700 px-1"
+                    onClick={toggleListening}
+                  >
+                    중지
+                  </Button>
+                </div>
+              )}
               <div className="flex gap-2">
                 <Input
-                  placeholder="질문을 입력하세요..."
+                  placeholder={isListening ? "음성을 인식하고 있습니다..." : "질문을 입력하세요..."}
                   value={userInput}
                   onChange={(e) => setUserInput(e.target.value)}
                   onKeyDown={(e) => {
@@ -719,9 +861,26 @@ export default function AiAgent({ isAdmin, onNavigate }: { isAdmin: boolean; onN
                     }
                   }}
                   disabled={isStreaming}
-                  className="flex-1"
+                  className={`flex-1 ${isListening ? "border-red-300 ring-1 ring-red-300" : ""}`}
                 />
+                {/* 음성인식 버튼 */}
+                {speechSupported && (
+                  <Button
+                    variant={isListening ? "destructive" : "outline"}
+                    onClick={toggleListening}
+                    disabled={isStreaming}
+                    className={`shrink-0 ${isListening ? "animate-pulse" : ""}`}
+                    title={isListening ? "음성인식 중지" : "음성으로 입력 (한국어)"}
+                  >
+                    {isListening ? (
+                      <MicOff className="h-4 w-4" />
+                    ) : (
+                      <Mic className="h-4 w-4" />
+                    )}
+                  </Button>
+                )}
                 <Button
+                  id="ai-agent-send-btn"
                   onClick={handleSendMessage}
                   disabled={!userInput.trim() || isStreaming}
                   className="gap-1 bg-purple-500 hover:bg-purple-600 text-white shrink-0"
@@ -733,6 +892,11 @@ export default function AiAgent({ isAdmin, onNavigate }: { isAdmin: boolean; onN
                   )}
                 </Button>
               </div>
+              {!speechSupported && (
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  ⚠️ 이 브라우저는 음성인식을 지원하지 않습니다. Chrome 또는 Edge를 사용해주세요.
+                </p>
+              )}
             </div>
           </CardContent>
         </Card>

@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Loader2,
   Search,
@@ -40,6 +41,7 @@ import {
   Copy,
   Trash2,
   Star,
+  ShoppingCart,
 } from "lucide-react";
 
 type SortField = "weight" | "changePercent" | null;
@@ -196,6 +198,9 @@ export default function EtfComponents() {
   // Core/Satellite 등락률 정렬
   const [coreSortDir, setCoreSortDir] = useState<"none" | "desc" | "asc">("none");
   const [satSortDir, setSatSortDir] = useState<"none" | "desc" | "asc">("none");
+  // Core/Satellite 체크박스 (매수용)
+  const [coreCheckedCodes, setCoreCheckedCodes] = useState<Set<string>>(new Set());
+  const [satCheckedCodes, setSatCheckedCodes] = useState<Set<string>>(new Set());
   const [chartPeriod, setChartPeriod] = useState<"day" | "week" | "month" | "year">("day");
   const [chartType, setChartType] = useState<"candle" | "area">("candle");
   // localStorage에서 이전 분석 결과 복원
@@ -528,6 +533,19 @@ export default function EtfComponents() {
     );
   }, [satelliteItemsRaw, satSortDir]);
 
+  // 관심ETF 체크 매수 핸들러
+  const handleCoreBuy = useCallback(() => {
+    const selected = watchlistItems.filter(e => coreCheckedCodes.has(e.code));
+    if (selected.length === 0) return;
+    navigate(`/trading?code=${encodeURIComponent(selected[0].code)}&name=${encodeURIComponent(selected[0].name)}`);
+  }, [coreCheckedCodes, watchlistItems, navigate]);
+
+  const handleSatBuy = useCallback(() => {
+    const selected = satelliteItems.filter(e => satCheckedCodes.has(e.code));
+    if (selected.length === 0) return;
+    navigate(`/trading?code=${encodeURIComponent(selected[0].code)}&name=${encodeURIComponent(selected[0].name)}`);
+  }, [satCheckedCodes, satelliteItems, navigate]);
+
   // 카페 전송 핸들러
   const handleCafePost = () => {
     const today = new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric" });
@@ -632,6 +650,12 @@ export default function EtfComponents() {
                 </Button>
               </div>
               <div className="flex items-center gap-2">
+                {coreCheckedCodes.size > 0 && (
+                  <Button size="sm" onClick={handleCoreBuy} className="gap-1.5 bg-red-500 hover:bg-red-600 text-white h-7 text-xs">
+                    <ShoppingCart className="w-3.5 h-3.5" />
+                    매수 ({coreCheckedCodes.size})
+                  </Button>
+                )}
                 {watchlistRealtimeData?.updatedAt && (
                   <span className="text-xs text-muted-foreground flex items-center gap-1">
                     <Clock className="w-3 h-3" />
@@ -662,6 +686,19 @@ export default function EtfComponents() {
               <Table>
                 <TableHeader>
                   <TableRow className="bg-yellow-50/70 dark:bg-yellow-950/20">
+                    <TableHead className="w-[32px] text-center px-1">
+                      <Checkbox
+                        checked={watchlistItems.length > 0 && watchlistItems.every(e => coreCheckedCodes.has(e.code))}
+                        onCheckedChange={() => {
+                          setCoreCheckedCodes(prev => {
+                            const allChecked = watchlistItems.every(e => prev.has(e.code));
+                            const newSet = new Set(prev);
+                            watchlistItems.forEach(e => { if (allChecked) newSet.delete(e.code); else newSet.add(e.code); });
+                            return newSet;
+                          });
+                        }}
+                      />
+                    </TableHead>
                     <TableHead className="w-[36px] text-center">#</TableHead>
                     <TableHead>ETF명</TableHead>
                     <TableHead className="text-right w-[90px]">현재가</TableHead>
@@ -696,6 +733,19 @@ export default function EtfComponents() {
                         }`}
                         onClick={() => handleSelectEtf(etf.code)}
                       >
+                        <TableCell className="text-center px-1" onClick={(e) => e.stopPropagation()}>
+                          <Checkbox
+                            checked={coreCheckedCodes.has(etf.code)}
+                            onCheckedChange={() => {
+                              setCoreCheckedCodes(prev => {
+                                const newSet = new Set(prev);
+                                if (newSet.has(etf.code)) newSet.delete(etf.code);
+                                else newSet.add(etf.code);
+                                return newSet;
+                              });
+                            }}
+                          />
+                        </TableCell>
                         <TableCell className="text-center font-bold text-sm">
                           <span className="text-yellow-500">
                             {index + 1}
@@ -783,6 +833,12 @@ export default function EtfComponents() {
                 </Button>
               </div>
               <div className="flex items-center gap-2">
+                {satCheckedCodes.size > 0 && (
+                  <Button size="sm" onClick={handleSatBuy} className="gap-1.5 bg-red-500 hover:bg-red-600 text-white h-7 text-xs">
+                    <ShoppingCart className="w-3.5 h-3.5" />
+                    매수 ({satCheckedCodes.size})
+                  </Button>
+                )}
                 {satelliteRealtimeData?.updatedAt && (
                   <span className="text-xs text-muted-foreground flex items-center gap-1">
                     <Clock className="w-3 h-3" />
@@ -813,6 +869,19 @@ export default function EtfComponents() {
               <Table>
                 <TableHeader>
                   <TableRow className="bg-blue-50/70 dark:bg-blue-950/20">
+                    <TableHead className="w-[32px] text-center px-1">
+                      <Checkbox
+                        checked={satelliteItems.length > 0 && satelliteItems.every(e => satCheckedCodes.has(e.code))}
+                        onCheckedChange={() => {
+                          setSatCheckedCodes(prev => {
+                            const allChecked = satelliteItems.every(e => prev.has(e.code));
+                            const newSet = new Set(prev);
+                            satelliteItems.forEach(e => { if (allChecked) newSet.delete(e.code); else newSet.add(e.code); });
+                            return newSet;
+                          });
+                        }}
+                      />
+                    </TableHead>
                     <TableHead className="w-[36px] text-center">#</TableHead>
                     <TableHead>ETF명</TableHead>
                     <TableHead className="text-right w-[90px]">현재가</TableHead>
@@ -846,6 +915,19 @@ export default function EtfComponents() {
                         }`}
                         onClick={() => handleSelectEtf(etf.code)}
                       >
+                        <TableCell className="text-center px-1" onClick={(e) => e.stopPropagation()}>
+                          <Checkbox
+                            checked={satCheckedCodes.has(etf.code)}
+                            onCheckedChange={() => {
+                              setSatCheckedCodes(prev => {
+                                const newSet = new Set(prev);
+                                if (newSet.has(etf.code)) newSet.delete(etf.code);
+                                else newSet.add(etf.code);
+                                return newSet;
+                              });
+                            }}
+                          />
+                        </TableCell>
                         <TableCell className="text-center font-bold text-sm">
                           <span className="text-blue-500">
                             {index + 1}
