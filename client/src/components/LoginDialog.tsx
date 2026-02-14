@@ -174,80 +174,72 @@ export function LoginDialog() {
       popup.location.href = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(window.location.origin)}&response_type=token&scope=openid%20email%20profile&prompt=select_account`;
     }
 
-    // 3. 팝업에서 redirect 감지 (One Tap 실패 시 OAuth 팝업 flow)
-    const checkInterval = setInterval(() => {
+    // 3. postMessage로 팝업에서 토큰 수신 (main.tsx에서 전송)
+    // 폴링 대신 postMessage를 사용하여 안정적으로 토큰을 수신
+    const handleMessage = async (event: MessageEvent) => {
+      // 동일 origin에서 온 메시지만 처리
+      if (event.origin !== window.location.origin) return;
+      if (event.data?.type !== "google-oauth-callback") return;
+      
+      const accessToken = event.data.accessToken;
+      if (!accessToken) return;
+      
+      // 리스너 제거
+      window.removeEventListener("message", handleMessage);
+      
+      // access_token으로 서버에 로그인 요청
+      setGoogleLoading(true);
       try {
-        if (popup.closed) {
-          clearInterval(checkInterval);
-          return;
-        }
-        const url = popup.location.href;
-        if (url && url.startsWith(window.location.origin)) {
-          clearInterval(checkInterval);
-          const hash = popup.location.hash;
-          const params = new URLSearchParams(hash.substring(1));
-          const accessToken = params.get("access_token");
-          popup.close();
-          
-          if (accessToken) {
-            // access_token으로 사용자 정보 가져오기
-            setGoogleLoading(true);
-            fetch(`https://www.googleapis.com/oauth2/v3/userinfo?access_token=${accessToken}`)
-              .then(res => res.json())
-              .then(async (userInfo) => {
-                const remember = rememberMeRef.current;
-                try {
-                  const res = await fetch("/api/auth/google", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ 
-                      accessToken, 
-                      userInfo,
-                      rememberMe: remember 
-                    }),
-                    credentials: "include",
-                  });
-                  if (res.ok) {
-                    setLoginOpen(false);
-                    toast({
-                      title: "로그인 성공",
-                      description: remember
-                        ? "Google 계정으로 로그인되었습니다 (24시간 유지)"
-                        : "Google 계정으로 로그인되었습니다",
-                    });
-                    const { queryClient } = await import("@/lib/queryClient");
-                    queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
-                  } else {
-                    toast({
-                      title: "로그인 실패",
-                      description: "서버 인증에 실패했습니다",
-                      variant: "destructive",
-                    });
-                  }
-                } catch {
-                  toast({
-                    title: "로그인 실패",
-                    description: "Google 인증에 실패했습니다",
-                    variant: "destructive",
-                  });
-                } finally {
-                  setGoogleLoading(false);
-                }
-              })
-              .catch(() => {
-                setGoogleLoading(false);
-                toast({
-                  title: "로그인 실패",
-                  description: "사용자 정보를 가져올 수 없습니다",
-                  variant: "destructive",
-                });
-              });
-          }
+        const userInfoRes = await fetch(
+          `https://www.googleapis.com/oauth2/v3/userinfo?access_token=${accessToken}`
+        );
+        const userInfo = await userInfoRes.json();
+        const remember = rememberMeRef.current;
+        
+        const res = await fetch("/api/auth/google", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ accessToken, userInfo, rememberMe: remember }),
+          credentials: "include",
+        });
+        
+        if (res.ok) {
+          setLoginOpen(false);
+          toast({
+            title: "로그인 성공",
+            description: remember
+              ? "Google 계정으로 로그인되었습니다 (24시간 유지)"
+              : "Google 계정으로 로그인되었습니다",
+          });
+          const { queryClient } = await import("@/lib/queryClient");
+          queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
+        } else {
+          toast({
+            title: "로그인 실패",
+            description: "서버 인증에 실패했습니다",
+            variant: "destructive",
+          });
         }
       } catch {
-        // cross-origin 에러 무시 (팝업이 google 도메인에 있을 때)
+        toast({
+          title: "로그인 실패",
+          description: "Google 인증에 실패했습니다",
+          variant: "destructive",
+        });
+      } finally {
+        setGoogleLoading(false);
       }
-    }, 500);
+    };
+    
+    window.addEventListener("message", handleMessage);
+    
+    // 팝업이 닫히면 리스너 정리
+    const cleanupInterval = setInterval(() => {
+      if (popup.closed) {
+        clearInterval(cleanupInterval);
+        window.removeEventListener("message", handleMessage);
+      }
+    }, 1000);
   }, [handleGoogleCallback, toast]);
 
   const handleAdminLogin = async (e: React.FormEvent) => {
