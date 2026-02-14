@@ -14,8 +14,9 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
-  Plus, Trash2, Loader2, RefreshCw, TrendingUp, TrendingDown, Minus, Search, Globe, Users, User, ShoppingCart,
+  Plus, Trash2, Loader2, RefreshCw, TrendingUp, TrendingDown, Minus, Search, Globe, Users, User, ShoppingCart, Eye,
 } from "lucide-react";
+// StockDetailPanel is now shown in a new window via /stock-detail route
 
 interface WatchlistStock {
   id: number;
@@ -47,6 +48,7 @@ function StockTable({
   getStockDetailUrl,
   checkedStocks,
   onToggleCheck,
+  onShowDetail,
 }: {
   stocks: WatchlistStock[];
   realtimeData: RealtimeStock[];
@@ -55,6 +57,7 @@ function StockTable({
   getStockDetailUrl: (code: string, exchange: string | null) => string;
   checkedStocks: Set<string>;
   onToggleCheck: (code: string) => void;
+  onShowDetail: (stock: WatchlistStock) => void;
 }) {
   const hasRealtime = realtimeData.length > 0;
 
@@ -115,7 +118,20 @@ function StockTable({
                         />
                       </TableCell>
                       <TableCell className="font-mono text-xs font-semibold">{stock.stockCode}</TableCell>
-                      <TableCell className="font-medium">{stock.stockName}</TableCell>
+                      <TableCell className="font-medium">
+                        <div className="flex items-center gap-1">
+                          {stock.stockName}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-5 w-5 text-primary hover:text-primary shrink-0"
+                            onClick={(e) => { e.stopPropagation(); onShowDetail(stock); }}
+                            title="상세보기"
+                          >
+                            <Eye className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </TableCell>
                       <TableCell className="text-center text-xs">
                         <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
                           stock.exchange === "NASDAQ" ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" :
@@ -456,6 +472,10 @@ export default function OverseasStocks() {
                 getStockDetailUrl={getStockDetailUrl}
                 checkedStocks={checkedStocks}
                 onToggleCheck={toggleCheck}
+                onShowDetail={(s) => {
+                  const url = `/stock-detail?code=${s.stockCode}&name=${encodeURIComponent(s.stockName)}&market=overseas&exchange=${s.exchange || "NASDAQ"}`;
+                  window.open(url, `stock_${s.stockCode}`, "width=1000,height=800,scrollbars=yes,resizable=yes");
+                }}
               />
             )}
           </CardContent>
@@ -484,6 +504,10 @@ export default function OverseasStocks() {
                 getStockDetailUrl={getStockDetailUrl}
                 checkedStocks={checkedStocks}
                 onToggleCheck={toggleCheck}
+                onShowDetail={(s) => {
+                  const url = `/stock-detail?code=${s.stockCode}&name=${encodeURIComponent(s.stockName)}&market=overseas&exchange=${s.exchange || "NASDAQ"}`;
+                  window.open(url, `stock_${s.stockCode}`, "width=1000,height=800,scrollbars=yes,resizable=yes");
+                }}
               />
             )}
           </CardContent>

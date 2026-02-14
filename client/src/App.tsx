@@ -10,6 +10,7 @@ import Home from "@/pages/Home";
 
 // Lazy-load heavy pages to reduce initial bundle size
 const Trading = lazy(() => import("@/pages/Trading"));
+const StockDetail = lazy(() => import("@/pages/StockDetail"));
 
 function PageLoader() {
   return (
@@ -27,6 +28,13 @@ function Router() {
         {() => (
           <Suspense fallback={<PageLoader />}>
             <Trading />
+          </Suspense>
+        )}
+      </Route>
+      <Route path="/stock-detail">
+        {() => (
+          <Suspense fallback={<PageLoader />}>
+            <StockDetail />
           </Suspense>
         )}
       </Route>

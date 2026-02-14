@@ -339,6 +339,51 @@ export const insertWatchlistStockSchema = createInsertSchema(watchlistStocks).om
 export type WatchlistStock = typeof watchlistStocks.$inferSelect;
 export type InsertWatchlistStock = z.infer<typeof insertWatchlistStockSchema>;
 
+// ========== 종목 코멘트 ==========
+export const stockComments = pgTable("stock_comments", {
+  id: serial("id").primaryKey(),
+  stockCode: text("stock_code").notNull(),
+  stockName: text("stock_name"),
+  market: text("market").default("domestic"), // 'domestic' | 'overseas'
+  userId: integer("user_id"),
+  userName: text("user_name"),
+  content: text("content").notNull(),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export type StockComment = typeof stockComments.$inferSelect;
+export type InsertStockComment = typeof stockComments.$inferInsert;
+
+// ========== 개선제안 및 QnA 게시판 ==========
+export const qnaPosts = pgTable("qna_posts", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id"),
+  userName: text("user_name"),
+  userEmail: text("user_email"),
+  title: text("title").notNull(),
+  content: text("content").notNull(),
+  category: text("category").default("general"), // 'improvement' | 'question' | 'general'
+  replyCount: integer("reply_count").default(0),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export type QnaPost = typeof qnaPosts.$inferSelect;
+export type InsertQnaPost = typeof qnaPosts.$inferInsert;
+
+export const qnaReplies = pgTable("qna_replies", {
+  id: serial("id").primaryKey(),
+  postId: integer("post_id").notNull(),
+  userId: integer("user_id"),
+  userName: text("user_name"),
+  userEmail: text("user_email"),
+  content: text("content").notNull(),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export type QnaReply = typeof qnaReplies.$inferSelect;
+export type InsertQnaReply = typeof qnaReplies.$inferInsert;
+
 // ========== 즐겨찾기 (북마크) ==========
 export const bookmarks = pgTable("bookmarks", {
   id: serial("id").primaryKey(),
@@ -354,3 +399,45 @@ export const insertBookmarkSchema = createInsertSchema(bookmarks).omit({ id: tru
 
 export type Bookmark = typeof bookmarks.$inferSelect;
 export type InsertBookmark = z.infer<typeof insertBookmarkSchema>;
+
+// ========== 10X (Ten Bagger) 종목 ==========
+export const tenbaggerStocks = pgTable("tenbagger_stocks", {
+  id: serial("id").primaryKey(),
+  stockCode: text("stock_code").notNull(),
+  stockName: text("stock_name").notNull(),
+  market: text("market").default("domestic"), // 'domestic' | 'overseas'
+  exchange: text("exchange"),                 // KOSPI, KOSDAQ, NYSE, NASDAQ 등
+  sector: text("sector").default("기본"),
+  memo: text("memo"),
+  targetPrice: text("target_price"),           // 목표가
+  buyPrice: text("buy_price"),                 // 매수가
+  reason: text("reason"),                      // 선정 사유
+  aiAnalysis: text("ai_analysis"),             // AI 분석 결과
+  aiAnalyzedAt: timestamp("ai_analyzed_at"),   // AI 분석 일시
+  listType: text("list_type").default("common"), // 'common' (공통관심) | 'personal' (개인관심)
+  userId: integer("user_id"),                     // 개인관심일 때 사용자 ID (null이면 공통)
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const insertTenbaggerStockSchema = createInsertSchema(tenbaggerStocks).omit({ id: true, createdAt: true });
+
+export type TenbaggerStock = typeof tenbaggerStocks.$inferSelect;
+export type InsertTenbaggerStock = z.infer<typeof insertTenbaggerStockSchema>;
+
+// ========== 종목 AI 종합분석 ==========
+export const stockAiAnalyses = pgTable("stock_ai_analyses", {
+  id: serial("id").primaryKey(),
+  stockCode: text("stock_code").notNull(),
+  stockName: text("stock_name").notNull(),
+  market: text("market").default("domestic"), // 'domestic' | 'overseas'
+  exchange: text("exchange"),
+  analysisResult: text("analysis_result").notNull(),
+  summary: text("summary"),                  // 한줄 요약
+  rating: text("rating"),                    // '강력매수' | '매수' | '중립' | '매도' | '강력매도'
+  userId: integer("user_id"),
+  userName: text("user_name"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export type StockAiAnalysis = typeof stockAiAnalyses.$inferSelect;
+export type InsertStockAiAnalysis = typeof stockAiAnalyses.$inferInsert;

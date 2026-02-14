@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { LoginDialog } from "@/components/LoginDialog";
+import { QnABoard } from "@/components/QnABoard";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -33,6 +34,7 @@ const DomesticMarket = lazy(() => import("@/components/DomesticMarket"));
 const GlobalMarket = lazy(() => import("@/components/GlobalMarket"));
 const DomesticStocks = lazy(() => import("@/components/DomesticStocks"));
 const OverseasStocks = lazy(() => import("@/components/OverseasStocks"));
+const TenBaggerStocks = lazy(() => import("@/components/TenBaggerStocks"));
 
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -60,6 +62,7 @@ export default function Home() {
             </div>
             
             <div className="flex items-center gap-3">
+              <QnABoard />
               {(isAdmin || isLoggedIn) && (
                 <Link href="/trading">
                   <Button variant="outline" className="gap-2 border-amber-300 text-amber-600 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-400 dark:hover:bg-amber-950">
@@ -191,6 +194,9 @@ export default function Home() {
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setActiveTab("stocks-overseas")} className="gap-2 cursor-pointer">
                   🌐 해외주식
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setActiveTab("stocks-10x")} className="gap-2 cursor-pointer">
+                  🚀 10X
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -332,6 +338,7 @@ export default function Home() {
                 <DropdownMenuContent align="center" className="min-w-[120px]">
                   <DropdownMenuItem onClick={() => setActiveTab("stocks-domestic")} className="gap-2 cursor-pointer text-xs">🇰🇷 국내주식</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => setActiveTab("stocks-overseas")} className="gap-2 cursor-pointer text-xs">🌐 해외주식</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setActiveTab("stocks-10x")} className="gap-2 cursor-pointer text-xs">🚀 10X</DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
               <DropdownMenu>
@@ -469,6 +476,13 @@ export default function Home() {
           <TabsContent value="stocks-overseas">
             <Suspense fallback={<div className="flex items-center justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>}>
               <OverseasStocks />
+            </Suspense>
+          </TabsContent>
+
+          {/* 10X (Ten Bagger) */}
+          <TabsContent value="stocks-10x">
+            <Suspense fallback={<div className="flex items-center justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>}>
+              <TenBaggerStocks />
             </Suspense>
           </TabsContent>
 

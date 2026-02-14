@@ -14,8 +14,9 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
-  Plus, Trash2, Loader2, RefreshCw, TrendingUp, TrendingDown, Minus, Search, Star, Users, User, ShoppingCart,
+  Plus, Trash2, Loader2, RefreshCw, TrendingUp, TrendingDown, Minus, Search, Star, Users, User, ShoppingCart, Eye,
 } from "lucide-react";
+// StockDetailPanel is now shown in a new window via /stock-detail route
 
 interface WatchlistStock {
   id: number;
@@ -48,6 +49,7 @@ function StockTable({
   onDelete,
   checkedStocks,
   onToggleCheck,
+  onShowDetail,
 }: {
   stocks: WatchlistStock[];
   realtimeData: RealtimeStock[];
@@ -55,6 +57,7 @@ function StockTable({
   onDelete: (id: number, name: string) => void;
   checkedStocks: Set<string>;
   onToggleCheck: (code: string) => void;
+  onShowDetail: (stock: WatchlistStock) => void;
 }) {
   const hasRealtime = realtimeData.length > 0;
 
@@ -117,7 +120,20 @@ function StockTable({
                         />
                       </TableCell>
                       <TableCell className="font-mono text-xs">{stock.stockCode}</TableCell>
-                      <TableCell className="font-medium text-sm">{stock.stockName}</TableCell>
+                      <TableCell className="font-medium text-sm">
+                        <div className="flex items-center gap-1">
+                          {stock.stockName}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-5 w-5 text-primary hover:text-primary shrink-0"
+                            onClick={(e) => { e.stopPropagation(); onShowDetail(stock); }}
+                            title="상세보기"
+                          >
+                            <Eye className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </TableCell>
                       <TableCell className="text-center text-[10px]">{stock.exchange || "-"}</TableCell>
                       {hasRealtime ? (
                         <>
@@ -431,6 +447,10 @@ export default function DomesticStocks() {
                 onDelete={handleDelete}
                 checkedStocks={checkedStocks}
                 onToggleCheck={toggleCheck}
+                onShowDetail={(s) => {
+                  const url = `/stock-detail?code=${s.stockCode}&name=${encodeURIComponent(s.stockName)}&market=domestic&exchange=${s.exchange || "KOSPI"}`;
+                  window.open(url, `stock_${s.stockCode}`, "width=1000,height=800,scrollbars=yes,resizable=yes");
+                }}
               />
             )}
           </CardContent>
@@ -458,6 +478,10 @@ export default function DomesticStocks() {
                 onDelete={handleDelete}
                 checkedStocks={checkedStocks}
                 onToggleCheck={toggleCheck}
+                onShowDetail={(s) => {
+                  const url = `/stock-detail?code=${s.stockCode}&name=${encodeURIComponent(s.stockName)}&market=domestic&exchange=${s.exchange || "KOSPI"}`;
+                  window.open(url, `stock_${s.stockCode}`, "width=1000,height=800,scrollbars=yes,resizable=yes");
+                }}
               />
             )}
           </CardContent>

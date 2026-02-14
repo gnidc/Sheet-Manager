@@ -51,6 +51,21 @@ import {
   type InsertGapStrategyPosition,
   type GapStrategyLog,
   type InsertGapStrategyLog,
+  stockComments,
+  type StockComment,
+  type InsertStockComment,
+  qnaPosts,
+  qnaReplies,
+  type QnaPost,
+  type InsertQnaPost,
+  type QnaReply,
+  type InsertQnaReply,
+  tenbaggerStocks,
+  type TenbaggerStock,
+  type InsertTenbaggerStock,
+  stockAiAnalyses,
+  type StockAiAnalysis,
+  type InsertStockAiAnalysis,
 } from "../shared/schema.js";
 import { eq, and, or, desc, isNull, inArray, sql } from "drizzle-orm";
 
@@ -155,6 +170,34 @@ export interface IStorage {
   // Gap Strategy Logs
   getGapLogs(strategyId: number, limit?: number): Promise<GapStrategyLog[]>;
   createGapLog(data: InsertGapStrategyLog): Promise<GapStrategyLog>;
+
+  // Stock Comments (종목 코멘트)
+  getStockComments(stockCode: string, market?: string): Promise<StockComment[]>;
+  createStockComment(data: InsertStockComment): Promise<StockComment>;
+  deleteStockComment(id: number): Promise<void>;
+
+  // QnA 게시판
+  getQnaPosts(limit?: number): Promise<QnaPost[]>;
+  getQnaPost(id: number): Promise<QnaPost | undefined>;
+  createQnaPost(data: InsertQnaPost): Promise<QnaPost>;
+  updateQnaPost(id: number, updates: Partial<InsertQnaPost>): Promise<QnaPost>;
+  deleteQnaPost(id: number): Promise<void>;
+  getQnaReplies(postId: number): Promise<QnaReply[]>;
+  createQnaReply(data: InsertQnaReply): Promise<QnaReply>;
+  deleteQnaReply(id: number): Promise<void>;
+
+  // 10X (Ten Bagger) 종목
+  getTenbaggerStocks(listType?: string, userId?: number): Promise<TenbaggerStock[]>;
+  getTenbaggerStock(id: number): Promise<TenbaggerStock | undefined>;
+  createTenbaggerStock(data: InsertTenbaggerStock): Promise<TenbaggerStock>;
+  updateTenbaggerStock(id: number, updates: Partial<InsertTenbaggerStock>): Promise<TenbaggerStock>;
+  deleteTenbaggerStock(id: number): Promise<void>;
+
+  // 종목 AI 종합분석
+  getStockAiAnalyses(stockCode?: string, market?: string): Promise<StockAiAnalysis[]>;
+  getStockAiAnalysis(id: number): Promise<StockAiAnalysis | undefined>;
+  createStockAiAnalysis(data: InsertStockAiAnalysis): Promise<StockAiAnalysis>;
+  deleteStockAiAnalysis(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1094,6 +1137,258 @@ export class DatabaseStorage implements IStorage {
       });
     }
     await db.delete(watchlistStocks).where(eq(watchlistStocks.id, id));
+  }
+
+  // ========== Stock Comments ==========
+  async getStockComments(stockCode: string, market?: string): Promise<StockComment[]> {
+    const conditions = [eq(stockComments.stockCode, stockCode)];
+    if (market) conditions.push(eq(stockComments.market, market));
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(stockComments).where(and(...conditions)).orderBy(desc(stockComments.createdAt));
+      });
+    }
+    return await db.select().from(stockComments).where(and(...conditions)).orderBy(desc(stockComments.createdAt));
+  }
+
+  async createStockComment(data: InsertStockComment): Promise<StockComment> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [created] = await db.insert(stockComments).values(data).returning();
+        return created;
+      });
+    }
+    const [created] = await db.insert(stockComments).values(data).returning();
+    return created;
+  }
+
+  async deleteStockComment(id: number): Promise<void> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        await db.delete(stockComments).where(eq(stockComments.id, id));
+      });
+    }
+    await db.delete(stockComments).where(eq(stockComments.id, id));
+  }
+
+  // ========== QnA 게시판 ==========
+  async getQnaPosts(limit = 50): Promise<QnaPost[]> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(qnaPosts).orderBy(desc(qnaPosts.createdAt)).limit(limit);
+      });
+    }
+    return await db.select().from(qnaPosts).orderBy(desc(qnaPosts.createdAt)).limit(limit);
+  }
+
+  async getQnaPost(id: number): Promise<QnaPost | undefined> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [post] = await db.select().from(qnaPosts).where(eq(qnaPosts.id, id));
+        return post;
+      });
+    }
+    const [post] = await db.select().from(qnaPosts).where(eq(qnaPosts.id, id));
+    return post;
+  }
+
+  async createQnaPost(data: InsertQnaPost): Promise<QnaPost> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [created] = await db.insert(qnaPosts).values(data).returning();
+        return created;
+      });
+    }
+    const [created] = await db.insert(qnaPosts).values(data).returning();
+    return created;
+  }
+
+  async updateQnaPost(id: number, updates: Partial<InsertQnaPost>): Promise<QnaPost> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [updated] = await db.update(qnaPosts).set({ ...updates, updatedAt: new Date() }).where(eq(qnaPosts.id, id)).returning();
+        return updated;
+      });
+    }
+    const [updated] = await db.update(qnaPosts).set({ ...updates, updatedAt: new Date() }).where(eq(qnaPosts.id, id)).returning();
+    return updated;
+  }
+
+  async deleteQnaPost(id: number): Promise<void> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        await db.delete(qnaReplies).where(eq(qnaReplies.postId, id));
+        await db.delete(qnaPosts).where(eq(qnaPosts.id, id));
+      });
+    }
+    await db.delete(qnaReplies).where(eq(qnaReplies.postId, id));
+    await db.delete(qnaPosts).where(eq(qnaPosts.id, id));
+  }
+
+  async getQnaReplies(postId: number): Promise<QnaReply[]> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(qnaReplies).where(eq(qnaReplies.postId, postId)).orderBy(qnaReplies.createdAt);
+      });
+    }
+    return await db.select().from(qnaReplies).where(eq(qnaReplies.postId, postId)).orderBy(qnaReplies.createdAt);
+  }
+
+  async createQnaReply(data: InsertQnaReply): Promise<QnaReply> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [reply] = await db.insert(qnaReplies).values(data).returning();
+        // 댓글 수 업데이트
+        await db.update(qnaPosts).set({ 
+          replyCount: sql`COALESCE(${qnaPosts.replyCount}, 0) + 1`,
+          updatedAt: new Date()
+        }).where(eq(qnaPosts.id, data.postId!));
+        return reply;
+      });
+    }
+    const [reply] = await db.insert(qnaReplies).values(data).returning();
+    await db.update(qnaPosts).set({ 
+      replyCount: sql`COALESCE(${qnaPosts.replyCount}, 0) + 1`,
+      updatedAt: new Date()
+    }).where(eq(qnaPosts.id, data.postId!));
+    return reply;
+  }
+
+  async deleteQnaReply(id: number): Promise<void> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [reply] = await db.select().from(qnaReplies).where(eq(qnaReplies.id, id));
+        if (reply) {
+          await db.delete(qnaReplies).where(eq(qnaReplies.id, id));
+          await db.update(qnaPosts).set({
+            replyCount: sql`GREATEST(COALESCE(${qnaPosts.replyCount}, 1) - 1, 0)`,
+          }).where(eq(qnaPosts.id, reply.postId));
+        }
+      });
+    }
+    const [reply] = await db.select().from(qnaReplies).where(eq(qnaReplies.id, id));
+    if (reply) {
+      await db.delete(qnaReplies).where(eq(qnaReplies.id, id));
+      await db.update(qnaPosts).set({
+        replyCount: sql`GREATEST(COALESCE(${qnaPosts.replyCount}, 1) - 1, 0)`,
+      }).where(eq(qnaPosts.id, reply.postId));
+    }
+  }
+
+  // ========== 10X (Ten Bagger) 종목 ==========
+
+  async getTenbaggerStocks(listType?: string, userId?: number): Promise<TenbaggerStock[]> {
+    const conditions: any[] = [];
+    if (listType) conditions.push(eq(tenbaggerStocks.listType, listType));
+    if (listType === "personal" && userId) conditions.push(eq(tenbaggerStocks.userId, userId));
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        if (whereClause) {
+          return await db.select().from(tenbaggerStocks).where(whereClause).orderBy(desc(tenbaggerStocks.createdAt));
+        }
+        return await db.select().from(tenbaggerStocks).orderBy(desc(tenbaggerStocks.createdAt));
+      });
+    }
+    if (whereClause) {
+      return await db.select().from(tenbaggerStocks).where(whereClause).orderBy(desc(tenbaggerStocks.createdAt));
+    }
+    return await db.select().from(tenbaggerStocks).orderBy(desc(tenbaggerStocks.createdAt));
+  }
+
+  async getTenbaggerStock(id: number): Promise<TenbaggerStock | undefined> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [stock] = await db.select().from(tenbaggerStocks).where(eq(tenbaggerStocks.id, id));
+        return stock;
+      });
+    }
+    const [stock] = await db.select().from(tenbaggerStocks).where(eq(tenbaggerStocks.id, id));
+    return stock;
+  }
+
+  async createTenbaggerStock(data: InsertTenbaggerStock): Promise<TenbaggerStock> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [stock] = await db.insert(tenbaggerStocks).values(data).returning();
+        return stock;
+      });
+    }
+    const [stock] = await db.insert(tenbaggerStocks).values(data).returning();
+    return stock;
+  }
+
+  async updateTenbaggerStock(id: number, updates: Partial<InsertTenbaggerStock>): Promise<TenbaggerStock> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [updated] = await db.update(tenbaggerStocks).set(updates).where(eq(tenbaggerStocks.id, id)).returning();
+        return updated;
+      });
+    }
+    const [updated] = await db.update(tenbaggerStocks).set(updates).where(eq(tenbaggerStocks.id, id)).returning();
+    return updated;
+  }
+
+  async deleteTenbaggerStock(id: number): Promise<void> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        await db.delete(tenbaggerStocks).where(eq(tenbaggerStocks.id, id));
+      });
+    }
+    await db.delete(tenbaggerStocks).where(eq(tenbaggerStocks.id, id));
+  }
+
+  // ========== 종목 AI 종합분석 ==========
+  async getStockAiAnalyses(stockCode?: string, market?: string): Promise<StockAiAnalysis[]> {
+    const conditions: any[] = [];
+    if (stockCode) conditions.push(eq(stockAiAnalyses.stockCode, stockCode));
+    if (market) conditions.push(eq(stockAiAnalyses.market, market));
+
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        if (conditions.length > 0) {
+          return await db.select().from(stockAiAnalyses).where(and(...conditions)).orderBy(desc(stockAiAnalyses.createdAt));
+        }
+        return await db.select().from(stockAiAnalyses).orderBy(desc(stockAiAnalyses.createdAt));
+      });
+    }
+    if (conditions.length > 0) {
+      return await db.select().from(stockAiAnalyses).where(and(...conditions)).orderBy(desc(stockAiAnalyses.createdAt));
+    }
+    return await db.select().from(stockAiAnalyses).orderBy(desc(stockAiAnalyses.createdAt));
+  }
+
+  async getStockAiAnalysis(id: number): Promise<StockAiAnalysis | undefined> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [analysis] = await db.select().from(stockAiAnalyses).where(eq(stockAiAnalyses.id, id));
+        return analysis;
+      });
+    }
+    const [analysis] = await db.select().from(stockAiAnalyses).where(eq(stockAiAnalyses.id, id));
+    return analysis;
+  }
+
+  async createStockAiAnalysis(data: InsertStockAiAnalysis): Promise<StockAiAnalysis> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [analysis] = await db.insert(stockAiAnalyses).values(data).returning();
+        return analysis;
+      });
+    }
+    const [analysis] = await db.insert(stockAiAnalyses).values(data).returning();
+    return analysis;
+  }
+
+  async deleteStockAiAnalysis(id: number): Promise<void> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        await db.delete(stockAiAnalyses).where(eq(stockAiAnalyses.id, id));
+      });
+    }
+    await db.delete(stockAiAnalyses).where(eq(stockAiAnalyses.id, id));
   }
 }
 
