@@ -8445,9 +8445,9 @@ ${etfListStr}
             const userCreds = await getUserCredentials(req);
             let result;
             if (userCreds) {
-              result = await kisApi.userGetBalance(userCreds.userId, userCreds.creds);
+              result = await kisApi.getUserAccountBalance(userCreds.userId, userCreds.creds);
             } else {
-              result = await kisApi.getBalance();
+              result = await kisApi.getAccountBalance();
             }
             return { type: "data", dataType: "balance", data: result, success: true };
           } catch (e: any) {
