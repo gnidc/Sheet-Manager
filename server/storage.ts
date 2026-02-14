@@ -747,7 +747,7 @@ export class DatabaseStorage implements IStorage {
   // ========== Satellite ETFs (관심ETF Satellite) ==========
 
   async getSatelliteEtfs(listType?: string, userId?: number): Promise<SatelliteEtf[]> {
-    let whereClause;
+    let whereClause: any;
     if (listType === "common") {
       whereClause = or(eq(satelliteEtfs.listType, "common"), isNull(satelliteEtfs.listType));
     } else if (listType === "personal" && userId != null) {
