@@ -174,20 +174,10 @@ export function LoginDialog() {
       popup.location.href = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(window.location.origin)}&response_type=token&scope=openid%20email%20profile&prompt=select_account`;
     }
 
-    // 3. postMessage로 팝업에서 토큰 수신 (main.tsx에서 전송)
-    // 폴링 대신 postMessage를 사용하여 안정적으로 토큰을 수신
-    const handleMessage = async (event: MessageEvent) => {
-      // 동일 origin에서 온 메시지만 처리
-      if (event.origin !== window.location.origin) return;
-      if (event.data?.type !== "google-oauth-callback") return;
-      
-      const accessToken = event.data.accessToken;
-      if (!accessToken) return;
-      
-      // 리스너 제거
-      window.removeEventListener("message", handleMessage);
-      
-      // access_token으로 서버에 로그인 요청
+    // 3. 팝업에서 토큰 수신 (localStorage storage 이벤트 + postMessage 백업)
+    // Google OAuth 페이지가 COOP 헤더를 설정하여 window.opener가 null이 되므로
+    // localStorage를 통한 storage 이벤트로 토큰을 수신 (다른 창에서 변경 시 발생)
+    const processAccessToken = async (accessToken: string) => {
       setGoogleLoading(true);
       try {
         const userInfoRes = await fetch(
@@ -230,14 +220,58 @@ export function LoginDialog() {
         setGoogleLoading(false);
       }
     };
-    
+
+    let handled = false;
+
+    // 방법 1: storage 이벤트 (팝업이 localStorage에 토큰 저장 시 발생)
+    const handleStorage = (event: StorageEvent) => {
+      if (handled) return;
+      if (event.key === "google-oauth-token" && event.newValue) {
+        handled = true;
+        localStorage.removeItem("google-oauth-token");
+        cleanup();
+        processAccessToken(event.newValue);
+      }
+    };
+
+    // 방법 2: postMessage (window.opener가 살아있는 경우 백업)
+    const handleMessage = (event: MessageEvent) => {
+      if (handled) return;
+      if (event.origin !== window.location.origin) return;
+      if (event.data?.type !== "google-oauth-callback") return;
+      if (!event.data.accessToken) return;
+      handled = true;
+      cleanup();
+      processAccessToken(event.data.accessToken);
+    };
+
+    const cleanup = () => {
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener("message", handleMessage);
+      clearInterval(cleanupInterval);
+    };
+
+    window.addEventListener("storage", handleStorage);
     window.addEventListener("message", handleMessage);
     
     // 팝업이 닫히면 리스너 정리
     const cleanupInterval = setInterval(() => {
       if (popup.closed) {
-        clearInterval(cleanupInterval);
-        window.removeEventListener("message", handleMessage);
+        // 팝업이 닫힌 후 잠시 대기 (storage 이벤트가 도착할 시간)
+        setTimeout(() => {
+          if (!handled) {
+            // 토큰이 localStorage에 남아있는지 한번 더 확인
+            const token = localStorage.getItem("google-oauth-token");
+            if (token) {
+              handled = true;
+              localStorage.removeItem("google-oauth-token");
+              cleanup();
+              processAccessToken(token);
+            } else {
+              cleanup();
+            }
+          }
+        }, 500);
       }
     }, 1000);
   }, [handleGoogleCallback, toast]);
