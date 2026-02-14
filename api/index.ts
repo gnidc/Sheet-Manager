@@ -20,13 +20,15 @@ const app = express();
 // registerRoutes가 httpServer를 요구하므로 생성 (실제로는 사용되지 않음)
 const httpServer = createServer(app);
 
-declare module "cookie-session" {
-  interface SessionData {
-    isAdmin?: boolean;
-    userId?: number;
-    userEmail?: string;
-    userName?: string;
-    userPicture?: string;
+declare module "express" {
+  interface Request {
+    session: {
+      isAdmin?: boolean;
+      userId?: number;
+      userEmail?: string;
+      userName?: string;
+      userPicture?: string;
+    } | null;
   }
 }
 
