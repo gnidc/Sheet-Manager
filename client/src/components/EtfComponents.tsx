@@ -805,7 +805,14 @@ export default function EtfComponents() {
                         </TableCell>
                         <TableCell className="text-right tabular-nums text-sm hidden sm:table-cell">
                           {(etf as any).dividendYield != null ? (
-                            <span className={`font-medium ${(etf as any).dividendYield > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}>
+                            <span
+                              className={`font-medium cursor-pointer hover:underline ${(etf as any).dividendYield > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}
+                              title="클릭하면 네이버 증권에서 배당 상세를 확인합니다"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                window.open(`https://stock.naver.com/domestic/stock/${etf.code}/info/dividend`, "_blank");
+                              }}
+                            >
                               {((etf as any).dividendYield as number).toFixed(2)}%
                             </span>
                           ) : (
