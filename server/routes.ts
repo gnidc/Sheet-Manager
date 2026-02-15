@@ -8571,58 +8571,62 @@ ${etfListStr}
         return res.status(400).json({ message: "authors 배열이 필요합니다" });
       }
 
-      // 3일치를 충분히 커버하기 위해 유저당 최대 30개씩 가져옴
-      const perAuthor = 30;
-      const allPosts: any[] = [];
-
       // author ID 정리 (공백, @ 제거)
       const cleanAuthors = authors.map((a: string) => a.trim().replace("@", "").toLowerCase()).filter((a: string) => a.length > 0);
 
-      await Promise.all(
-        cleanAuthors.map(async (author: string) => {
-          try {
-            const response = await axios.post(STEEM_API_URL, {
-              jsonrpc: "2.0",
-              method: "condenser_api.get_discussions_by_blog",
-              params: [{ tag: author, limit: perAuthor }],
-              id: 1,
-            }, { timeout: 15000 });
+      // 사용자 수에 따라 perAuthor 조절 (타임아웃 방지)
+      const perAuthor = cleanAuthors.length > 20 ? 10 : cleanAuthors.length > 10 ? 15 : 30;
+      const BATCH_SIZE = 10; // 동시 요청 최대 10개
+      const allPosts: any[] = [];
 
-            const rawResults = response.data?.result || [];
-            // 디버그: active_votes 확인
-            if (rawResults.length > 0) {
-              const sample = rawResults[0];
-              console.log(`[Steem] @${author}: ${rawResults.length} posts, active_votes sample: ${sample.active_votes?.length ?? 'undefined'} votes`);
+      console.log(`[Steem] Fetching feed: ${cleanAuthors.length} authors, ${perAuthor} posts each, batch=${BATCH_SIZE}`);
+
+      // 배치 처리
+      for (let i = 0; i < cleanAuthors.length; i += BATCH_SIZE) {
+        const batch = cleanAuthors.slice(i, i + BATCH_SIZE);
+        await Promise.all(
+          batch.map(async (author: string) => {
+            try {
+              const response = await axios.post(STEEM_API_URL, {
+                jsonrpc: "2.0",
+                method: "condenser_api.get_discussions_by_blog",
+                params: [{ tag: author, limit: perAuthor }],
+                id: 1,
+              }, { timeout: 10000 });
+
+              const rawResults = response.data?.result || [];
+              const posts = rawResults.map((post: any) => ({
+                author: post.author,
+                permlink: post.permlink,
+                title: post.title,
+                body: post.body?.slice(0, 300) + (post.body?.length > 300 ? "..." : ""),
+                created: post.created,
+                category: post.category,
+                tags: (() => {
+                  try {
+                    const meta = JSON.parse(post.json_metadata || "{}");
+                    return meta.tags?.slice(0, 5) || [];
+                  } catch { return []; }
+                })(),
+                net_votes: post.net_votes,
+                children: post.children,
+                pending_payout_value: post.pending_payout_value,
+                total_payout_value: post.total_payout_value,
+                curator_payout_value: post.curator_payout_value,
+                url: `https://steemit.com${post.url}`,
+                isReblog: post.author !== author,
+                // 보팅한 사용자 목록 (voter name만 전달)
+                voters: (post.active_votes || []).map((v: any) => v.voter),
+              }));
+              allPosts.push(...posts);
+            } catch (err: any) {
+              console.error(`[Steem] Failed to fetch @${author}:`, err.message);
             }
-            const posts = rawResults.map((post: any) => ({
-              author: post.author,
-              permlink: post.permlink,
-              title: post.title,
-              body: post.body?.slice(0, 300) + (post.body?.length > 300 ? "..." : ""),
-              created: post.created,
-              category: post.category,
-              tags: (() => {
-                try {
-                  const meta = JSON.parse(post.json_metadata || "{}");
-                  return meta.tags || [];
-                } catch { return []; }
-              })(),
-              net_votes: post.net_votes,
-              children: post.children,
-              pending_payout_value: post.pending_payout_value,
-              total_payout_value: post.total_payout_value,
-              curator_payout_value: post.curator_payout_value,
-              url: `https://steemit.com${post.url}`,
-              isReblog: post.author !== author,
-              // 보팅한 사용자 목록 (voter name만 전달)
-              voters: (post.active_votes || []).map((v: any) => v.voter),
-            }));
-            allPosts.push(...posts);
-          } catch (err: any) {
-            console.error(`[Steem] Failed to fetch @${author}:`, err.message);
-          }
-        })
-      );
+          })
+        );
+      }
+
+      console.log(`[Steem] Total raw posts: ${allPosts.length}`);
 
       // 최근 3일치만 필터링
       const threeDaysAgo = new Date();
@@ -8632,10 +8636,21 @@ ${etfListStr}
         return postDate >= threeDaysAgo;
       });
 
-      // 시간순 정렬 (최신글 먼저)
-      recentPosts.sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime());
+      // 중복 제거 (같은 글이 여러 사용자의 리블로그로 나올 수 있음)
+      const seen = new Set<string>();
+      const uniquePosts = recentPosts.filter((post) => {
+        const key = `${post.author}/${post.permlink}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
 
-      res.json({ posts: recentPosts, authors });
+      // 시간순 정렬 (최신글 먼저)
+      uniquePosts.sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime());
+
+      console.log(`[Steem] Recent 3 days: ${uniquePosts.length} posts`);
+
+      res.json({ posts: uniquePosts, authors: cleanAuthors });
     } catch (error: any) {
       console.error("[Steem] Feed fetch failed:", error.message);
       res.status(500).json({ message: `스팀 피드 조회 실패: ${error.message}` });

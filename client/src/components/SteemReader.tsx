@@ -58,7 +58,14 @@ declare global {
 }
 
 const STORAGE_KEY = "steem_reader_authors";
-const DEFAULT_AUTHORS = ["seraphim502"];
+const DEFAULT_AUTHORS = [
+  "seraphim502", "jungjunghoon", "skuld2000", "banguri", "prettyjoo", "yann03", "kimyg18", "epitt925",
+  "talkit", "goodhello", "soonhwan", "lucky2015", "parkname", "steem-agora", "pys", "oldstone",
+  "cjsdns", "blockstudent", "ayogom", "greentree", "blackeyedm", "futurecurrency", "libera-tor",
+  "yonggyu01", "happycoachmate", "niikii", "cancerdoctor", "newiz", "successgr", "peterchung", "jamislee",
+  "tradingideas", "khaiyoui", "rtytf2", "anpigon", "centering", "leemikyung", "luminaryhmo", "kyju",
+  "powerego", "ezen", "yoghurty",
+];
 
 interface SteemPost {
   author: string;
@@ -78,8 +85,19 @@ interface SteemPost {
   voters?: string[]; // 보팅한 사용자 목록
 }
 
+const STORAGE_VERSION_KEY = "steem_reader_authors_v";
+const CURRENT_VERSION = "2"; // 버전 변경 시 기본 목록으로 리셋
+
 function getAuthorsFromStorage(): string[] {
   try {
+    const savedVersion = localStorage.getItem(STORAGE_VERSION_KEY);
+    // 버전이 다르면 기본 목록으로 리셋
+    if (savedVersion !== CURRENT_VERSION) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_AUTHORS));
+      localStorage.setItem(STORAGE_VERSION_KEY, CURRENT_VERSION);
+      return [...DEFAULT_AUTHORS];
+    }
+
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
@@ -96,6 +114,7 @@ function getAuthorsFromStorage(): string[] {
       }
     }
   } catch {}
+  localStorage.setItem(STORAGE_VERSION_KEY, CURRENT_VERSION);
   return [...DEFAULT_AUTHORS];
 }
 
@@ -572,7 +591,7 @@ export default function SteemReader() {
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium text-muted-foreground">
           {selectedAuthorFilter === "all"
-            ? `전체 글 (${filteredPosts.length}건)`
+            ? `최근 3일 전체글 (${filteredPosts.length}건)`
             : `@${selectedAuthorFilter}의 글 (${filteredPosts.length}건)`}
         </h3>
         <Button
