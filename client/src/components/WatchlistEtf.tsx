@@ -230,7 +230,14 @@ function EtfTable({
                   {listType === "core" && (
                     <TableCell className="text-right text-xs whitespace-nowrap">
                       {md?.dividendYield != null ? (
-                        <span className={`font-medium ${md.dividendYield > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}>
+                        <span
+                          className={`font-medium cursor-pointer hover:underline ${md.dividendYield > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}
+                          title="클릭하면 네이버 증권에서 배당 상세를 확인합니다"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            window.open(`https://stock.naver.com/etf/${etf.etfCode}/dividend`, "_blank");
+                          }}
+                        >
                           {md.dividendYield.toFixed(2)}%
                         </span>
                       ) : (
