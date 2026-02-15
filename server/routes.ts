@@ -2671,29 +2671,38 @@ ${researchList}
       const ipoRes = await axios.get("https://www.38.co.kr/html/fund/index.htm?o=k", {
         headers: { "User-Agent": UA },
         timeout: 8000,
+        responseType: "arraybuffer", // EUC-KR 인코딩 처리를 위해 바이너리로 받기
       });
-      const $ = cheerio.load(ipoRes.data);
+      const iconv = await import("iconv-lite");
+      const html = iconv.default.decode(Buffer.from(ipoRes.data), "euc-kr");
+      const $ = cheerio.load(html);
 
       const ipos: any[] = [];
+      // 38.co.kr 테이블 구조: 종목명, 공모주일정, 확정공모가, 희망공모가, 청약경쟁률, 주간사, 분석
       $("table tr").each((_i, row) => {
         const tds = $(row).find("td");
-        if (tds.length < 4) return;
+        if (tds.length < 6) return; // 7열 테이블 (6 이상)
 
         const name = $(tds[0]).text().trim();
         const schedule = $(tds[1]).text().trim();
-        const price = $(tds[2]).text().trim();
-        const exchange = $(tds[3]).text().trim();
+        const confirmedPrice = $(tds[2]).text().trim();
+        const hopePrice = $(tds[3]).text().trim();
+        const competition = $(tds[4]).text().trim();
+        const underwriter = $(tds[5]).text().trim();
         const link = $(tds[0]).find("a").attr("href") || "";
 
-        if (name && name.length > 1 && ipos.length < 20) {
-          ipos.push({
-            name,
-            schedule,
-            price,
-            exchange,
-            url: link.startsWith("http") ? link : `https://www.38.co.kr${link}`,
-          });
-        }
+        // 헤더 행이나 빈 행 건너뛰기
+        if (!name || name.length < 2 || name === "종목명") return;
+        if (ipos.length >= 20) return;
+
+        ipos.push({
+          name,
+          schedule,
+          price: confirmedPrice && confirmedPrice !== "-" ? confirmedPrice : hopePrice,
+          exchange: underwriter,
+          competition: competition || "-",
+          url: link.startsWith("http") ? link : (link ? `https://www.38.co.kr${link}` : "#"),
+        });
       });
 
       res.json({ ipos, updatedAt: new Date().toLocaleString("ko-KR") });
@@ -2703,64 +2712,77 @@ ${researchList}
     }
   });
 
-  // ========== 배당 일정 (KRX 데이터 기반) ==========
+  // ========== 배당 일정 (네이버 증권 기반) ==========
   app.get("/api/markets/dividend-calendar", async (req, res) => {
     try {
-      // 최근 거래일 계산 (주말 제외)
-      const now = new Date();
-      let trdDate = new Date(now);
-      const day = trdDate.getDay();
-      if (day === 0) trdDate.setDate(trdDate.getDate() - 2); // 일→금
-      else if (day === 6) trdDate.setDate(trdDate.getDate() - 1); // 토→금
+      // 대표 고배당 종목 리스트 (KOSPI/KOSDAQ 대표 배당주)
+      const dividendCodes = [
+        // 고배당 대표주
+        "005930", "000660", "005380", "012330", "066570", "035420", "051910",
+        "006400", "003550", "105560", "096770", "086280", "032830",
+        "034020", "003490", "090430", "009150", "017670", "029780",
+        "071050", "069960", "024110", "078930", "316140", "030200",
+        "036570", "028260", "011170", "000270", "010130", "008770",
+        "010140", "004990", "000810", "001040", "003410", "039490",
+        "161390", "009540", "002790", "055550", "088350", "100220",
+        "950130", "329180", "267250", "138930", "006360", "003240", "004370",
+      ];
 
-      const trdDd = `${trdDate.getFullYear()}${String(trdDate.getMonth() + 1).padStart(2, "0")}${String(trdDate.getDate()).padStart(2, "0")}`;
+      const dividendStocks: any[] = [];
+      const batchSize = 10;
 
-      const response = await axios.post(
-        "https://data.krx.co.kr/comm/bldAttendant/getJsonData.cmd",
-        new URLSearchParams({
-          bld: "dbms/MDC/STAT/standard/MDCSTAT03901",
-          locale: "ko_KR",
-          searchType: "1",
-          mktId: "ALL",
-          trdDd: trdDd,
-        }).toString(),
-        {
-          headers: {
-            "User-Agent": UA,
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Referer": "https://data.krx.co.kr/contents/MDC/MDI/mdiLoader/index.cmd?menuId=MDC0201030104",
-          },
-          timeout: 15000,
-        }
-      );
+      for (let i = 0; i < dividendCodes.length; i += batchSize) {
+        const batch = dividendCodes.slice(i, i + batchSize);
+        await Promise.all(batch.map(async (code) => {
+          try {
+            const intRes = await axios.get(`https://m.stock.naver.com/api/stock/${code}/integration`, {
+              headers: { "User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36" },
+              timeout: 5000,
+            });
+            const data = intRes.data;
+            const infos = data?.totalInfos || [];
 
-      const rawData = response.data?.OutBlock_1 || [];
+            const getVal = (key: string) => {
+              const item = infos.find((i: any) => i.key === key);
+              return item?.value || "";
+            };
 
-      // 배당수익률 > 0인 종목만 필터링, 배당수익률 내림차순 정렬, 상위 50개
-      const dividendStocks = rawData
-        .filter((item: any) => parseFloat(item.DVD_YLD) > 0)
-        .map((item: any) => ({
-          code: item.ISU_SRT_CD,
-          name: item.ISU_ABBRV,
-          market: item.MKT_NM,
-          closePrice: item.TDD_CLSPRC?.replace(/,/g, "") || "0",
-          change: item.CMPPRVDD_PRC?.replace(/,/g, "") || "0",
-          changeRate: item.FLUC_RT || "0",
-          changeSign: item.FLUC_TP_CD || "",
-          eps: item.EPS?.replace(/,/g, "") || "-",
-          per: item.PER || "-",
-          bps: item.BPS?.replace(/,/g, "") || "-",
-          pbr: item.PBR || "-",
-          dps: item.DPS?.replace(/,/g, "") || "0", // 주당배당금
-          dividendYield: item.DVD_YLD || "0", // 배당수익률(%)
-        }))
-        .sort((a: any, b: any) => parseFloat(b.dividendYield) - parseFloat(a.dividendYield))
-        .slice(0, 50);
+            const dividendYieldStr = getVal("배당수익률");
+            const dividendYield = parseFloat(dividendYieldStr.replace(/[^0-9.]/g, "")) || 0;
+
+            // 배당수익률이 0 이상인 종목만
+            if (dividendYield > 0) {
+              const priceStr = getVal("전일");
+              const closePrice = priceStr.replace(/,/g, "");
+
+              dividendStocks.push({
+                code,
+                name: data?.stockName || code,
+                market: data?.stockEndType === "kosdaq" ? "KOSDAQ" : "KOSPI",
+                closePrice: closePrice || "0",
+                change: "0",
+                changeRate: "0",
+                eps: getVal("EPS").replace(/원|,/g, "") || "-",
+                per: getVal("PER").replace(/배/g, "") || "-",
+                bps: getVal("BPS").replace(/원|,/g, "") || "-",
+                pbr: getVal("PBR").replace(/배/g, "") || "-",
+                dps: getVal("주당배당금").replace(/원|,/g, "") || "0",
+                dividendYield: dividendYield.toFixed(2),
+              });
+            }
+          } catch (e: any) {
+            // 개별 종목 실패 무시
+          }
+        }));
+      }
+
+      // 배당수익률 내림차순 정렬
+      dividendStocks.sort((a, b) => parseFloat(b.dividendYield) - parseFloat(a.dividendYield));
 
       res.json({
         stocks: dividendStocks,
-        tradingDate: trdDd,
-        totalCount: rawData.filter((item: any) => parseFloat(item.DVD_YLD) > 0).length,
+        tradingDate: new Date().toISOString().slice(0, 10).replace(/-/g, ""),
+        totalCount: dividendStocks.length,
         updatedAt: new Date().toLocaleString("ko-KR"),
       });
     } catch (error: any) {
