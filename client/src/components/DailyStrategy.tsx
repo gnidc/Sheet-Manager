@@ -87,6 +87,65 @@ async function copyAsRichText(markdown: string): Promise<boolean> {
   }
 }
 
+// MarketReport → 텍스트 변환 (시장 보고서 복사용)
+function marketReportToText(report: MarketReport): string {
+  const lines: string[] = [];
+
+  lines.push(`📊 ${report.periodLabel} 시장 보고서`);
+  lines.push(`기간: ${report.periodRange}`);
+  lines.push(`생성: ${report.reportTime}`);
+  lines.push('');
+
+  if (report.marketSummary) {
+    lines.push(`📈 시장 요약: ${report.marketSummary}`);
+    lines.push('');
+  }
+
+  if (report.indices.length > 0) {
+    lines.push('## 주요 지수');
+    report.indices.forEach((idx) => {
+      const sign = idx.changeSign === "2" ? "▲" : idx.changeSign === "5" ? "▼" : "";
+      lines.push(`  ${idx.name}: ${idx.price} (${sign}${Math.abs(parseFloat(idx.change)).toFixed(2)}, ${parseFloat(idx.changePercent) >= 0 ? "+" : ""}${idx.changePercent}%)`);
+    });
+    lines.push('');
+  }
+
+  if (report.volumeRanking.length > 0) {
+    lines.push('## 거래량 상위 종목');
+    report.volumeRanking.forEach((item) => {
+      const sign = item.changeSign === "2" ? "▲" : item.changeSign === "5" ? "▼" : "";
+      lines.push(`  ${item.rank}. ${item.stockName}: ${parseInt(item.price).toLocaleString()}원 (${sign}${Math.abs(parseFloat(item.changePercent)).toFixed(2)}%) 거래량 ${parseInt(item.volume).toLocaleString()}`);
+    });
+    lines.push('');
+  }
+
+  if (report.investorTrends.length > 0) {
+    lines.push('## 투자자 동향');
+    report.investorTrends.forEach((t) => {
+      lines.push(`  ${t.category}: 개인 ${t.individualNetBuy} | 외국인 ${t.foreignNetBuy} | 기관 ${t.institutionNetBuy}`);
+    });
+    lines.push('');
+  }
+
+  if (report.topEtfs.length > 0) {
+    lines.push('## 주요 ETF');
+    report.topEtfs.forEach((etf, i) => {
+      lines.push(`  ${i + 1}. ${etf.name}: ${etf.price} (${etf.changeRate}%)`);
+    });
+    lines.push('');
+  }
+
+  if (report.news.length > 0) {
+    lines.push('## 주요 뉴스');
+    report.news.forEach((item, i) => {
+      lines.push(`  ${i + 1}. ${item.title}`);
+    });
+    lines.push('');
+  }
+
+  return lines.join('\n');
+}
+
 interface MarketIndex {
   name: string;
   code: string;
@@ -2146,10 +2205,33 @@ export default function DailyStrategy({ period = "daily" }: DailyStrategyProps) 
         <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <div className="flex items-center justify-between pr-8">
-              <DialogTitle className="flex items-center gap-2 text-base">
-                <BrainCircuit className="w-5 h-5 text-primary" />
-                AI 분석 보고서
-              </DialogTitle>
+              <div className="flex items-center gap-2">
+                <DialogTitle className="flex items-center gap-2 text-base">
+                  <BrainCircuit className="w-5 h-5 text-primary" />
+                  AI 분석 보고서
+                </DialogTitle>
+                {viewingAnalysis && (
+                  <div className="flex items-center gap-1">
+                    <Button variant="outline" size="sm" className="h-6 text-[11px] gap-1 px-2" onClick={() => {
+                      navigator.clipboard.writeText(viewingAnalysis.result.analysis).then(() => {
+                        toast({ title: "복사 완료", description: "텍스트가 클립보드에 복사되었습니다." });
+                      }).catch(() => {
+                        toast({ title: "복사 실패", description: "클립보드 복사에 실패했습니다.", variant: "destructive" });
+                      });
+                    }}>
+                      <Copy className="w-3 h-3" /> 복사
+                    </Button>
+                    <Button variant="outline" size="sm" className="h-6 text-[11px] gap-1 px-2 border-primary/30 text-primary hover:bg-primary/5" onClick={() => {
+                      copyAsRichText(viewingAnalysis.result.analysis).then((ok) => {
+                        if (ok) toast({ title: "서식 복사 완료", description: "서식이 포함된 텍스트가 복사되었습니다. 네이버 카페 등에 붙여넣기 하세요." });
+                        else toast({ title: "서식 복사 실패", description: "브라우저가 서식 복사를 지원하지 않습니다.", variant: "destructive" });
+                      });
+                    }}>
+                      <ClipboardPaste className="w-3 h-3" /> 서식복사
+                    </Button>
+                  </div>
+                )}
+              </div>
               <FontSizeControl
                 fontSize={analysisFontSize}
                 onIncrease={() => setAnalysisFontSize((s) => Math.min(s + 1, 24))}
@@ -2260,10 +2342,35 @@ export default function DailyStrategy({ period = "daily" }: DailyStrategyProps) 
         <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <div className="flex items-center justify-between pr-8">
-              <DialogTitle className="flex items-center gap-2 text-base">
-                <FileText className="w-5 h-5 text-primary" />
-                {viewingReport?.title || "보고서"}
-              </DialogTitle>
+              <div className="flex items-center gap-2">
+                <DialogTitle className="flex items-center gap-2 text-base">
+                  <FileText className="w-5 h-5 text-primary" />
+                  {viewingReport?.title || "보고서"}
+                </DialogTitle>
+                {viewingReport && (
+                  <div className="flex items-center gap-1">
+                    <Button variant="outline" size="sm" className="h-6 text-[11px] gap-1 px-2" onClick={() => {
+                      const text = marketReportToText(viewingReport.report);
+                      navigator.clipboard.writeText(text).then(() => {
+                        toast({ title: "복사 완료", description: "보고서 텍스트가 클립보드에 복사되었습니다." });
+                      }).catch(() => {
+                        toast({ title: "복사 실패", description: "클립보드 복사에 실패했습니다.", variant: "destructive" });
+                      });
+                    }}>
+                      <Copy className="w-3 h-3" /> 복사
+                    </Button>
+                    <Button variant="outline" size="sm" className="h-6 text-[11px] gap-1 px-2 border-primary/30 text-primary hover:bg-primary/5" onClick={() => {
+                      const text = marketReportToText(viewingReport.report);
+                      copyAsRichText(text).then((ok) => {
+                        if (ok) toast({ title: "서식 복사 완료", description: "서식이 포함된 텍스트가 복사되었습니다. 네이버 카페 등에 붙여넣기 하세요." });
+                        else toast({ title: "서식 복사 실패", description: "브라우저가 서식 복사를 지원하지 않습니다.", variant: "destructive" });
+                      });
+                    }}>
+                      <ClipboardPaste className="w-3 h-3" /> 서식복사
+                    </Button>
+                  </div>
+                )}
+              </div>
               <FontSizeControl
                 fontSize={reportFontSize}
                 onIncrease={() => setReportFontSize((s) => Math.min(s + 1, 24))}
