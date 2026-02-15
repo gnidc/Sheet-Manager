@@ -119,59 +119,30 @@ export function LoginDialog() {
   const triggerGoogleLogin = useCallback(() => {
     if (!GOOGLE_CLIENT_ID) return;
 
+    // OAuth 콜백 URL: 전용 경량 HTML 페이지 (SPA 미로드)
+    const callbackUrl = `${window.location.origin}/oauth-callback.html`;
+    const oauthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(callbackUrl)}&response_type=token&scope=openid%20email%20profile&prompt=select_account`;
+
     // 팝업 차단 방지: 사용자 클릭 이벤트 내에서 즉시 팝업을 열어야 함
-    // prompt() 콜백 내에서 window.open()을 호출하면 브라우저가 팝업을 차단함
     const width = 500;
     const height = 600;
     const left = window.screenX + (window.outerWidth - width) / 2;
     const top = window.screenY + (window.outerHeight - height) / 2;
     
-    // 1. 먼저 빈 팝업을 즉시 열고 (사용자 클릭 컨텍스트에서)
+    // 바로 Google OAuth URL로 팝업 열기 (빈 페이지 거치지 않음)
     const popup = window.open(
-      "about:blank",
+      oauthUrl,
       "google-login",
       `width=${width},height=${height},left=${left},top=${top}`
     );
     
     if (!popup) {
-      // 팝업이 차단된 경우
       toast({
         title: "팝업 차단됨",
-        description: "팝업 차단을 해제해주세요.",
+        description: "브라우저의 팝업 차단을 해제해주세요.",
         variant: "destructive",
       });
       return;
-    }
-
-    // 2. Google One Tap 시도 (SDK가 로드된 경우만)
-    if (window.google) {
-      window.google.accounts.id.initialize({
-        client_id: GOOGLE_CLIENT_ID,
-        callback: (response: any) => {
-          // One Tap 성공 시 팝업 닫고 credential 사용
-          popup.close();
-          handleGoogleCallback(response);
-        },
-        auto_select: false,
-        cancel_on_tap_outside: false,
-      });
-
-      // prompt 시도 - 성공하면 One Tap UI 표시, 실패하면 팝업으로 진행
-      let oneTapShown = false;
-      window.google.accounts.id.prompt((notification: any) => {
-        if (!notification.isNotDisplayed() && !notification.isSkippedMoment()) {
-          oneTapShown = true;
-          // One Tap이 표시되면 팝업은 닫기
-          popup.close();
-        }
-        if (!oneTapShown && (notification.isNotDisplayed() || notification.isSkippedMoment())) {
-          // One Tap 실패 → 이미 열린 팝업을 Google OAuth URL로 리다이렉트
-          popup.location.href = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(window.location.origin)}&response_type=token&scope=openid%20email%20profile&prompt=select_account`;
-        }
-      });
-    } else {
-      // Google SDK 미로드 시 바로 OAuth 팝업으로 진행
-      popup.location.href = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(window.location.origin)}&response_type=token&scope=openid%20email%20profile&prompt=select_account`;
     }
 
     // 3. 팝업에서 토큰 수신 (localStorage storage 이벤트 + postMessage 백업)

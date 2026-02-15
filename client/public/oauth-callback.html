@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>로그인 처리 중...</title>
+  <style>
+    body { display:flex; align-items:center; justify-content:center; height:100vh; margin:0; font-family:sans-serif; background:#f5f5f5; }
+    .msg { text-align:center; color:#333; }
+  </style>
+</head>
+<body>
+  <div class="msg">
+    <p>로그인 처리 중...</p>
+    <p id="fallback" style="display:none; font-size:12px; color:#999;">이 창을 닫아주세요.</p>
+  </div>
+  <script>
+    // Google OAuth 리다이렉트 콜백 전용 페이지
+    // SPA를 로드하지 않고 토큰만 부모 창에 전달
+    (function() {
+      var hash = window.location.hash;
+      if (hash && hash.includes('access_token')) {
+        var params = new URLSearchParams(hash.substring(1));
+        var token = params.get('access_token');
+        if (token) {
+          // localStorage로 부모 창에 전달 (storage 이벤트 발생)
+          try { localStorage.setItem('google-oauth-token', token); } catch(e) {}
+          // postMessage도 시도 (백업)
+          try { if (window.opener) window.opener.postMessage({ type: 'google-oauth-callback', accessToken: token }, window.location.origin); } catch(e) {}
+          // 팝업 닫기
+          window.close();
+          // window.close() 실패 시 안내
+          document.getElementById('fallback').style.display = 'block';
+        }
+      } else {
+        document.querySelector('.msg p').textContent = '인증 정보를 찾을 수 없습니다.';
+        document.getElementById('fallback').style.display = 'block';
+      }
+    })();
+  </script>
+</body>
+</html>
+
