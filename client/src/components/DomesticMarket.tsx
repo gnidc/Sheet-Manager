@@ -288,8 +288,8 @@ export default function DomesticMarket() {
   return (
     <div className="space-y-4">
       {/* ===== 외부 링크 바로가기 ===== */}
-      <Card>
-        <CardContent className="p-3">
+      <div>
+        <div className="p-3">
           <div className="flex flex-wrap gap-2 items-center">
             <span className="text-xs font-medium text-muted-foreground mr-1">📌 바로가기</span>
             {[
@@ -312,8 +312,8 @@ export default function DomesticMarket() {
               </Button>
             ))}
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* ===== 1. 시장 지수 카드 ===== */}
       <div className="flex items-center justify-between">
