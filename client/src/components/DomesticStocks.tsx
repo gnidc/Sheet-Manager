@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import {
-  Plus, Trash2, Loader2, RefreshCw, TrendingUp, TrendingDown, Minus, Search, Star, Users, User, ShoppingCart, Eye, Share2,
+  Plus, Trash2, Loader2, RefreshCw, TrendingUp, TrendingDown, Minus, Search, Star, Users, User, ShoppingCart, ExternalLink, Share2,
 } from "lucide-react";
 // StockDetailPanel is now shown in a new window via /stock-detail route
 
@@ -132,13 +132,13 @@ function StockTable({
                             </span>
                           )}
                           <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-5 w-5 text-primary hover:text-primary shrink-0"
+                            variant="outline"
+                            size="sm"
+                            className="h-5 px-1.5 text-[10px] text-primary hover:text-primary shrink-0"
                             onClick={(e) => { e.stopPropagation(); onShowDetail(stock); }}
-                            title="상세보기"
                           >
-                            <Eye className="h-3.5 w-3.5" />
+                            <ExternalLink className="h-3 w-3 mr-0.5" />
+                            상세
                           </Button>
                         </div>
                       </TableCell>
