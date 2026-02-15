@@ -990,7 +990,11 @@ function PublicCafeView() {
     staleTime: 60 * 1000,
   });
 
-  const latestArticles = data?.latestArticles || [];
+  // 일반계정: 최근 3일치 글만 표시
+  const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000;
+  const latestArticles = (data?.latestArticles || []).filter(
+    (a) => a.writeDateTimestamp >= threeDaysAgo
+  );
   const noticeArticles = data?.noticeArticles || [];
   const searchArticles = searchData?.articles || [];
   const searchTotalArticles = searchData?.totalArticles || 0;
@@ -1177,8 +1181,7 @@ function PublicCafeView() {
             <div className="px-4 pt-3 pb-1">
               <h4 className="text-sm font-semibold flex items-center gap-1.5 mb-2">
                 <FileText className="w-4 h-4 text-primary" />
-                최신글
-                <span className="text-xs text-muted-foreground font-normal">({latestArticles.length})</span>
+                최신글 <span className="text-xs text-muted-foreground font-normal">(최근 3일, {latestArticles.length}건)</span>
               </h4>
             </div>
             {latestArticles.length === 0 ? (
