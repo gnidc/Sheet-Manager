@@ -148,6 +148,110 @@ const PERIOD_LABELS: Record<string, string> = {
   daily: "일간", weekly: "주간", monthly: "월간", yearly: "연간",
 };
 
+// 시장 보고서 JSON 데이터를 마크다운 텍스트로 변환
+function formatReportToMarkdown(report: any): string {
+  if (typeof report === "string") return report;
+  if (report.fullReport) return report.fullReport;
+
+  // 텍스트 형태 필드 우선
+  if (report.market || report.analysis || report.strategy || report.summary) {
+    const sections: string[] = [];
+    if (report.market) sections.push(`## 📈 시장 동향\n${report.market}`);
+    if (report.analysis) sections.push(`## 🔍 분석\n${report.analysis}`);
+    if (report.strategy) sections.push(`## 💡 전략\n${report.strategy}`);
+    if (report.summary) sections.push(`## 📋 요약\n${report.summary}`);
+    if (sections.length > 0) return sections.join('\n\n');
+  }
+
+  // 구조화된 시장 데이터를 마크다운으로 변환
+  const parts: string[] = [];
+
+  // 기간 정보
+  if (report.periodRange) {
+    parts.push(`**📅 ${report.periodRange}**`);
+    parts.push('');
+  }
+
+  // 시장 요약
+  if (report.marketSummary) {
+    parts.push(`## 📊 시장 요약`);
+    parts.push('');
+    parts.push(report.marketSummary);
+    parts.push('');
+  }
+
+  // 주요 지수
+  if (report.indices && Array.isArray(report.indices) && report.indices.length > 0) {
+    parts.push(`## 📈 주요 지수`);
+    parts.push('');
+    parts.push('| 지수 | 현재가 | 등락 | 등락률 |');
+    parts.push('|------|--------|------|--------|');
+    for (const idx of report.indices) {
+      const sign = parseFloat(idx.change) >= 0 ? "▲" : "▼";
+      const changeStr = parseFloat(idx.change) >= 0 ? `+${idx.change}` : idx.change;
+      parts.push(`| ${idx.name} | ${idx.price} | ${sign} ${Math.abs(parseFloat(idx.change))} | ${idx.changePercent}% |`);
+    }
+    parts.push('');
+  }
+
+  // 거래량 상위
+  if (report.volumeRanking && Array.isArray(report.volumeRanking) && report.volumeRanking.length > 0) {
+    parts.push(`## 🔥 거래량 상위 종목`);
+    parts.push('');
+    parts.push('| 순위 | 종목명 | 현재가 | 등락률 | 거래량 |');
+    parts.push('|------|--------|--------|--------|--------|');
+    report.volumeRanking.forEach((item: any, i: number) => {
+      parts.push(`| ${i + 1} | ${item.name || item.stockName || '-'} | ${item.price || item.currentPrice || '-'} | ${item.changePercent || item.change || '-'}% | ${item.volume || '-'} |`);
+    });
+    parts.push('');
+  }
+
+  // 투자자 동향
+  if (report.investorTrends && Array.isArray(report.investorTrends) && report.investorTrends.length > 0) {
+    parts.push(`## 👥 투자자 동향`);
+    parts.push('');
+    parts.push('| 투자자 | 매수 | 매도 | 순매수 |');
+    parts.push('|--------|------|------|--------|');
+    for (const inv of report.investorTrends) {
+      parts.push(`| ${inv.investor || inv.name || '-'} | ${inv.buy || '-'} | ${inv.sell || '-'} | ${inv.net || '-'} |`);
+    }
+    parts.push('');
+  }
+
+  // 상승 ETF
+  if (report.topEtfs && Array.isArray(report.topEtfs) && report.topEtfs.length > 0) {
+    parts.push(`## 🚀 주요 ETF`);
+    parts.push('');
+    parts.push('| ETF명 | 현재가 | 등락률 |');
+    parts.push('|-------|--------|--------|');
+    for (const etf of report.topEtfs) {
+      parts.push(`| ${etf.name || etf.etfName || '-'} | ${etf.price || etf.currentPrice || '-'} | ${etf.changePercent || etf.change || '-'}% |`);
+    }
+    parts.push('');
+  }
+
+  // 뉴스
+  if (report.news && Array.isArray(report.news) && report.news.length > 0) {
+    parts.push(`## 📰 주요 뉴스`);
+    parts.push('');
+    for (const n of report.news) {
+      const title = n.title || n.headline || '';
+      const link = n.link || n.url || '';
+      if (title) {
+        parts.push(link ? `- [${title}](${link})` : `- ${title}`);
+      }
+    }
+    parts.push('');
+  }
+
+  // 아무 데이터도 포맷팅되지 않았다면, 알려진 메타 필드를 제외한 나머지를 표시
+  if (parts.length === 0) {
+    return JSON.stringify(report, null, 2);
+  }
+
+  return parts.join('\n');
+}
+
 // DB에서 최신 공통 일일보고서/AI분석을 비동기로 가져오기
 async function fetchLatestReportFromDB(): Promise<{ text: string; periodLabel: string } | null> {
   try {
@@ -195,21 +299,7 @@ async function fetchLatestReportFromDB(): Promise<{ text: string; periodLabel: s
           const reportContent = newest.report;
           if (reportContent) {
             const pLabel = PERIOD_LABELS[p] || p;
-            // report 객체를 마크다운으로 변환
-            let body = "";
-            if (typeof reportContent === "string") {
-              body = reportContent;
-            } else if (reportContent.fullReport) {
-              body = reportContent.fullReport;
-            } else {
-              // 섹션들을 합쳐서 표시
-              const sections: string[] = [];
-              if (reportContent.market) sections.push(`## 시장 동향\n${reportContent.market}`);
-              if (reportContent.analysis) sections.push(`## 분석\n${reportContent.analysis}`);
-              if (reportContent.strategy) sections.push(`## 전략\n${reportContent.strategy}`);
-              if (reportContent.summary) sections.push(`## 요약\n${reportContent.summary}`);
-              body = sections.join('\n\n') || JSON.stringify(reportContent, null, 2);
-            }
+            const body = formatReportToMarkdown(reportContent);
 
             const lines: string[] = [];
             lines.push(`# Comment`);
@@ -221,7 +311,7 @@ async function fetchLatestReportFromDB(): Promise<{ text: string; periodLabel: s
             lines.push(body);
             lines.push('');
             lines.push('---');
-            lines.push('*이 보고서는 AI가 자동 수집 데이터를 기반으로 생성한 내용입니다.*');
+            lines.push('*이 보고서는 자동 수집된 시장 데이터를 기반으로 생성한 보고서입니다.*');
             return { text: lines.join('\n'), periodLabel: pLabel };
           }
         }
