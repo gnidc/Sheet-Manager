@@ -2575,6 +2575,134 @@ ${researchList}
     }
   });
 
+  // ========== 경제 캘린더 (Investing.com 기반) ==========
+  app.get("/api/markets/economic-calendar", async (req, res) => {
+    try {
+      const days = parseInt(req.query.days as string) || 14;
+      const now = new Date();
+      const dateFrom = now.toISOString().split("T")[0]; // YYYY-MM-DD
+      const dateTo = new Date(now.getTime() + days * 86400000).toISOString().split("T")[0];
+
+      // 국가 코드: 11=한국, 72=미국, 5=일본, 35=중국, 4=영국, 34=독일, 22=EU, 17=프랑스
+      const calRes = await axios.post(
+        "https://kr.investing.com/economic-calendar/Service/getCalendarFilteredData",
+        `country%5B%5D=11&country%5B%5D=72&country%5B%5D=5&country%5B%5D=35&country%5B%5D=4&country%5B%5D=34&country%5B%5D=22&dateFrom=${dateFrom}&dateTo=${dateTo}&timeZone=88&timeFilter=timeRemain&currentTab=custom&limit_from=0`,
+        {
+          headers: {
+            "User-Agent": UA,
+            "X-Requested-With": "XMLHttpRequest",
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          timeout: 10000,
+        }
+      );
+
+      const html = calRes.data?.data || "";
+      const events: any[] = [];
+      let currentDate = "";
+
+      // HTML 파싱
+      const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/g;
+      let match;
+      while ((match = rowRegex.exec(html)) !== null) {
+        const row = match[1];
+
+        // 날짜 헤더
+        const dayMatch = row.match(/theDay[^>]*>(.*?)</);
+        if (dayMatch) {
+          currentDate = dayMatch[1].trim();
+          continue;
+        }
+
+        // 이벤트 행
+        const timeMatch = row.match(/first left[^>]*>(.*?)</);
+        const countryMatch = row.match(/title="(.*?)"/);
+        const eventMatch = row.match(/event"[^>]*>(.*?)</);
+
+        const time = timeMatch ? timeMatch[1].trim() : "";
+        const country = countryMatch ? countryMatch[1].trim() : "";
+        let eventName = eventMatch ? eventMatch[1].trim() : "";
+
+        // HTML entities 디코딩
+        eventName = eventName.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&middot;/g, "·");
+
+        // 중요도 (★ 개수)
+        const importance = (row.match(/grayFullBullishIcon/g) || []).length;
+
+        // 실제값, 예상값, 이전값
+        const tdValues = [...row.matchAll(/<td[^>]*class="[^"]*bold[^"]*"[^>]*>(.*?)<\/td>/g)].map(m => m[1].replace(/<[^>]+>/g, "").trim());
+
+        if (eventName && eventName.length > 2 && !eventName.includes("클릭하세요")) {
+          events.push({
+            date: currentDate,
+            time,
+            country,
+            event: eventName,
+            importance, // 0~3
+            actual: tdValues[0] || "",
+            forecast: tdValues[1] || "",
+            previous: tdValues[2] || "",
+          });
+        }
+      }
+
+      // 날짜별 그룹화
+      const grouped: Record<string, any[]> = {};
+      for (const ev of events) {
+        if (!grouped[ev.date]) grouped[ev.date] = [];
+        grouped[ev.date].push(ev);
+      }
+
+      res.json({
+        events: grouped,
+        totalEvents: events.length,
+        dateRange: { from: dateFrom, to: dateTo },
+        updatedAt: new Date().toLocaleString("ko-KR"),
+      });
+    } catch (error: any) {
+      console.error("[EconomicCalendar] Error:", error.message);
+      res.status(500).json({ message: "경제 캘린더 조회 실패" });
+    }
+  });
+
+  // ========== IPO 일정 (38.co.kr 기반) ==========
+  app.get("/api/markets/ipo-schedule", async (req, res) => {
+    try {
+      const ipoRes = await axios.get("https://www.38.co.kr/html/fund/index.htm?o=k", {
+        headers: { "User-Agent": UA },
+        timeout: 8000,
+      });
+      const $ = cheerio.load(ipoRes.data);
+
+      const ipos: any[] = [];
+      $("table tr").each((_i, row) => {
+        const tds = $(row).find("td");
+        if (tds.length < 4) return;
+
+        const name = $(tds[0]).text().trim();
+        const schedule = $(tds[1]).text().trim();
+        const price = $(tds[2]).text().trim();
+        const exchange = $(tds[3]).text().trim();
+        const link = $(tds[0]).find("a").attr("href") || "";
+
+        if (name && name.length > 1 && ipos.length < 20) {
+          ipos.push({
+            name,
+            schedule,
+            price,
+            exchange,
+            url: link.startsWith("http") ? link : `https://www.38.co.kr${link}`,
+          });
+        }
+      });
+
+      res.json({ ipos, updatedAt: new Date().toLocaleString("ko-KR") });
+    } catch (error: any) {
+      console.error("[IPO Schedule] Error:", error.message);
+      res.status(500).json({ message: "IPO 일정 조회 실패" });
+    }
+  });
+
   // ========== ETC Markets (채권·환율·크립토·원자재) ==========
 
   // --- 1) 채권/금리 ---
