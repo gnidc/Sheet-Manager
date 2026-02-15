@@ -346,17 +346,30 @@ export default function GlobalMarket() {
                       <TableRow key={stock.code || i} className="hover:bg-muted/30">
                         <TableCell className="text-xs text-muted-foreground font-mono">{i + 1}</TableCell>
                         <TableCell>
-                          <a
-                            href={stock.code ? `https://stock.naver.com/worldstock/stock/${stock.code}.O/price` : "#"}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="hover:text-primary hover:underline"
-                          >
-                            <div className="text-sm font-medium">{stock.name}</div>
-                            {stock.nameEn && stock.nameEn !== stock.name && (
-                              <div className="text-[10px] text-muted-foreground">{stock.nameEn}</div>
-                            )}
-                          </a>
+                          <div className="flex items-center gap-1.5">
+                            <a
+                              href={stock.code ? `https://stock.naver.com/worldstock/stock/${stock.code}.O/price` : "#"}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="hover:text-primary hover:underline"
+                            >
+                              <div className="text-sm font-medium">{stock.name}</div>
+                              {stock.nameEn && stock.nameEn !== stock.name && (
+                                <div className="text-[10px] text-muted-foreground">{stock.nameEn}</div>
+                              )}
+                            </a>
+                            <button
+                              className="inline-flex items-center px-1 py-0 text-[9px] text-red-500 hover:text-red-700 border border-red-300 hover:border-red-500 rounded shrink-0 leading-tight"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const url = `/stock-detail?code=${stock.code}&name=${encodeURIComponent(stock.name)}&market=overseas&exchange=NASDAQ`;
+                                window.open(url, `stock_${stock.code}`, "width=1000,height=800,scrollbars=yes,resizable=yes");
+                              }}
+                              title="상세보기"
+                            >
+                              상세
+                            </button>
+                          </div>
                         </TableCell>
                         <TableCell className="text-right text-sm font-semibold tabular-nums">
                           ${stock.nowVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}

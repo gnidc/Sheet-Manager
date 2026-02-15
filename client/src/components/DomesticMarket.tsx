@@ -509,14 +509,29 @@ export default function DomesticMarket() {
                                     className="w-3.5 h-3.5"
                                   />
                                 </TableCell>
-                                <TableCell
-                                  className="cursor-pointer"
-                                  onClick={() => {
-                                    if (stock.code) window.open(`https://finance.naver.com/item/main.naver?code=${stock.code}`, "_blank");
-                                  }}
-                                >
-                                  <div className="text-sm font-medium hover:text-primary hover:underline">{stock.name}</div>
-                                  <div className="text-[10px] text-muted-foreground font-mono">{stock.code}</div>
+                                <TableCell>
+                                  <div className="flex items-center gap-1.5">
+                                    <div
+                                      className="cursor-pointer"
+                                      onClick={() => {
+                                        if (stock.code) window.open(`https://finance.naver.com/item/main.naver?code=${stock.code}`, "_blank");
+                                      }}
+                                    >
+                                      <div className="text-sm font-medium hover:text-primary hover:underline">{stock.name}</div>
+                                      <div className="text-[10px] text-muted-foreground font-mono">{stock.code}</div>
+                                    </div>
+                                    <button
+                                      className="inline-flex items-center px-1 py-0 text-[9px] text-red-500 hover:text-red-700 border border-red-300 hover:border-red-500 rounded shrink-0 leading-tight"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const url = `/stock-detail?code=${stock.code}&name=${encodeURIComponent(stock.name)}&market=domestic&exchange=KOSPI`;
+                                        window.open(url, `stock_${stock.code}`, "width=1000,height=800,scrollbars=yes,resizable=yes");
+                                      }}
+                                      title="상세보기"
+                                    >
+                                      상세
+                                    </button>
+                                  </div>
                                 </TableCell>
                                 <TableCell className="text-right text-sm font-semibold tabular-nums">
                                   {stock.nowVal.toLocaleString()}
@@ -704,14 +719,29 @@ export default function DomesticMarket() {
                             className="w-3.5 h-3.5"
                           />
                         </TableCell>
-                        <TableCell
-                          className="cursor-pointer"
-                          onClick={() => {
-                            if (stock.code) window.open(`https://finance.naver.com/item/main.naver?code=${stock.code}`, "_blank");
-                          }}
-                        >
-                          <div className="text-sm font-medium hover:text-primary hover:underline">{stock.name}</div>
-                          <div className="text-[10px] text-muted-foreground font-mono">{stock.code}</div>
+                        <TableCell>
+                          <div className="flex items-center gap-1.5">
+                            <div
+                              className="cursor-pointer"
+                              onClick={() => {
+                                if (stock.code) window.open(`https://finance.naver.com/item/main.naver?code=${stock.code}`, "_blank");
+                              }}
+                            >
+                              <div className="text-sm font-medium hover:text-primary hover:underline">{stock.name}</div>
+                              <div className="text-[10px] text-muted-foreground font-mono">{stock.code}</div>
+                            </div>
+                            <button
+                              className="inline-flex items-center px-1 py-0 text-[9px] text-red-500 hover:text-red-700 border border-red-300 hover:border-red-500 rounded shrink-0 leading-tight"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const url = `/stock-detail?code=${stock.code}&name=${encodeURIComponent(stock.name)}&market=domestic&exchange=KOSPI`;
+                                window.open(url, `stock_${stock.code}`, "width=1000,height=800,scrollbars=yes,resizable=yes");
+                              }}
+                              title="상세보기"
+                            >
+                              상세
+                            </button>
+                          </div>
                         </TableCell>
                         <TableCell className="text-right text-sm font-semibold tabular-nums">
                           {stock.nowVal.toLocaleString()}
