@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, Suspense, lazy } from "react";
+import { useState, useEffect, useRef, Suspense, lazy, useTransition, useCallback } from "react";
 import { Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { Input } from "@/components/ui/input";
@@ -43,7 +43,13 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState("home");
+  const [activeTab, setActiveTabRaw] = useState("home");
+  const [isTabPending, startTabTransition] = useTransition();
+  const setActiveTab = useCallback((tab: string) => {
+    startTabTransition(() => {
+      setActiveTabRaw(tab);
+    });
+  }, []);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [darkMode, setDarkMode] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -411,7 +417,7 @@ export default function Home() {
           </div>
 
           {/* 오른쪽 콘텐츠 영역 */}
-          <div className="flex-1 min-w-0">
+          <div className={`flex-1 min-w-0 ${isTabPending ? 'opacity-70 transition-opacity duration-150' : ''}`}>
 
           <TabsContent value="home">
             <HomeEmbed onNavigate={setActiveTab} />
