@@ -5,6 +5,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { EtfDetailDialog } from "@/components/EtfDetailDialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -203,6 +204,10 @@ export default function EtfComponents() {
   const [satCheckedCodes, setSatCheckedCodes] = useState<Set<string>>(new Set());
   const [chartPeriod, setChartPeriod] = useState<"day" | "week" | "month" | "year">("day");
   const [chartType, setChartType] = useState<"candle" | "area">("candle");
+  // 상세 팝업 다이얼로그
+  const [detailDialogOpen, setDetailDialogOpen] = useState(false);
+  const [detailEtfCode, setDetailEtfCode] = useState("");
+  const [detailEtfName, setDetailEtfName] = useState("");
   // localStorage에서 이전 분석 결과 복원
   const savedAnalysis = useMemo(() => {
     try {
@@ -1086,7 +1091,9 @@ export default function EtfComponents() {
                             className="h-6 w-10 text-[9px] text-red-500 border-red-500 hover:bg-red-50 hover:text-white shrink-0"
                             onClick={(e) => {
                               e.stopPropagation();
-                              window.open(`https://finance.naver.com/item/main.naver?code=${etf.code}`, "_blank", "noopener,noreferrer");
+                              setDetailEtfCode(etf.code);
+                              setDetailEtfName(etf.name);
+                              setDetailDialogOpen(true);
                             }}
                             title="상세보기"
                           >
@@ -1991,6 +1998,14 @@ export default function EtfComponents() {
           </div>
         </div>
       )}
+
+      {/* ETF 상세 팝업 다이얼로그 */}
+      <EtfDetailDialog
+        open={detailDialogOpen}
+        onOpenChange={setDetailDialogOpen}
+        etfCode={detailEtfCode}
+        etfName={detailEtfName}
+      />
     </div>
   );
 }

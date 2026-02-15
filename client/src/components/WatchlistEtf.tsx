@@ -6,6 +6,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { EtfDetailDialog } from "@/components/EtfDetailDialog";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -125,6 +126,7 @@ function EtfTable({
   onEdit,
   onDelete,
   onMemoClick,
+  onDetailClick,
 }: {
   items: WatchlistEtf[];
   marketData: Record<string, EtfMarketData>;
@@ -137,6 +139,7 @@ function EtfTable({
   onEdit: (etf: WatchlistEtf) => void;
   onDelete: (etf: WatchlistEtf) => void;
   onMemoClick: (etf: WatchlistEtf) => void;
+  onDetailClick: (code: string, name: string) => void;
 }) {
   return (
     <div className="border rounded-lg overflow-hidden">
@@ -190,7 +193,7 @@ function EtfTable({
                         className="h-6 w-10 text-[9px] text-red-500 border-red-500 hover:bg-red-50 hover:text-white shrink-0"
                         onClick={(e) => {
                           e.stopPropagation();
-                          window.open(`https://finance.naver.com/item/main.naver?code=${etf.etfCode}`, "_blank", "noopener,noreferrer");
+                          onDetailClick(etf.etfCode, etf.etfName);
                         }}
                         title="상세보기"
                       >
@@ -321,6 +324,10 @@ export default function WatchlistEtfComponent({ listType = "core" }: WatchlistEt
   const [filterSector, setFilterSector] = useState<string | null>(null);
   const [memoDialogOpen, setMemoDialogOpen] = useState(false);
   const [selectedMemoEtf, setSelectedMemoEtf] = useState<WatchlistEtf | null>(null);
+  // ETF 상세정보 팝업 (구성종목/차트)
+  const [componentDialogOpen, setComponentDialogOpen] = useState(false);
+  const [componentEtfCode, setComponentEtfCode] = useState("");
+  const [componentEtfName, setComponentEtfName] = useState("");
 
   // ===== API 조회 =====
 
@@ -653,6 +660,7 @@ export default function WatchlistEtfComponent({ listType = "core" }: WatchlistEt
                       onEdit={handleEdit}
                       onDelete={handleDelete}
                       onMemoClick={handleMemoClick}
+                      onDetailClick={(code, name) => { setComponentEtfCode(code); setComponentEtfName(name); setComponentDialogOpen(true); }}
                     />
                   </div>
                 ))}
@@ -769,6 +777,7 @@ export default function WatchlistEtfComponent({ listType = "core" }: WatchlistEt
                 onEdit={handleEdit}
                 onDelete={handleDelete}
                 onMemoClick={handleMemoClick}
+                onDetailClick={(code, name) => { setComponentEtfCode(code); setComponentEtfName(name); setComponentDialogOpen(true); }}
               />
             )}
           </div>
@@ -808,6 +817,7 @@ export default function WatchlistEtfComponent({ listType = "core" }: WatchlistEt
                   onEdit={handleEdit}
                   onDelete={handleDelete}
                   onMemoClick={handleMemoClick}
+                  onDetailClick={(code, name) => { setComponentEtfCode(code); setComponentEtfName(name); setComponentDialogOpen(true); }}
                 />
               )}
             </div>
@@ -834,6 +844,14 @@ export default function WatchlistEtfComponent({ listType = "core" }: WatchlistEt
       {renderAddDialog()}
       {renderEditDialog()}
       {renderMemoDialog()}
+
+      {/* ETF 구성종목/차트 상세 팝업 */}
+      <EtfDetailDialog
+        open={componentDialogOpen}
+        onOpenChange={setComponentDialogOpen}
+        etfCode={componentEtfCode}
+        etfName={componentEtfName}
+      />
     </div>
   );
 

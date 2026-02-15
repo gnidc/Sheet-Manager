@@ -5,6 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { EtfDetailDialog } from "@/components/EtfDetailDialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -82,6 +83,10 @@ export default function NewEtf() {
   const [isEditing, setIsEditing] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [commentEtf, setCommentEtf] = useState<SavedEtf | null>(null);
+  // ETF 상세정보 팝업 (구성종목/차트)
+  const [componentDialogOpen, setComponentDialogOpen] = useState(false);
+  const [componentEtfCode, setComponentEtfCode] = useState("");
+  const [componentEtfName, setComponentEtfName] = useState("");
 
   // 저장된 ETF 목록 조회
   const { data: savedEtfs, isLoading } = useQuery<SavedEtf[]>({
@@ -288,7 +293,9 @@ export default function NewEtf() {
                               className="h-6 w-10 text-[9px] text-red-500 border-red-500 hover:bg-red-50 hover:text-white shrink-0"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                window.open(`https://finance.naver.com/item/main.naver?code=${etf.etfCode}`, "_blank", "noopener,noreferrer");
+                                setComponentEtfCode(etf.etfCode);
+                                setComponentEtfName(etf.etfName);
+                                setComponentDialogOpen(true);
                               }}
                               title="상세보기"
                             >
@@ -368,6 +375,14 @@ export default function NewEtf() {
           isAdmin={isAdmin}
         />
       )}
+
+      {/* ETF 구성종목/차트 상세 팝업 */}
+      <EtfDetailDialog
+        open={componentDialogOpen}
+        onOpenChange={setComponentDialogOpen}
+        etfCode={componentEtfCode}
+        etfName={componentEtfName}
+      />
     </div>
   );
 }
