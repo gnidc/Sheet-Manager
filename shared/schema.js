@@ -213,6 +213,12 @@ const strategyReports = pgTable("strategy_reports", {
   // "일일" | "주간" | "월간" | "연간"
   reportData: text("report_data").notNull(),
   // MarketReport JSON
+  userId: integer("user_id"),
+  // 생성자 ID (null=admin 기존 데이터)
+  createdBy: text("created_by"),
+  // 생성자 이름
+  isShared: boolean("is_shared").default(true),
+  // 공유 여부 (기본 공유)
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull()
 });
 const insertStrategyReportSchema = createInsertSchema(strategyReports).omit({ id: true, createdAt: true });
@@ -230,6 +236,12 @@ const strategyAnalyses = pgTable("strategy_analyses", {
   // "strategy" | "etf-realtime"
   analysisResult: text("analysis_result").notNull(),
   // AiAnalysisResult JSON
+  userId: integer("user_id"),
+  // 생성자 ID (null=admin 기존 데이터)
+  createdBy: text("created_by"),
+  // 생성자 이름
+  isShared: boolean("is_shared").default(true),
+  // 공유 여부 (기본 공유)
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull()
 });
 const insertStrategyAnalysisSchema = createInsertSchema(strategyAnalyses).omit({ id: true, createdAt: true });

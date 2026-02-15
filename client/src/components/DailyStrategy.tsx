@@ -6,6 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import {
   Loader2,
   RefreshCw,
@@ -32,6 +33,11 @@ import {
   ZoomOut,
   Type,
   ClipboardPaste,
+  Share2,
+  Lock,
+  Globe,
+  KeyRound,
+  AlertTriangle,
 } from "lucide-react";
 
 // Markdown → HTML 변환 후 서식 복사 (네이버 카페 등 리치 에디터 호환)
@@ -157,6 +163,10 @@ interface SavedReport {
   createdAt: string;
   periodLabel: string;
   report: MarketReport;
+  userId?: number | null;
+  createdBy?: string;
+  isShared?: boolean;
+  isOwner?: boolean;
 }
 
 interface SavedAnalysis {
@@ -167,6 +177,10 @@ interface SavedAnalysis {
   fileNames: string[];
   source?: "strategy" | "etf-realtime";
   result: AiAnalysisResult;
+  userId?: number | null;
+  createdBy?: string;
+  isShared?: boolean;
+  isOwner?: boolean;
 }
 
 interface SavedPromptItem {
@@ -181,7 +195,6 @@ type ReportPeriod = "daily" | "weekly" | "monthly" | "yearly";
 
 interface DailyStrategyProps {
   period?: ReportPeriod;
-  isAdmin?: boolean;
 }
 
 const PERIOD_LABELS: Record<ReportPeriod, string> = {
@@ -300,8 +313,10 @@ const PROMPT_BASE = "strategy_prompt_";
 const AI_ANALYSIS_BASE = "strategy_ai_analysis_";
 const PROMPT_HISTORY_BASE = "strategy_prompt_history_";
 
-function storageKey(base: string, period: ReportPeriod) {
-  return `${base}${period}`;
+function storageKey(base: string, period: ReportPeriod, userId?: number | null) {
+  // userId가 있으면 계정별 키 사용 (계정별 프롬프트 저장)
+  const userSuffix = userId ? `_u${userId}` : "";
+  return `${base}${period}${userSuffix}`;
 }
 
 // 일주일 이전 항목 필터링 (id가 Date.now() 타임스탬프 기반)
@@ -315,14 +330,13 @@ function filterByRetention<T extends { id: string }>(items: T[]): T[] {
   });
 }
 
-// localStorage CRUD
+// localStorage CRUD (userId별 분리)
 function getSavedReports(period: ReportPeriod): SavedReport[] {
   try {
     const raw = localStorage.getItem(storageKey(SAVED_REPORTS_BASE, period));
     if (!raw) return [];
     const all: SavedReport[] = JSON.parse(raw);
     const filtered = filterByRetention(all);
-    // 만료된 항목이 있으면 localStorage도 정리
     if (filtered.length !== all.length) {
       localStorage.setItem(storageKey(SAVED_REPORTS_BASE, period), JSON.stringify(filtered));
     }
@@ -332,14 +346,14 @@ function getSavedReports(period: ReportPeriod): SavedReport[] {
 function setSavedReportsLS(period: ReportPeriod, reports: SavedReport[]) {
   localStorage.setItem(storageKey(SAVED_REPORTS_BASE, period), JSON.stringify(filterByRetention(reports)));
 }
-function getSavedPrompt(period: ReportPeriod): { prompt: string; urls: string[] } | null {
+function getSavedPrompt(period: ReportPeriod, userId?: number | null): { prompt: string; urls: string[] } | null {
   try {
-    const raw = localStorage.getItem(storageKey(PROMPT_BASE, period));
+    const raw = localStorage.getItem(storageKey(PROMPT_BASE, period, userId));
     return raw ? JSON.parse(raw) : null;
   } catch { return null; }
 }
-function setSavedPrompt(period: ReportPeriod, prompt: string, urls: string[]) {
-  localStorage.setItem(storageKey(PROMPT_BASE, period), JSON.stringify({ prompt, urls }));
+function setSavedPrompt(period: ReportPeriod, prompt: string, urls: string[], userId?: number | null) {
+  localStorage.setItem(storageKey(PROMPT_BASE, period, userId), JSON.stringify({ prompt, urls }));
 }
 function getSavedAnalyses(period: ReportPeriod): SavedAnalysis[] {
   try {
@@ -347,7 +361,6 @@ function getSavedAnalyses(period: ReportPeriod): SavedAnalysis[] {
     if (!raw) return [];
     const all: SavedAnalysis[] = JSON.parse(raw);
     const filtered = filterByRetention(all);
-    // 만료된 항목이 있으면 localStorage도 정리
     if (filtered.length !== all.length) {
       localStorage.setItem(storageKey(AI_ANALYSIS_BASE, period), JSON.stringify(filtered));
     }
@@ -357,14 +370,14 @@ function getSavedAnalyses(period: ReportPeriod): SavedAnalysis[] {
 function setSavedAnalysesLS(period: ReportPeriod, analyses: SavedAnalysis[]) {
   localStorage.setItem(storageKey(AI_ANALYSIS_BASE, period), JSON.stringify(filterByRetention(analyses)));
 }
-function getPromptHistory(period: ReportPeriod): SavedPromptItem[] {
+function getPromptHistory(period: ReportPeriod, userId?: number | null): SavedPromptItem[] {
   try {
-    const raw = localStorage.getItem(storageKey(PROMPT_HISTORY_BASE, period));
+    const raw = localStorage.getItem(storageKey(PROMPT_HISTORY_BASE, period, userId));
     return raw ? JSON.parse(raw) : [];
   } catch { return []; }
 }
-function savePromptToHistory(prompt: string, urls: string[], period: ReportPeriod) {
-  const history = getPromptHistory(period);
+function savePromptToHistory(prompt: string, urls: string[], period: ReportPeriod, userId?: number | null) {
+  const history = getPromptHistory(period, userId);
   const newItem: SavedPromptItem = {
     id: Date.now().toString(),
     label: prompt.substring(0, 50) + (prompt.length > 50 ? "..." : ""),
@@ -373,12 +386,12 @@ function savePromptToHistory(prompt: string, urls: string[], period: ReportPerio
     createdAt: new Date().toLocaleString("ko-KR"),
   };
   const updated = [newItem, ...history].slice(0, MAX_PROMPT_HISTORY);
-  localStorage.setItem(storageKey(PROMPT_HISTORY_BASE, period), JSON.stringify(updated));
+  localStorage.setItem(storageKey(PROMPT_HISTORY_BASE, period, userId), JSON.stringify(updated));
 }
-function deletePromptFromHistory(id: string, period: ReportPeriod) {
-  const history = getPromptHistory(period);
+function deletePromptFromHistory(id: string, period: ReportPeriod, userId?: number | null) {
+  const history = getPromptHistory(period, userId);
   const updated = history.filter((item) => item.id !== id);
-  localStorage.setItem(storageKey(PROMPT_HISTORY_BASE, period), JSON.stringify(updated));
+  localStorage.setItem(storageKey(PROMPT_HISTORY_BASE, period, userId), JSON.stringify(updated));
 }
 
 // ===== Helper functions =====
@@ -758,18 +771,34 @@ function generateReportHTML(report: MarketReport, periodLabel: string): string {
 </html>`;
 }
 
-export default function DailyStrategy({ period = "daily", isAdmin = false }: DailyStrategyProps) {
+export default function DailyStrategy({ period = "daily" }: DailyStrategyProps) {
   const { toast } = useToast();
+  const { userId, isLoggedIn, isAdmin } = useAuth();
   const periodLabel = PERIOD_LABELS[period];
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showApiKeySetup, setShowApiKeySetup] = useState(false);
+
+  // ===== AI API 키 설정 확인 =====
+  const { data: aiConfigData } = useQuery({
+    queryKey: ["/api/user/ai-config"],
+    queryFn: async () => {
+      const res = await fetch("/api/user/ai-config", { credentials: "include" });
+      if (!res.ok) return { config: null };
+      return res.json();
+    },
+    staleTime: 5 * 60 * 1000,
+    enabled: isLoggedIn && !isAdmin, // 일반 유저만 체크 (admin은 서버 키 사용)
+  });
+  const hasAiKey = isAdmin || aiConfigData?.config?.hasGeminiKey || aiConfigData?.config?.hasOpenaiKey;
+  const serverHasKey = true; // 서버에 기본 키가 있을 수 있음 (확인 불가하므로 true로 기본)
 
   // ===== State =====
   const [prompt, setPrompt] = useState(() => {
-    const saved = getSavedPrompt(period);
+    const saved = getSavedPrompt(period, userId);
     return saved?.prompt || DEFAULT_PROMPTS[period];
   });
   const [urls, setUrls] = useState<string[]>(() => {
-    const saved = getSavedPrompt(period);
+    const saved = getSavedPrompt(period, userId);
     return saved?.urls?.length ? saved.urls : ["https://stock.naver.com/"];
   });
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
@@ -778,7 +807,7 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
   const [savedAnalyses, setSavedAnalyses] = useState<SavedAnalysis[]>([]);
   const [activeReport, setActiveReport] = useState<MarketReport | null>(null);
   const [showPromptHistory, setShowPromptHistory] = useState(false);
-  const [promptHistory, setPromptHistory] = useState<SavedPromptItem[]>(() => getPromptHistory(period));
+  const [promptHistory, setPromptHistory] = useState<SavedPromptItem[]>(() => getPromptHistory(period, userId));
   const [viewingReport, setViewingReport] = useState<SavedReport | null>(null);
   const [viewingAnalysis, setViewingAnalysis] = useState<SavedAnalysis | null>(null);
 
@@ -789,9 +818,11 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
 
   // ===== 서버에서 보고서/분석 목록 로딩 + localStorage → DB 마이그레이션 =====
   useEffect(() => {
-    // localStorage → 서버 마이그레이션 함수 (admin만)
+    if (!isLoggedIn) return;
+
+    // localStorage → 서버 마이그레이션 함수
     const migrateReportsToServer = async (localReports: SavedReport[]) => {
-      if (!isAdmin || localReports.length === 0) return;
+      if (localReports.length === 0) return;
       const migrated: SavedReport[] = [];
       for (const r of localReports) {
         try {
@@ -814,14 +845,13 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
       }
       if (migrated.length > 0) {
         setSavedReports(migrated);
-        // 마이그레이션 완료 후 localStorage 정리
         localStorage.removeItem(storageKey(SAVED_REPORTS_BASE, period));
         console.log(`[Strategy] ${period} 보고서 ${migrated.length}건 DB 마이그레이션 완료`);
       }
     };
 
     const migrateAnalysesToServer = async (localAnalyses: SavedAnalysis[]) => {
-      if (!isAdmin || localAnalyses.length === 0) return;
+      if (localAnalyses.length === 0) return;
       const migrated: SavedAnalysis[] = [];
       for (const a of localAnalyses) {
         try {
@@ -846,37 +876,56 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
       }
       if (migrated.length > 0) {
         setSavedAnalyses(migrated);
-        // 마이그레이션 완료 후 localStorage 정리
         localStorage.removeItem(storageKey(AI_ANALYSIS_BASE, period));
         console.log(`[Strategy] ${period} AI분석 ${migrated.length}건 DB 마이그레이션 완료`);
       }
     };
 
-    // 서버에서 저장된 보고서 조회
+    // 서버 응답 → SavedReport 매핑 (서버가 이미 JSON parse 해줌)
+    const mapReport = (r: any): SavedReport => ({
+      id: String(r.id),
+      userId: r.userId,
+      title: r.title,
+      createdAt: r.createdAt || "",
+      periodLabel: r.periodLabel || periodLabel,
+      report: typeof r.report === "string" ? JSON.parse(r.report) : r.report,
+      isShared: r.isShared ?? true,
+      createdBy: r.createdBy || undefined,
+      isOwner: !!r.isOwner,
+    });
+    const mapAnalysis = (a: any): SavedAnalysis => ({
+      id: String(a.id),
+      userId: a.userId,
+      prompt: a.prompt,
+      urls: typeof a.urls === "string" ? JSON.parse(a.urls) : (a.urls || []),
+      fileNames: typeof a.fileNames === "string" ? JSON.parse(a.fileNames) : (a.fileNames || []),
+      source: a.source || "strategy",
+      result: typeof a.analysisResult === "string" ? JSON.parse(a.analysisResult) : (a.result || a.analysisResult),
+      createdAt: a.createdAt || "",
+      isShared: a.isShared ?? true,
+      createdBy: a.createdBy || undefined,
+      isOwner: !!a.isOwner,
+    });
+
+    // 서버에서 보고서 조회 (서버가 공유 + 본인 + admin 필터링 처리)
     fetch(`/api/strategy-reports/${period}`, { credentials: "include" })
       .then(res => res.ok ? res.json() : { reports: [] })
       .then(data => {
-        if (data.reports?.length > 0) {
-          setSavedReports(data.reports);
-          // 서버에 이미 있어도, localStorage에 남아있으면 추가 마이그레이션
-          if (isAdmin) {
-            const localReports = getSavedReports(period);
-            if (localReports.length > 0) {
-              migrateReportsToServer(localReports).then(() => {
-                // 마이그레이션 후 서버에서 다시 로딩
-                fetch(`/api/strategy-reports/${period}`, { credentials: "include" })
-                  .then(res => res.ok ? res.json() : null)
-                  .then(refreshed => { if (refreshed?.reports?.length > 0) setSavedReports(refreshed.reports); })
-                  .catch(() => {});
-              });
-            }
-          }
+        const reports = (data.reports || []).map(mapReport);
+        if (reports.length > 0) {
+          setSavedReports(reports);
         } else {
-          // 서버에 없으면 localStorage에서 마이그레이션
+          // DB에 없으면 localStorage에서 마이그레이션 시도
           const localReports = getSavedReports(period);
           if (localReports.length > 0) {
-            setSavedReports(localReports); // 먼저 화면에 표시
-            migrateReportsToServer(localReports); // 백그라운드로 DB 업로드
+            setSavedReports(localReports);
+            migrateReportsToServer(localReports).then(() => {
+              fetch(`/api/strategy-reports/${period}`, { credentials: "include" })
+                .then(r => r.ok ? r.json() : null)
+                .then(refreshed => {
+                  if (refreshed?.reports?.length > 0) setSavedReports(refreshed.reports.map(mapReport));
+                }).catch(() => {});
+            });
           }
         }
       })
@@ -885,29 +934,24 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
         if (localReports.length > 0) setSavedReports(localReports);
       });
 
-    // 서버에서 저장된 AI 분석 조회
+    // 서버에서 AI 분석 조회
     fetch(`/api/strategy-analyses/${period}`, { credentials: "include" })
       .then(res => res.ok ? res.json() : { analyses: [] })
       .then(data => {
-        if (data.analyses?.length > 0) {
-          setSavedAnalyses(data.analyses);
-          // 서버에 이미 있어도, localStorage에 남아있으면 추가 마이그레이션
-          if (isAdmin) {
-            const localAnalyses = getSavedAnalyses(period);
-            if (localAnalyses.length > 0) {
-              migrateAnalysesToServer(localAnalyses).then(() => {
-                fetch(`/api/strategy-analyses/${period}`, { credentials: "include" })
-                  .then(res => res.ok ? res.json() : null)
-                  .then(refreshed => { if (refreshed?.analyses?.length > 0) setSavedAnalyses(refreshed.analyses); })
-                  .catch(() => {});
-              });
-            }
-          }
+        const analyses = (data.analyses || []).map(mapAnalysis);
+        if (analyses.length > 0) {
+          setSavedAnalyses(analyses);
         } else {
           const localAnalyses = getSavedAnalyses(period);
           if (localAnalyses.length > 0) {
             setSavedAnalyses(localAnalyses);
-            migrateAnalysesToServer(localAnalyses);
+            migrateAnalysesToServer(localAnalyses).then(() => {
+              fetch(`/api/strategy-analyses/${period}`, { credentials: "include" })
+                .then(r => r.ok ? r.json() : null)
+                .then(refreshed => {
+                  if (refreshed?.analyses?.length > 0) setSavedAnalyses(refreshed.analyses.map(mapAnalysis));
+                }).catch(() => {});
+            });
           }
         }
       })
@@ -915,15 +959,15 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
         const localAnalyses = getSavedAnalyses(period);
         if (localAnalyses.length > 0) setSavedAnalyses(localAnalyses);
       });
-  }, [period, isAdmin]);
+  }, [period, isLoggedIn, userId]);
 
-  // ===== Auto-save prompt =====
+  // ===== Auto-save prompt (계정별) =====
   useEffect(() => {
     const timer = setTimeout(() => {
-      setSavedPrompt(period, prompt, urls);
+      setSavedPrompt(period, prompt, urls, userId);
     }, 500);
     return () => clearTimeout(timer);
-  }, [prompt, urls, period]);
+  }, [prompt, urls, period, userId]);
 
   // ===== Data query =====
   const {
@@ -938,7 +982,7 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
       const res = await fetch(`/api/report/${period}`, { credentials: "include" });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        if (res.status === 401) throw new Error("관리자 로그인이 필요합니다");
+        if (res.status === 401) throw new Error("로그인이 필요합니다");
         throw new Error(err.message || "보고서 생성 실패");
       }
       return res.json();
@@ -986,31 +1030,48 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
             fileNames: fNames,
             source: "strategy",
             result: data,
+            isShared: false,
           }),
         });
         if (saveRes.ok) {
           const serverSaved = await saveRes.json();
-          const updated = [serverSaved, ...savedAnalyses].slice(0, MAX_SAVED_ANALYSES);
+          const mapped: SavedAnalysis = {
+            id: String(serverSaved.id),
+            userId: serverSaved.userId,
+            prompt: serverSaved.prompt,
+            urls: Array.isArray(serverSaved.urls) ? serverSaved.urls : filteredUrls,
+            fileNames: Array.isArray(serverSaved.fileNames) ? serverSaved.fileNames : fNames,
+            source: serverSaved.source || "strategy",
+            result: serverSaved.result || data,
+            createdAt: serverSaved.createdAt || new Date().toLocaleString("ko-KR"),
+            isShared: false,
+            isOwner: true,
+            createdBy: serverSaved.createdBy,
+          };
+          const updated = [mapped, ...savedAnalyses.filter(a => a.id !== mapped.id)].slice(0, MAX_SAVED_ANALYSES);
           setSavedAnalyses(updated);
         }
       } catch {
         // 서버 저장 실패 시 localStorage에 저장
         const newSaved: SavedAnalysis = {
           id: Date.now().toString(),
+          userId: userId || 0,
           createdAt: new Date().toLocaleString("ko-KR"),
           prompt,
           urls: filteredUrls,
           fileNames: fNames,
           result: data,
+          isShared: false,
+          isOwner: true,
         };
         const updated = [newSaved, ...savedAnalyses].slice(0, MAX_SAVED_ANALYSES);
         setSavedAnalysesLS(period, updated);
         setSavedAnalyses(updated);
       }
 
-      // Save prompt to history
-      savePromptToHistory(prompt, urls, period);
-      setPromptHistory(getPromptHistory(period));
+      // Save prompt to history (계정별)
+      savePromptToHistory(prompt, urls, period, userId);
+      setPromptHistory(getPromptHistory(period, userId));
       toast({ title: "AI 분석 완료", description: "분석 보고서가 생성되었습니다." });
     },
     onError: (error: Error) => {
@@ -1025,7 +1086,7 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
 
   // Save report when new data arrives (서버 + localStorage)
   useEffect(() => {
-    if (report && !isFetching) {
+    if (report && !isFetching && isLoggedIn) {
       // 서버에 저장
       fetch("/api/strategy-reports", {
         method: "POST",
@@ -1036,21 +1097,35 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
           title: `${periodLabel} 시장 보고서`,
           periodLabel,
           report,
+          isShared: false,
         }),
       })
         .then(res => res.ok ? res.json() : null)
         .then(serverSaved => {
           if (serverSaved) {
-            const updated = [serverSaved, ...savedReports].slice(0, MAX_SAVED_REPORTS);
+            const mapped: SavedReport = {
+              id: String(serverSaved.id),
+              userId: serverSaved.userId,
+              title: serverSaved.title,
+              createdAt: serverSaved.createdAt || new Date().toLocaleString("ko-KR"),
+              periodLabel: serverSaved.periodLabel || periodLabel,
+              report: typeof serverSaved.report === "string" ? JSON.parse(serverSaved.report) : (serverSaved.report || report),
+              isShared: false,
+              isOwner: true,
+            };
+            const updated = [mapped, ...savedReports.filter(r => r.id !== mapped.id)].slice(0, MAX_SAVED_REPORTS);
             setSavedReports(updated);
           } else {
             // 서버 저장 실패 시 localStorage 사용
             const newSaved: SavedReport = {
               id: Date.now().toString(),
+              userId: userId || 0,
               title: `${periodLabel} 시장 보고서`,
               createdAt: new Date().toLocaleString("ko-KR"),
               periodLabel,
               report,
+              isShared: false,
+              isOwner: true,
             };
             const updated = [newSaved, ...savedReports].slice(0, MAX_SAVED_REPORTS);
             setSavedReportsLS(period, updated);
@@ -1060,10 +1135,13 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
         .catch(() => {
           const newSaved: SavedReport = {
             id: Date.now().toString(),
+            userId: userId || 0,
             title: `${periodLabel} 시장 보고서`,
             createdAt: new Date().toLocaleString("ko-KR"),
             periodLabel,
             report,
+            isShared: false,
+            isOwner: true,
           };
           const updated = [newSaved, ...savedReports].slice(0, MAX_SAVED_REPORTS);
           setSavedReportsLS(period, updated);
@@ -1128,17 +1206,17 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
   }, [toast]);
 
   const handleDeletePromptHistory = useCallback((id: string) => {
-    deletePromptFromHistory(id, period);
-    setPromptHistory(getPromptHistory(period));
+    deletePromptFromHistory(id, period, userId);
+    setPromptHistory(getPromptHistory(period, userId));
     toast({ title: "프롬프트 삭제 완료" });
-  }, [toast, period]);
+  }, [toast, period, userId]);
 
   const handleSaveCurrentPrompt = useCallback(() => {
     if (!prompt.trim()) return;
-    savePromptToHistory(prompt, urls, period);
-    setPromptHistory(getPromptHistory(period));
+    savePromptToHistory(prompt, urls, period, userId);
+    setPromptHistory(getPromptHistory(period, userId));
     toast({ title: "프롬프트 저장 완료", description: "프롬프트 예시 목록에 저장되었습니다." });
-  }, [prompt, urls, toast, period]);
+  }, [prompt, urls, toast, period, userId]);
 
   const openReportHtml = useCallback((rpt: MarketReport, label: string) => {
     const html = generateReportHTML(rpt, label);
@@ -1148,12 +1226,158 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
     setTimeout(() => URL.revokeObjectURL(url), 10000);
   }, []);
 
+  // ===== 공유 토글 =====
+  const handleToggleShareReport = useCallback(async (id: string, currentShared: boolean) => {
+    try {
+      const res = await fetch(`/api/strategy-reports/${id}/share`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ isShared: !currentShared }),
+      });
+      if (res.ok) {
+        setSavedReports(prev => prev.map(r => r.id === id ? { ...r, isShared: !currentShared } : r));
+        toast({ title: !currentShared ? "보고서가 공유되었습니다" : "보고서 공유가 해제되었습니다" });
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toast({ title: "공유 설정 실패", description: err.message, variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "공유 설정 실패", variant: "destructive" });
+    }
+  }, [toast]);
+
+  const handleToggleShareAnalysis = useCallback(async (id: string, currentShared: boolean) => {
+    try {
+      const res = await fetch(`/api/strategy-analyses/${id}/share`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ isShared: !currentShared }),
+      });
+      if (res.ok) {
+        setSavedAnalyses(prev => prev.map(a => a.id === id ? { ...a, isShared: !currentShared } : a));
+        toast({ title: !currentShared ? "분석이 공유되었습니다" : "분석 공유가 해제되었습니다" });
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toast({ title: "공유 설정 실패", description: err.message, variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "공유 설정 실패", variant: "destructive" });
+    }
+  }, [toast]);
+
+  // ===== AI API 키 저장 =====
+  const [aiProvider, setAiProvider] = useState<"gemini" | "openai">("gemini");
+  const [apiKeyInput, setApiKeyInput] = useState("");
+  const [savingApiKey, setSavingApiKey] = useState(false);
+
+  const handleSaveApiKey = useCallback(async () => {
+    if (!apiKeyInput.trim()) return;
+    setSavingApiKey(true);
+    try {
+      const body: any = { aiProvider };
+      if (aiProvider === "gemini") body.geminiApiKey = apiKeyInput;
+      else body.openaiApiKey = apiKeyInput;
+      const res = await fetch("/api/user/ai-config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        toast({ title: "API 키 저장 완료", description: "이제 AI 분석을 사용할 수 있습니다." });
+        setShowApiKeySetup(false);
+        setApiKeyInput("");
+        // Refresh AI config
+        const { queryClient } = await import("@/lib/queryClient");
+        queryClient.invalidateQueries({ queryKey: ["/api/user/ai-config"] });
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toast({ title: "API 키 저장 실패", description: err.message, variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "API 키 저장 실패", variant: "destructive" });
+    } finally {
+      setSavingApiKey(false);
+    }
+  }, [apiKeyInput, aiProvider, toast]);
+
   const displayReport = activeReport || report;
 
   return (
     <div className="space-y-6">
-      {/* ===== 프롬프트 입력 영역 (Admin 전용) ===== */}
-      {isAdmin && (
+      {/* ===== API 키 미등록 안내 배너 (일반 유저, 키 없을 때) ===== */}
+      {isLoggedIn && !isAdmin && !hasAiKey && (
+        <Card className="border-amber-300 bg-amber-50/50 dark:bg-amber-900/10">
+          <CardContent className="flex items-center gap-3 py-4">
+            <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0" />
+            <div className="flex-1">
+              <p className="text-sm font-medium">AI API 키가 등록되지 않았습니다</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                보고서를 생성하려면 개인 AI API 키(Gemini 또는 OpenAI)를 등록해주세요. 서버에 기본 키가 설정된 경우 키 없이도 사용 가능합니다.
+              </p>
+            </div>
+            <Button size="sm" onClick={() => setShowApiKeySetup(true)} className="gap-1.5 shrink-0">
+              <KeyRound className="w-4 h-4" />
+              API 키 등록
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ===== API 키 등록 다이얼로그 ===== */}
+      <Dialog open={showApiKeySetup} onOpenChange={setShowApiKeySetup}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <KeyRound className="w-5 h-5 text-primary" />
+              AI API 키 등록
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              AI 분석에 사용할 개인 API 키를 등록하세요. 키는 암호화되어 안전하게 저장됩니다.
+            </p>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">AI 제공자</label>
+              <div className="flex gap-2">
+                <Button variant={aiProvider === "gemini" ? "default" : "outline"} size="sm" onClick={() => setAiProvider("gemini")}>
+                  Google Gemini
+                </Button>
+                <Button variant={aiProvider === "openai" ? "default" : "outline"} size="sm" onClick={() => setAiProvider("openai")}>
+                  OpenAI
+                </Button>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">{aiProvider === "gemini" ? "Gemini" : "OpenAI"} API 키</label>
+              <input
+                type="password"
+                value={apiKeyInput}
+                onChange={(e) => setApiKeyInput(e.target.value)}
+                placeholder={aiProvider === "gemini" ? "AIzaSy..." : "sk-..."}
+                className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
+              />
+              <p className="text-xs text-muted-foreground">
+                {aiProvider === "gemini"
+                  ? "Google AI Studio (https://aistudio.google.com)에서 무료로 발급받을 수 있습니다."
+                  : "OpenAI Platform (https://platform.openai.com)에서 발급받을 수 있습니다."}
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 pt-2 border-t">
+              <Button variant="outline" onClick={() => setShowApiKeySetup(false)}>취소</Button>
+              <Button onClick={handleSaveApiKey} disabled={!apiKeyInput.trim() || savingApiKey} className="gap-1.5">
+                {savingApiKey ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                저장
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ===== 프롬프트 입력 영역 (로그인 유저 모두 사용 가능) ===== */}
+      {isLoggedIn && (
       <Card className="border-primary/30">
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
@@ -1161,9 +1385,15 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
               <BrainCircuit className="w-5 h-5 text-primary" />
               {periodLabel} 보고서 프롬프트
             </CardTitle>
+            {!isAdmin && (
+              <Button variant="ghost" size="sm" onClick={() => setShowApiKeySetup(true)} className="h-7 text-xs gap-1" title="AI API 키 설정">
+                <KeyRound className="w-3.5 h-3.5" />
+                {hasAiKey ? "API 키 변경" : "API 키 등록"}
+              </Button>
+            )}
           </div>
           <p className="text-xs text-muted-foreground">
-            프롬프트에 참고 URL이나 파일을 함께 첨부하면 AI가 내용을 분석에 포함합니다. 프롬프트는 자동 저장됩니다.
+            프롬프트에 참고 URL이나 파일을 함께 첨부하면 AI가 내용을 분석에 포함합니다. 프롬프트는 계정별로 자동 저장됩니다.
           </p>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -1281,8 +1511,8 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
       </Card>
       )}
 
-      {/* ===== AI 분석 진행/결과 (Admin 전용) ===== */}
-      {isAdmin && aiAnalyzeMutation.isPending && (
+      {/* ===== AI 분석 진행/결과 ===== */}
+      {aiAnalyzeMutation.isPending && (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 gap-3">
             <Loader2 className="w-8 h-8 animate-spin text-primary" />
@@ -1292,7 +1522,7 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
         </Card>
       )}
 
-      {isAdmin && aiAnalyzeMutation.isError && !aiAnalyzeMutation.isPending && (
+      {aiAnalyzeMutation.isError && !aiAnalyzeMutation.isPending && (
         <Card className="border-destructive/50">
           <CardContent className="flex items-center gap-3 py-4">
             <div className="flex-1">
@@ -1306,7 +1536,7 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
         </Card>
       )}
 
-      {isAdmin && aiAnalysis && !aiAnalyzeMutation.isPending && (
+      {aiAnalysis && !aiAnalyzeMutation.isPending && (
         <Card className="border-primary/20 bg-primary/[0.02]">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
@@ -1379,9 +1609,9 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
               <FileText className="w-10 h-10 mx-auto mb-3 opacity-20" />
               <p className="text-sm">저장된 보고서가 없습니다.</p>
               <p className="text-xs mt-1">
-                {isAdmin
+                {isLoggedIn
                   ? '"시장 데이터 보고서" 또는 "AI 분석 실행" 버튼으로 보고서를 생성하세요.'
-                  : "관리자가 보고서를 생성하면 여기에 표시됩니다."}
+                  : "로그인하면 보고서를 생성하고 공유된 보고서를 확인할 수 있습니다."}
               </p>
             </div>
           ) : (
@@ -1401,11 +1631,12 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
                   if (item.type === "analysis") {
                     const saved = item.data;
                     const isEtfSource = (saved as any).source === "etf-realtime";
+                    const canManage = saved.isOwner || isAdmin;
                     return (
                       <div key={`a-${saved.id}`} className="flex items-center gap-3 py-3 group hover:bg-muted/30 rounded-md px-2 -mx-2 transition-colors">
                         <span className="flex-shrink-0"><BrainCircuit className={`w-4 h-4 ${isEtfSource ? "text-orange-500" : "text-primary"}`} /></span>
                         <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { setViewingAnalysis(saved); setAnalysisFontSize(DEFAULT_FONT_SIZE); }}>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-sm font-medium truncate hover:text-primary transition-colors">
                               {isEtfSource ? "실시간ETF AI 분석" : "AI 분석 보고서"}
                             </span>
@@ -1413,39 +1644,49 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
                             {isEtfSource && <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400 font-medium flex-shrink-0">📈 ETF</span>}
                             {saved.urls.length > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-600 font-medium flex-shrink-0">🔗 URL {saved.urls.length}</span>}
                             {saved.fileNames.length > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-600 font-medium flex-shrink-0">📎 파일 {saved.fileNames.length}</span>}
+                            {saved.isShared && <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400 font-medium flex-shrink-0"><Globe className="w-2.5 h-2.5 inline mr-0.5" />공유</span>}
                           </div>
                           <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
                             <Clock className="w-3 h-3" />
                             <span>{saved.createdAt}</span>
+                            {saved.createdBy && <><span className="opacity-40">|</span><span className="text-primary/60">👤 {saved.createdBy}</span></>}
                             <span className="opacity-40">|</span>
-                            <span className="truncate max-w-[300px]">{saved.prompt.substring(0, 50)}...</span>
+                            <span className="truncate max-w-[200px]">{saved.prompt.substring(0, 40)}...</span>
                           </div>
                         </div>
                         <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
                           <Button variant="ghost" size="icon" className="h-7 w-7" title="상세 보기" onClick={() => { setViewingAnalysis(saved); setAnalysisFontSize(DEFAULT_FONT_SIZE); }}>
                             <Eye className="w-3.5 h-3.5" />
                           </Button>
-                          {isAdmin && (
-                            <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" title="삭제" onClick={() => handleDeleteAnalysis(saved.id)}>
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </Button>
+                          {canManage && (
+                            <>
+                              <Button variant="ghost" size="icon" className="h-7 w-7" title={saved.isShared ? "공유 해제" : "공유하기"} onClick={() => handleToggleShareAnalysis(saved.id, !!saved.isShared)}>
+                                {saved.isShared ? <Globe className="w-3.5 h-3.5 text-green-500" /> : <Lock className="w-3.5 h-3.5 text-muted-foreground" />}
+                              </Button>
+                              <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" title="삭제" onClick={() => handleDeleteAnalysis(saved.id)}>
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </Button>
+                            </>
                           )}
                         </div>
                       </div>
                     );
                   } else {
                     const saved = item.data;
+                    const canManage = saved.isOwner || isAdmin;
                     return (
                       <div key={`r-${saved.id}`} className="flex items-center gap-3 py-3 group hover:bg-muted/30 rounded-md px-2 -mx-2 transition-colors">
                         <span className="flex-shrink-0"><BarChart3 className="w-4 h-4 text-indigo-500" /></span>
                         <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { setViewingReport(saved); setReportFontSize(DEFAULT_FONT_SIZE); }}>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-sm font-medium truncate hover:text-primary transition-colors">{saved.title}</span>
                             {idx === 0 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400 font-bold flex-shrink-0">최신</span>}
+                            {saved.isShared && <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400 font-medium flex-shrink-0"><Globe className="w-2.5 h-2.5 inline mr-0.5" />공유</span>}
                           </div>
                           <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
                             <Clock className="w-3 h-3" />
                             <span>{saved.createdAt}</span>
+                            {saved.createdBy && <><span className="opacity-40">|</span><span className="text-primary/60">👤 {saved.createdBy}</span></>}
                             <span className="opacity-40">|</span>
                             <span>{saved.report.indices?.length || 0}개 지수</span>
                             <span className="opacity-40">|</span>
@@ -1456,10 +1697,13 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
                           <Button variant="ghost" size="icon" className="h-7 w-7" title="상세 보기" onClick={() => { setViewingReport(saved); setReportFontSize(DEFAULT_FONT_SIZE); }}>
                             <Eye className="w-3.5 h-3.5" />
                           </Button>
-                          {isAdmin && (
+                          <Button variant="ghost" size="icon" className="h-7 w-7" title="HTML 보고서" onClick={() => openReportHtml(saved.report, saved.periodLabel)}>
+                            <FileOutput className="w-3.5 h-3.5" />
+                          </Button>
+                          {canManage && (
                             <>
-                              <Button variant="ghost" size="icon" className="h-7 w-7" title="HTML 보고서" onClick={() => openReportHtml(saved.report, saved.periodLabel)}>
-                                <FileOutput className="w-3.5 h-3.5" />
+                              <Button variant="ghost" size="icon" className="h-7 w-7" title={saved.isShared ? "공유 해제" : "공유하기"} onClick={() => handleToggleShareReport(saved.id, !!saved.isShared)}>
+                                {saved.isShared ? <Globe className="w-3.5 h-3.5 text-green-500" /> : <Lock className="w-3.5 h-3.5 text-muted-foreground" />}
                               </Button>
                               <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" title="삭제" onClick={() => handleDelete(saved.id)}>
                                 <Trash2 className="w-3.5 h-3.5" />
@@ -1477,8 +1721,8 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
         </CardContent>
       </Card>
 
-      {/* ===== 보고서 생성 진행 상태 (Admin 전용) ===== */}
-      {isAdmin && (isFetching || isLoading) && (
+      {/* ===== 보고서 생성 진행 상태 ===== */}
+      {isLoggedIn && (isFetching || isLoading) && (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 gap-3">
             <Loader2 className="w-8 h-8 animate-spin text-primary" />
@@ -1488,8 +1732,8 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
         </Card>
       )}
 
-      {/* ===== 에러 표시 (Admin 전용) ===== */}
-      {isAdmin && error && !displayReport && !isFetching && (
+      {/* ===== 에러 표시 ===== */}
+      {isLoggedIn && error && !displayReport && !isFetching && (
         <Card className="border-destructive/50">
           <CardContent className="flex items-center gap-3 py-4">
             <div className="flex-1">
@@ -1520,7 +1764,7 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
             <span>{displayReport.reportTime} 생성</span>
           </div>
         </div>
-        {isAdmin && (
+        {isLoggedIn && (
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={handleGenerate} disabled={isFetching} className="gap-2">
             {isFetching ? <Loader2 className="w-4 h-4 animate-spin" /> : <FilePlus className="w-4 h-4" />}

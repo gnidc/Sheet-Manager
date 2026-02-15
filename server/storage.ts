@@ -166,11 +166,13 @@ export interface IStorage {
   getStrategyReports(period: string, limit?: number): Promise<StrategyReport[]>;
   createStrategyReport(data: InsertStrategyReport): Promise<StrategyReport>;
   deleteStrategyReport(id: number): Promise<void>;
+  updateStrategyReportShared(id: number, isShared: boolean): Promise<void>;
 
   // Strategy Analyses (전략 AI 분석)
   getStrategyAnalyses(period: string, limit?: number): Promise<StrategyAnalysis[]>;
   createStrategyAnalysis(data: InsertStrategyAnalysis): Promise<StrategyAnalysis>;
   deleteStrategyAnalysis(id: number): Promise<void>;
+  updateStrategyAnalysisShared(id: number, isShared: boolean): Promise<void>;
 
   // Watchlist Stocks (관심종목)
   getWatchlistStocks(market?: string, listType?: string, userId?: number): Promise<WatchlistStock[]>;
@@ -982,18 +984,15 @@ export class DatabaseStorage implements IStorage {
   // ========== Strategy Reports (전략 보고서 - 일일/주간/월간/연간) ==========
 
   async getStrategyReports(period: string, limit: number = 10): Promise<StrategyReport[]> {
+    const query = (dbInstance: any) => {
+      let q = dbInstance.select().from(strategyReports);
+      if (period) q = q.where(eq(strategyReports.period, period));
+      return q.orderBy(desc(strategyReports.createdAt)).limit(limit);
+    };
     if (process.env.VERCEL) {
-      return await executeWithClient(async (db) => {
-        return await db.select().from(strategyReports)
-          .where(eq(strategyReports.period, period))
-          .orderBy(desc(strategyReports.createdAt))
-          .limit(limit);
-      });
+      return await executeWithClient(async (db) => query(db));
     }
-    return await db.select().from(strategyReports)
-      .where(eq(strategyReports.period, period))
-      .orderBy(desc(strategyReports.createdAt))
-      .limit(limit);
+    return await query(db);
   }
 
   async createStrategyReport(data: InsertStrategyReport): Promise<StrategyReport> {
@@ -1016,21 +1015,27 @@ export class DatabaseStorage implements IStorage {
     await db.delete(strategyReports).where(eq(strategyReports.id, id));
   }
 
+  async updateStrategyReportShared(id: number, isShared: boolean): Promise<void> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        await db.update(strategyReports).set({ isShared }).where(eq(strategyReports.id, id));
+      });
+    }
+    await db.update(strategyReports).set({ isShared }).where(eq(strategyReports.id, id));
+  }
+
   // ========== Strategy Analyses (전략 AI 분석) ==========
 
   async getStrategyAnalyses(period: string, limit: number = 10): Promise<StrategyAnalysis[]> {
+    const query = (dbInstance: any) => {
+      let q = dbInstance.select().from(strategyAnalyses);
+      if (period) q = q.where(eq(strategyAnalyses.period, period));
+      return q.orderBy(desc(strategyAnalyses.createdAt)).limit(limit);
+    };
     if (process.env.VERCEL) {
-      return await executeWithClient(async (db) => {
-        return await db.select().from(strategyAnalyses)
-          .where(eq(strategyAnalyses.period, period))
-          .orderBy(desc(strategyAnalyses.createdAt))
-          .limit(limit);
-      });
+      return await executeWithClient(async (db) => query(db));
     }
-    return await db.select().from(strategyAnalyses)
-      .where(eq(strategyAnalyses.period, period))
-      .orderBy(desc(strategyAnalyses.createdAt))
-      .limit(limit);
+    return await query(db);
   }
 
   async createStrategyAnalysis(data: InsertStrategyAnalysis): Promise<StrategyAnalysis> {
@@ -1051,6 +1056,15 @@ export class DatabaseStorage implements IStorage {
       });
     }
     await db.delete(strategyAnalyses).where(eq(strategyAnalyses.id, id));
+  }
+
+  async updateStrategyAnalysisShared(id: number, isShared: boolean): Promise<void> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        await db.update(strategyAnalyses).set({ isShared }).where(eq(strategyAnalyses.id, id));
+      });
+    }
+    await db.update(strategyAnalyses).set({ isShared }).where(eq(strategyAnalyses.id, id));
   }
 
   // ========== Gap Strategy (시가급등 추세추종) ==========

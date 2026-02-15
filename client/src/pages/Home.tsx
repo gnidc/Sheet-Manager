@@ -541,7 +541,7 @@ export default function Home() {
           {(["daily", "weekly", "monthly", "yearly"] as const).map((period) => (
             <TabsContent key={period} value={`strategy-${period}`}>
               <Suspense fallback={<ContentSkeleton />}>
-                <DailyStrategy period={period} isAdmin={isAdmin} />
+                <DailyStrategy period={period} />
               </Suspense>
           </TabsContent>
           ))}

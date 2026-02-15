@@ -7795,8 +7795,22 @@ ${etfListStr}
 
       console.log(`[AI Report] Final prompt length: ${finalPrompt.length} chars (${urlContents.length} URLs, ${fileContents.length} files)`);
 
-      // 5) AI 호출
-      const analysis = await callAI(finalPrompt);
+      // 5) 사용자 AI 키 조회
+      let userKey: UserAiKeyOption | undefined;
+      const userId = req.session?.userId;
+      if (userId) {
+        const userAiConfig = await storage.getUserAiConfig(userId);
+        if (userAiConfig && userAiConfig.useOwnKey) {
+          userKey = {
+            provider: userAiConfig.aiProvider || "gemini",
+            geminiApiKey: userAiConfig.geminiApiKey || undefined,
+            openaiApiKey: userAiConfig.openaiApiKey || undefined,
+          };
+        }
+      }
+
+      // 6) AI 호출 (사용자 키 → 서버 기본 키 순으로 사용)
+      const analysis = await callAI(finalPrompt, userKey);
 
       res.json({
         analysis,
@@ -7818,17 +7832,28 @@ ${etfListStr}
 
   // ========== 전략 보고서 저장/조회 API (DB 기반, 모든 유저 공유) ==========
 
-  // 전략 시장 보고서 조회 (모든 로그인 유저)
+  // 전략 시장 보고서 조회 (모든 로그인 유저 - 공유된 보고서 + 본인 보고서)
   app.get("/api/strategy-reports/:period", requireUser, async (req, res) => {
     try {
       const { period } = req.params;
-      const reports = await storage.getStrategyReports(period, 10);
-      const parsed = reports.map(r => ({
+      const userId = req.session?.userId || null;
+      const reports = await storage.getStrategyReports(period, 20);
+      // 공유된 보고서 + 본인 보고서만 표시
+      const filtered = reports.filter(r => 
+        r.isShared === true || r.isShared === null || // 공유 or 기존(null) 데이터
+        (userId && r.userId === userId) ||             // 본인 보고서
+        req.session?.isAdmin                           // admin은 모두 조회
+      );
+      const parsed = filtered.map(r => ({
         id: r.id.toString(),
         title: r.title,
         periodLabel: r.periodLabel,
         createdAt: r.createdAt.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }),
         report: JSON.parse(r.reportData),
+        userId: r.userId,
+        createdBy: r.createdBy || "Admin",
+        isShared: r.isShared ?? true,
+        isOwner: req.session?.isAdmin || (userId != null && r.userId === userId),
       }));
       res.json({ reports: parsed });
     } catch (error: any) {
@@ -7837,18 +7862,23 @@ ${etfListStr}
     }
   });
 
-  // 전략 시장 보고서 저장 (admin 전용)
-  app.post("/api/strategy-reports", requireAdmin, async (req, res) => {
+  // 전략 시장 보고서 저장 (모든 로그인 유저)
+  app.post("/api/strategy-reports", requireUser, async (req, res) => {
     try {
-      const { period, title, periodLabel, report } = req.body;
+      const { period, title, periodLabel, report, isShared } = req.body;
       if (!period || !report) {
         return res.status(400).json({ message: "period와 report가 필요합니다." });
       }
+      const userId = req.session?.userId || null;
+      const userName = req.session?.userName || req.session?.userEmail || (req.session?.isAdmin ? "Admin" : "사용자");
       const saved = await storage.createStrategyReport({
         period,
         title: title || `${periodLabel} 시장 전략 보고서`,
         periodLabel: periodLabel || period,
         reportData: JSON.stringify(report),
+        userId,
+        createdBy: userName,
+        isShared: isShared !== undefined ? isShared : true,
       });
       res.json({
         id: saved.id.toString(),
@@ -7856,6 +7886,10 @@ ${etfListStr}
         periodLabel: saved.periodLabel,
         createdAt: saved.createdAt.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }),
         report: JSON.parse(saved.reportData),
+        userId: saved.userId,
+        createdBy: saved.createdBy || "Admin",
+        isShared: saved.isShared ?? true,
+        isOwner: true,
       });
     } catch (error: any) {
       console.error("[StrategyReports] POST error:", error.message);
@@ -7863,10 +7897,18 @@ ${etfListStr}
     }
   });
 
-  // 전략 시장 보고서 삭제 (admin 전용)
-  app.delete("/api/strategy-reports/:id", requireAdmin, async (req, res) => {
+  // 전략 시장 보고서 삭제 (본인 또는 admin)
+  app.delete("/api/strategy-reports/:id", requireUser, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      // admin이 아니면 본인 보고서만 삭제 가능
+      if (!req.session?.isAdmin) {
+        const reports = await storage.getStrategyReports("", 100);
+        const target = reports.find(r => r.id === id);
+        if (target && target.userId !== req.session?.userId) {
+          return res.status(403).json({ message: "본인이 작성한 보고서만 삭제할 수 있습니다." });
+        }
+      }
       await storage.deleteStrategyReport(id);
       res.json({ success: true });
     } catch (error: any) {
@@ -7875,12 +7917,40 @@ ${etfListStr}
     }
   });
 
-  // 전략 AI 분석 조회 (모든 로그인 유저)
+  // 전략 시장 보고서 공유 토글 (본인 또는 admin)
+  app.patch("/api/strategy-reports/:id/share", requireUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { isShared } = req.body;
+      // 본인 보고서만 공유 토글 가능 (admin은 모두 가능)
+      if (!req.session?.isAdmin) {
+        const reports = await storage.getStrategyReports("", 100);
+        const target = reports.find(r => r.id === id);
+        if (target && target.userId !== req.session?.userId) {
+          return res.status(403).json({ message: "본인이 작성한 보고서만 공유 설정을 변경할 수 있습니다." });
+        }
+      }
+      await storage.updateStrategyReportShared(id, isShared);
+      res.json({ success: true, isShared });
+    } catch (error: any) {
+      console.error("[StrategyReports] PATCH share error:", error.message);
+      res.status(500).json({ message: error.message || "공유 설정 변경 실패" });
+    }
+  });
+
+  // 전략 AI 분석 조회 (모든 로그인 유저 - 공유된 분석 + 본인 분석)
   app.get("/api/strategy-analyses/:period", requireUser, async (req, res) => {
     try {
       const { period } = req.params;
-      const analyses = await storage.getStrategyAnalyses(period, 10);
-      const parsed = analyses.map(a => ({
+      const userId = req.session?.userId || null;
+      const analyses = await storage.getStrategyAnalyses(period, 20);
+      // 공유된 분석 + 본인 분석만 표시
+      const filtered = analyses.filter(a =>
+        a.isShared === true || a.isShared === null || // 공유 or 기존(null) 데이터
+        (userId && a.userId === userId) ||             // 본인 분석
+        req.session?.isAdmin                           // admin은 모두 조회
+      );
+      const parsed = filtered.map(a => ({
         id: a.id.toString(),
         createdAt: a.createdAt.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }),
         prompt: a.prompt,
@@ -7888,6 +7958,10 @@ ${etfListStr}
         fileNames: JSON.parse(a.fileNames),
         source: a.source || "strategy",
         result: JSON.parse(a.analysisResult),
+        userId: a.userId,
+        createdBy: a.createdBy || "Admin",
+        isShared: a.isShared ?? true,
+        isOwner: req.session?.isAdmin || (userId != null && a.userId === userId),
       }));
       res.json({ analyses: parsed });
     } catch (error: any) {
@@ -7896,13 +7970,15 @@ ${etfListStr}
     }
   });
 
-  // 전략 AI 분석 저장 (admin 전용)
-  app.post("/api/strategy-analyses", requireAdmin, async (req, res) => {
+  // 전략 AI 분석 저장 (모든 로그인 유저)
+  app.post("/api/strategy-analyses", requireUser, async (req, res) => {
     try {
-      const { period, prompt, urls, fileNames, source, result } = req.body;
+      const { period, prompt, urls, fileNames, source, result, isShared } = req.body;
       if (!period || !result) {
         return res.status(400).json({ message: "period와 result가 필요합니다." });
       }
+      const userId = req.session?.userId || null;
+      const userName = req.session?.userName || req.session?.userEmail || (req.session?.isAdmin ? "Admin" : "사용자");
       const saved = await storage.createStrategyAnalysis({
         period,
         prompt: prompt || "",
@@ -7910,6 +7986,9 @@ ${etfListStr}
         fileNames: JSON.stringify(fileNames || []),
         source: source || "strategy",
         analysisResult: JSON.stringify(result),
+        userId,
+        createdBy: userName,
+        isShared: isShared !== undefined ? isShared : true,
       });
       res.json({
         id: saved.id.toString(),
@@ -7919,6 +7998,10 @@ ${etfListStr}
         fileNames: JSON.parse(saved.fileNames),
         source: saved.source,
         result: JSON.parse(saved.analysisResult),
+        userId: saved.userId,
+        createdBy: saved.createdBy || "Admin",
+        isShared: saved.isShared ?? true,
+        isOwner: true,
       });
     } catch (error: any) {
       console.error("[StrategyAnalyses] POST error:", error.message);
@@ -7926,15 +8009,43 @@ ${etfListStr}
     }
   });
 
-  // 전략 AI 분석 삭제 (admin 전용)
-  app.delete("/api/strategy-analyses/:id", requireAdmin, async (req, res) => {
+  // 전략 AI 분석 삭제 (본인 또는 admin)
+  app.delete("/api/strategy-analyses/:id", requireUser, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      // admin이 아니면 본인 분석만 삭제 가능
+      if (!req.session?.isAdmin) {
+        const analyses = await storage.getStrategyAnalyses("", 100);
+        const target = analyses.find(a => a.id === id);
+        if (target && target.userId !== req.session?.userId) {
+          return res.status(403).json({ message: "본인이 작성한 분석만 삭제할 수 있습니다." });
+        }
+      }
       await storage.deleteStrategyAnalysis(id);
       res.json({ success: true });
     } catch (error: any) {
       console.error("[StrategyAnalyses] DELETE error:", error.message);
       res.status(500).json({ message: error.message || "AI 분석 삭제 실패" });
+    }
+  });
+
+  // 전략 AI 분석 공유 토글 (본인 또는 admin)
+  app.patch("/api/strategy-analyses/:id/share", requireUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { isShared } = req.body;
+      if (!req.session?.isAdmin) {
+        const analyses = await storage.getStrategyAnalyses("", 100);
+        const target = analyses.find(a => a.id === id);
+        if (target && target.userId !== req.session?.userId) {
+          return res.status(403).json({ message: "본인이 작성한 분석만 공유 설정을 변경할 수 있습니다." });
+        }
+      }
+      await storage.updateStrategyAnalysisShared(id, isShared);
+      res.json({ success: true, isShared });
+    } catch (error: any) {
+      console.error("[StrategyAnalyses] PATCH share error:", error.message);
+      res.status(500).json({ message: error.message || "공유 설정 변경 실패" });
     }
   });
 

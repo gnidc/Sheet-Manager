@@ -235,13 +235,16 @@ export type InsertAiReport = z.infer<typeof insertAiReportSchema>;
 
 // ========== 전략 보고서 (일일/주간/월간/연간) ==========
 
-// 시장 데이터 보고서 (admin 생성 → 모든 유저 조회)
+// 시장 데이터 보고서 (모든 로그인 유저 생성 가능, 공유 가능)
 export const strategyReports = pgTable("strategy_reports", {
   id: serial("id").primaryKey(),
   period: text("period").notNull(),               // "daily" | "weekly" | "monthly" | "yearly"
   title: text("title").notNull(),                  // 보고서 제목
   periodLabel: text("period_label").notNull(),     // "일일" | "주간" | "월간" | "연간"
   reportData: text("report_data").notNull(),       // MarketReport JSON
+  userId: integer("user_id"),                      // 생성자 ID (null=admin 기존 데이터)
+  createdBy: text("created_by"),                   // 생성자 이름
+  isShared: boolean("is_shared").default(true),    // 공유 여부 (기본 공유)
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
@@ -249,7 +252,7 @@ export const insertStrategyReportSchema = createInsertSchema(strategyReports).om
 export type StrategyReport = typeof strategyReports.$inferSelect;
 export type InsertStrategyReport = z.infer<typeof insertStrategyReportSchema>;
 
-// AI 분석 보고서 (admin 생성 → 모든 유저 조회)
+// AI 분석 보고서 (모든 로그인 유저 생성 가능, 공유 가능)
 export const strategyAnalyses = pgTable("strategy_analyses", {
   id: serial("id").primaryKey(),
   period: text("period").notNull(),               // "daily" | "weekly" | "monthly" | "yearly"
@@ -258,6 +261,9 @@ export const strategyAnalyses = pgTable("strategy_analyses", {
   fileNames: text("file_names").notNull(),         // 파일 이름 목록 JSON
   source: text("source"),                          // "strategy" | "etf-realtime"
   analysisResult: text("analysis_result").notNull(),// AiAnalysisResult JSON
+  userId: integer("user_id"),                      // 생성자 ID (null=admin 기존 데이터)
+  createdBy: text("created_by"),                   // 생성자 이름
+  isShared: boolean("is_shared").default(true),    // 공유 여부 (기본 공유)
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
