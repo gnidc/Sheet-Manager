@@ -602,7 +602,7 @@ export async function registerRoutes(
       kisAccountNo: !!process.env.KIS_ACCOUNT_NO,
       kisAccountNoPrefix: process.env.KIS_ACCOUNT_NO ? process.env.KIS_ACCOUNT_NO.slice(0, 4) + "****" : "미설정",
       kisMockTrading: process.env.KIS_MOCK_TRADING,
-      kisMockTradingParsed: process.env.KIS_MOCK_TRADING === "true",
+      kisMockTradingParsed: process.env.KIS_MOCK_TRADING?.toLowerCase() === "true",
       tradingConfigured: status.tradingConfigured,
       geminiKey: !!process.env.GEMINI_API_KEY,
       openaiKey: !!process.env.OPENAI_API_KEY,
