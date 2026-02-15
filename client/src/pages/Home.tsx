@@ -47,8 +47,14 @@ export default function Home() {
   const [activeTab, setActiveTabRaw] = useState("home");
   const [isTabPending, startTabTransition] = useTransition();
   const setActiveTab = useCallback((tab: string) => {
-    startTabTransition(() => {
-      setActiveTabRaw(tab);
+    // 이중 rAF: 첫 번째 rAF 후 페인트 → 두 번째 rAF에서 transition 시작
+    // 이렇게 하면 버튼 클릭 피드백이 먼저 렌더링된 후 무거운 컴포넌트 전환이 시작됨
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        startTabTransition(() => {
+          setActiveTabRaw(tab);
+        });
+      });
     });
   }, []);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -633,9 +639,7 @@ function SidebarAccordion({ icon, label, active, items, activeTab, onSelect }: {
           {items.map((item) => (
             <button
               key={item.value}
-              onClick={() => {
-                requestAnimationFrame(() => onSelect(item.value));
-              }}
+              onClick={() => onSelect(item.value)}
               className={`w-full text-left rounded-md px-2.5 py-1.5 text-xs font-medium transition-all duration-150 ${
                 activeTab === item.value
                   ? 'bg-primary/10 text-primary dark:bg-primary/15'
