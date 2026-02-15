@@ -387,19 +387,19 @@ export default function OverseasStocks() {
     setAddDialogOpen(true);
   };
 
-  // 네이버 해외주식 상세 링크 생성
+  // 네이버 해외주식 상세 링크 생성 (finance.naver.com 사용)
   const getStockDetailUrl = (code: string, exchangeName: string | null) => {
-    let prefix = "NAS";
+    let suffix = ".O"; // 기본값: NASDAQ
     switch (exchangeName?.toUpperCase()) {
-      case "NYSE": prefix = "NYS"; break;
-      case "NASDAQ": prefix = "NAS"; break;
-      case "AMEX": prefix = "AMS"; break;
-      case "TSE": prefix = "TKS"; break;
-      case "HKEX": prefix = "HKS"; break;
-      case "SSE": prefix = "SHS"; break;
-      default: prefix = "NAS";
+      case "NYSE": suffix = ".N"; break;
+      case "NASDAQ": suffix = ".O"; break;
+      case "AMEX": suffix = ".A"; break;
+      case "TSE": suffix = ".T"; break;
+      case "HKEX": suffix = ".HK"; break;
+      case "SSE": suffix = ".SS"; break;
+      default: suffix = ".O";
     }
-    return `https://stock.naver.com/world/stock/${prefix}${code}`;
+    return `https://finance.naver.com/world/sise.naver?symbol=${code}${suffix}`;
   };
 
   const toggleCheck = (code: string) => {
