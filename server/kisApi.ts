@@ -10,8 +10,15 @@ const KIS_TRADE_URL = KIS_MOCK_TRADING ? KIS_MOCK_URL : KIS_REAL_URL;
 const KIS_MARKET_URL = KIS_REAL_URL;
 const KIS_APP_KEY = process.env.KIS_APP_KEY || "";
 const KIS_APP_SECRET = process.env.KIS_APP_SECRET || "";
-const KIS_ACCOUNT_NO = process.env.KIS_ACCOUNT_NO || ""; // 계좌번호 앞 8자리
-const KIS_ACCOUNT_PRODUCT_CD = process.env.KIS_ACCOUNT_PRODUCT_CD || "01"; // 계좌상품코드 뒤 2자리
+
+// 계좌번호 자동 파싱: "50151234-01", "5015123401", "50151234" 모두 지원
+const rawAccountNo = (process.env.KIS_ACCOUNT_NO || "").replace(/-/g, "").trim();
+const KIS_ACCOUNT_NO = rawAccountNo.length >= 10 ? rawAccountNo.slice(0, 8) : rawAccountNo; // 앞 8자리
+const KIS_ACCOUNT_PRODUCT_CD = rawAccountNo.length >= 10 
+  ? rawAccountNo.slice(8, 10) 
+  : (process.env.KIS_ACCOUNT_PRODUCT_CD || "01"); // 뒤 2자리
+
+console.log(`[KIS] Account parsed: CANO=${KIS_ACCOUNT_NO.slice(0,4)}****, ACNT_PRDT_CD=${KIS_ACCOUNT_PRODUCT_CD}, rawLength=${rawAccountNo.length}`);
 
 // tr_id는 모의투자/실전투자에 따라 다름
 const TR_ID = {

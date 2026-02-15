@@ -601,6 +601,8 @@ export async function registerRoutes(
       kisAppSecret: !!process.env.KIS_APP_SECRET,
       kisAccountNo: !!process.env.KIS_ACCOUNT_NO,
       kisAccountNoPrefix: process.env.KIS_ACCOUNT_NO ? process.env.KIS_ACCOUNT_NO.slice(0, 4) + "****" : "미설정",
+      kisAccountNoLength: (process.env.KIS_ACCOUNT_NO || "").replace(/-/g, "").trim().length,
+      kisAccountProductCd: process.env.KIS_ACCOUNT_PRODUCT_CD || "(auto from account)",
       kisMockTrading: process.env.KIS_MOCK_TRADING,
       kisMockTradingParsed: process.env.KIS_MOCK_TRADING?.toLowerCase() === "true",
       tradingConfigured: status.tradingConfigured,
