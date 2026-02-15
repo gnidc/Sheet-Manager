@@ -1013,33 +1013,33 @@ export default function EtfComponents() {
                   {topGainersData.updatedAt}
                 </span>
               )}
+              {isLoggedIn && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={scrollToAnalysis}
+                  disabled={topGainers.length === 0}
+                  className="h-7 text-xs gap-1"
+                >
+                  <BrainCircuit className="w-3.5 h-3.5" />
+                  AI 분석
+                </Button>
+              )}
               {isAdmin && (
-                <>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={scrollToAnalysis}
-                    disabled={topGainers.length === 0}
-                    className="h-7 text-xs gap-1"
-                  >
-                    <BrainCircuit className="w-3.5 h-3.5" />
-                    AI 분석
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleCafePost}
-                    disabled={topGainers.length === 0 || cafeWriteMutation.isPending}
-                    className="h-7 text-xs gap-1 border-green-300 text-green-700 hover:bg-green-50"
-                  >
-                    {cafeWriteMutation.isPending ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Upload className="w-3.5 h-3.5" />
-                    )}
-                    카페 전송
-                  </Button>
-                </>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCafePost}
+                  disabled={topGainers.length === 0 || cafeWriteMutation.isPending}
+                  className="h-7 text-xs gap-1 border-green-300 text-green-700 hover:bg-green-50"
+                >
+                  {cafeWriteMutation.isPending ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Upload className="w-3.5 h-3.5" />
+                  )}
+                  카페 전송
+                </Button>
               )}
               <Button
                 variant="ghost"
@@ -1557,8 +1557,8 @@ export default function EtfComponents() {
         </>
       )}
 
-      {/* ===== AI 분석 섹션 (Admin 전용) ===== */}
-      {isAdmin && showAnalysisPanel && (
+      {/* ===== AI 분석 섹션 (로그인 사용자) ===== */}
+      {isLoggedIn && showAnalysisPanel && (
         <div ref={analysisSectionRef} className="space-y-4">
           {/* 프롬프트 입력 영역 */}
           <Card className="border-primary/30">
@@ -1581,6 +1581,13 @@ export default function EtfComponents() {
                 실시간 ETF 상승/하락 데이터 + 네이버 뉴스 + 시장 지표를 자동 수집하여 AI가 분석합니다.
                 프롬프트를 수정하여 원하는 분석을 요청할 수 있습니다.
               </p>
+              {!isAdmin && (
+                <div className="mt-2 p-2.5 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-700">
+                  <p className="text-[11px] text-amber-800 dark:text-amber-300 flex items-center gap-1">
+                    ⚠️ 일반 계정은 개인 API 키가 필요합니다. 투자전략 &gt; 일일보고서에서 API 키를 등록해주세요.
+                  </p>
+                </div>
+              )}
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="relative">

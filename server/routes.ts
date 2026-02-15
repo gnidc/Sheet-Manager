@@ -5247,9 +5247,27 @@ ${stockSummary}
   });
 
   // ===== ETF 상승 트렌드 AI 분석 =====
-  app.post("/api/etf/analyze-trend", async (req, res) => {
+  app.post("/api/etf/analyze-trend", requireUser, async (req, res) => {
     try {
       const userPrompt = (req.body.prompt as string) || "";
+
+      // 사용자 AI 키 조회 (일반 계정은 개인 키 필수)
+      let userKey: UserAiKeyOption | undefined;
+      const userId = req.session?.userId;
+      if (userId) {
+        const userAiConfig = await storage.getUserAiConfig(userId);
+        if (userAiConfig && userAiConfig.useOwnKey) {
+          userKey = {
+            provider: userAiConfig.aiProvider || "gemini",
+            geminiApiKey: userAiConfig.geminiApiKey || undefined,
+            openaiApiKey: userAiConfig.openaiApiKey || undefined,
+          };
+        }
+      }
+      // 일반 계정은 개인 API 키가 없으면 AI 분석 불가
+      if (!req.session?.isAdmin && !userKey) {
+        return res.status(400).json({ message: "AI 분석을 위해 개인 API 키를 등록해주세요." });
+      }
 
       // 1) ETF 상승/하락 데이터 수집
       const allEtfs = await getEtfFullList();
@@ -5324,9 +5342,9 @@ ${newsSummary}`;
 
       const finalPrompt = `${systemRole}\n\n${dataContext}\n\n[분석 요청]\n${userPrompt || defaultInstruction}`;
 
-      // 6) AI API 호출
+      // 6) AI API 호출 (사용자 키 → 서버 기본 키 순)
       console.log("[Analyze] Calling AI API with prompt length:", finalPrompt.length);
-      const analysis = await callAI(finalPrompt);
+      const analysis = await callAI(finalPrompt, userKey);
       console.log("[Analyze] Analysis generated successfully");
 
       res.json({ 
