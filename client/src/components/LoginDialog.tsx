@@ -71,7 +71,7 @@ export function LoginDialog() {
     rememberMeRef.current = rememberMe;
   }, [rememberMe]);
 
-  // Google OAuth 팝업 로그인
+  // Google OAuth 팝업 로그인 (INP 최적화: 팝업 열기 후 리스너는 rAF로 지연)
   const triggerGoogleLogin = useCallback(() => {
     if (!GOOGLE_CLIENT_ID) return;
 
@@ -83,6 +83,7 @@ export function LoginDialog() {
     const left = window.screenX + (window.outerWidth - width) / 2;
     const top = window.screenY + (window.outerHeight - height) / 2;
     
+    // 팝업은 즉시 열어야 브라우저가 차단하지 않음
     const popup = window.open(oauthUrl, "google-login", `width=${width},height=${height},left=${left},top=${top}`);
     
     if (!popup) {
@@ -91,89 +92,85 @@ export function LoginDialog() {
     }
 
     setGoogleLoading(true);
-    let done = false;
 
-    const finish = () => {
-      done = true;
-      clearInterval(pollInterval);
-      window.removeEventListener("storage", onStorage);
-    };
+    // 이벤트 리스너/폴링 등록은 rAF로 지연하여 UI 업데이트를 먼저 처리
+    requestAnimationFrame(() => {
+      let done = false;
 
-    const processToken = async (accessToken: string) => {
-      if (done) return;
-      finish();
-      try {
-        // 1. Google에서 사용자 정보 가져오기
-        const userInfoRes = await fetch(`https://www.googleapis.com/oauth2/v3/userinfo?access_token=${accessToken}`);
-        if (!userInfoRes.ok) {
-          throw new Error(`Google userinfo 실패: ${userInfoRes.status}`);
-        }
-        const userInfo = await userInfoRes.json();
-        const remember = rememberMeRef.current;
-        
-        // 2. 서버에 로그인 요청
-        const res = await fetch("/api/auth/google", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ accessToken, userInfo, rememberMe: remember }),
-          credentials: "include",
-        });
-        
-        if (res.ok) {
-          setLoginOpen(false);
-          toast({
-            title: "로그인 성공",
-            description: remember ? "Google 계정으로 로그인되었습니다 (24시간 유지)" : "Google 계정으로 로그인되었습니다",
+      const finish = () => {
+        done = true;
+        clearInterval(pollInterval);
+        window.removeEventListener("storage", onStorage);
+      };
+
+      const processToken = async (accessToken: string) => {
+        if (done) return;
+        finish();
+        try {
+          const userInfoRes = await fetch(`https://www.googleapis.com/oauth2/v3/userinfo?access_token=${accessToken}`);
+          if (!userInfoRes.ok) {
+            throw new Error(`Google userinfo 실패: ${userInfoRes.status}`);
+          }
+          const userInfo = await userInfoRes.json();
+          const remember = rememberMeRef.current;
+          
+          const res = await fetch("/api/auth/google", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ accessToken, userInfo, rememberMe: remember }),
+            credentials: "include",
           });
-          const { queryClient } = await import("@/lib/queryClient");
-          queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
-        } else {
-          // 서버 에러 메시지 표시
-          let errMsg = `서버 에러 (${res.status})`;
-          try { const errData = await res.json(); errMsg = errData.message || errMsg; } catch {}
-          toast({ title: "로그인 실패", description: errMsg, variant: "destructive" });
+          
+          if (res.ok) {
+            setLoginOpen(false);
+            toast({
+              title: "로그인 성공",
+              description: remember ? "Google 계정으로 로그인되었습니다 (24시간 유지)" : "Google 계정으로 로그인되었습니다",
+            });
+            const { queryClient } = await import("@/lib/queryClient");
+            queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
+          } else {
+            let errMsg = `서버 에러 (${res.status})`;
+            try { const errData = await res.json(); errMsg = errData.message || errMsg; } catch {}
+            toast({ title: "로그인 실패", description: errMsg, variant: "destructive" });
+          }
+        } catch (err: any) {
+          toast({ title: "로그인 실패", description: err.message || "Google 인증에 실패했습니다", variant: "destructive" });
+        } finally {
+          setGoogleLoading(false);
         }
-      } catch (err: any) {
-        toast({ title: "로그인 실패", description: err.message || "Google 인증에 실패했습니다", variant: "destructive" });
-      } finally {
-        setGoogleLoading(false);
-      }
-    };
+      };
 
-    // storage 이벤트로 토큰 수신 (다른 창에서 localStorage 변경 시)
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === "google-oauth-token" && e.newValue) {
-        localStorage.removeItem("google-oauth-token");
-        processToken(e.newValue);
-      }
-    };
-    window.addEventListener("storage", onStorage);
+      const onStorage = (e: StorageEvent) => {
+        if (e.key === "google-oauth-token" && e.newValue) {
+          localStorage.removeItem("google-oauth-token");
+          processToken(e.newValue);
+        }
+      };
+      window.addEventListener("storage", onStorage);
 
-    // 폴링: 팝업 닫힘 감지 + localStorage 직접 확인 (storage 이벤트 백업)
-    const pollInterval = setInterval(() => {
-      // localStorage에 토큰이 있는지 직접 확인 (storage 이벤트가 안 올 경우 대비)
-      const token = localStorage.getItem("google-oauth-token");
-      if (token && !done) {
-        localStorage.removeItem("google-oauth-token");
-        processToken(token);
-        return;
-      }
-      // 팝업이 닫혔는데 토큰이 없으면 사용자가 취소한 것
-      if (popup.closed && !done) {
-        finish();
-        setGoogleLoading(false);
-      }
-    }, 500);
+      const pollInterval = setInterval(() => {
+        const token = localStorage.getItem("google-oauth-token");
+        if (token && !done) {
+          localStorage.removeItem("google-oauth-token");
+          processToken(token);
+          return;
+        }
+        if (popup.closed && !done) {
+          finish();
+          setGoogleLoading(false);
+        }
+      }, 500);
 
-    // 30초 타임아웃
-    setTimeout(() => {
-      if (!done) {
-        finish();
-        setGoogleLoading(false);
-        if (!popup.closed) popup.close();
-        toast({ title: "로그인 시간 초과", description: "다시 시도해주세요.", variant: "destructive" });
-      }
-    }, 30000);
+      setTimeout(() => {
+        if (!done) {
+          finish();
+          setGoogleLoading(false);
+          if (!popup.closed) popup.close();
+          toast({ title: "로그인 시간 초과", description: "다시 시도해주세요.", variant: "destructive" });
+        }
+      }, 30000);
+    });
   }, [toast]);
 
   const handleAdminLogin = async (e: React.FormEvent) => {
