@@ -287,6 +287,34 @@ export default function DomesticMarket() {
 
   return (
     <div className="space-y-4">
+      {/* ===== 외부 링크 바로가기 ===== */}
+      <Card>
+        <CardContent className="p-3">
+          <div className="flex flex-wrap gap-2 items-center">
+            <span className="text-xs font-medium text-muted-foreground mr-1">📌 바로가기</span>
+            {[
+              { label: "코스피", url: "https://finance.naver.com/sise/sise_index.naver?code=KOSPI" },
+              { label: "코스닥", url: "https://finance.naver.com/sise/sise_index.naver?code=KOSDAQ" },
+              { label: "업종별", url: "https://finance.naver.com/sise/sise_group.naver?type=upjong" },
+              { label: "투자자별", url: "https://finance.naver.com/sise/investorDealTrendDay.naver" },
+              { label: "거래량 상위", url: "https://finance.naver.com/sise/sise_quant.naver" },
+              { label: "시가총액", url: "https://finance.naver.com/sise/sise_market_sum.naver" },
+            ].map(({ label, url }) => (
+              <Button
+                key={label}
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs gap-1"
+                onClick={() => window.open(url, "_blank", "noopener,noreferrer")}
+              >
+                {label}
+                <ExternalLink className="w-2.5 h-2.5" />
+              </Button>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
       {/* ===== 1. 시장 지수 카드 ===== */}
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold flex items-center gap-2">
@@ -718,33 +746,6 @@ export default function DomesticMarket() {
         </CardContent>
       </Card>
 
-      {/* ===== 4. 외부 링크 바로가기 ===== */}
-      <Card>
-        <CardContent className="p-3">
-          <div className="flex flex-wrap gap-2 items-center">
-            <span className="text-xs font-medium text-muted-foreground mr-1">📌 바로가기</span>
-            {[
-              { label: "코스피", url: "https://finance.naver.com/sise/sise_index.naver?code=KOSPI" },
-              { label: "코스닥", url: "https://finance.naver.com/sise/sise_index.naver?code=KOSDAQ" },
-              { label: "업종별", url: "https://finance.naver.com/sise/sise_group.naver?type=upjong" },
-              { label: "투자자별", url: "https://finance.naver.com/sise/investorDealTrendDay.naver" },
-              { label: "거래량 상위", url: "https://finance.naver.com/sise/sise_quant.naver" },
-              { label: "시가총액", url: "https://finance.naver.com/sise/sise_market_sum.naver" },
-            ].map(({ label, url }) => (
-              <Button
-                key={label}
-                variant="outline"
-                size="sm"
-                className="h-7 text-xs gap-1"
-                onClick={() => window.open(url, "_blank", "noopener,noreferrer")}
-              >
-                {label}
-                <ExternalLink className="w-2.5 h-2.5" />
-              </Button>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 }
