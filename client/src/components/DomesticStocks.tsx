@@ -132,7 +132,7 @@ function StockTable({
                             </span>
                           )}
                           <button
-                            className="inline-flex items-center px-1 py-0 text-[9px] text-muted-foreground hover:text-primary border border-border rounded shrink-0 leading-tight"
+                            className="inline-flex items-center px-1 py-0 text-[9px] text-red-500 hover:text-red-700 border border-red-300 hover:border-red-500 rounded shrink-0 leading-tight"
                             onClick={(e) => { e.stopPropagation(); onShowDetail(stock); }}
                           >
                             상세
