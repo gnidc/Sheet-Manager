@@ -1335,11 +1335,15 @@ export default function DailyStrategy({ period = "daily" }: DailyStrategyProps) 
 
       {/* ===== 일반 계정: 주간/월간/연간 보고서 생성 불가 안내 ===== */}
       {isLoggedIn && !isAdmin && period !== "daily" && (
-        <Card className="border-muted">
-          <CardContent className="flex flex-col items-center justify-center py-10 gap-3">
-            <AlertTriangle className="w-8 h-8 text-muted-foreground" />
-            <p className="text-sm font-medium text-muted-foreground">일반 계정은 일일 보고서만 생성할 수 있습니다.</p>
-            <p className="text-xs text-muted-foreground">주간/월간/연간 보고서 생성은 관리자(Admin) 전용 기능입니다. 관리자가 생성한 공통 보고서는 아래에서 확인할 수 있습니다.</p>
+        <Card className="border-blue-200 bg-blue-50/50 dark:bg-blue-900/10 dark:border-blue-800">
+          <CardContent className="flex items-center gap-3 py-3">
+            <FileText className="w-5 h-5 text-blue-500 shrink-0" />
+            <div className="flex-1">
+              <p className="text-sm font-medium">{periodLabel} 보고서 (읽기 전용)</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {periodLabel} 보고서 생성은 관리자(Admin) 전용 기능입니다. 아래에서 관리자가 생성한 공통 보고서를 확인할 수 있습니다.
+              </p>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -1637,10 +1641,11 @@ export default function DailyStrategy({ period = "daily" }: DailyStrategyProps) 
           <div className="flex items-center justify-between">
             <CardTitle className="text-base flex items-center gap-2">
               <FileText className="w-5 h-5 text-indigo-500" />
-              보고서 목록
+              {!isAdmin && period !== "daily" ? `${periodLabel} 공통 보고서` : "보고서 목록"}
             </CardTitle>
           </div>
-          {/* 필터 탭 */}
+          {/* 필터 탭 (일반계정 non-daily에서는 공통보고서만 표시하므로 탭 숨김) */}
+          {(isAdmin || period === "daily") && (
           <div className="flex flex-wrap gap-1.5 mt-2">
             {([
               { key: "all", label: "전체", icon: "📋" },
@@ -1668,6 +1673,7 @@ export default function DailyStrategy({ period = "daily" }: DailyStrategyProps) 
               );
             })}
           </div>
+          )}
         </CardHeader>
         <CardContent>
           {(() => {
@@ -1675,8 +1681,10 @@ export default function DailyStrategy({ period = "daily" }: DailyStrategyProps) 
               | { type: "analysis"; data: typeof savedAnalyses[0] }
               | { type: "report"; data: typeof savedReports[0] };
 
-            // 필터링
+            // 필터링 (일반계정 non-daily는 공통보고서만)
+            const isReadOnlyMode = !isAdmin && period !== "daily";
             const filterFn = (item: { reportType?: string }) => {
+              if (isReadOnlyMode) return item.reportType === "common";
               if (reportListFilter === "all") return true;
               // 개인보고서: 본인이 만든 보고서 중 공유하지 않은 것
               if (reportListFilter === "my") return item.reportType === "personal" || (item.reportType !== "common" && item.reportType !== "shared");
