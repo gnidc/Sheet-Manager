@@ -302,7 +302,7 @@ export default function DomesticMarket() {
             ].map(({ label, url }) => (
               <Button
                 key={label}
-                variant="outline"
+                variant="ghost"
                 size="sm"
                 className="h-7 text-xs gap-1"
                 onClick={() => window.open(url, "_blank", "noopener,noreferrer")}

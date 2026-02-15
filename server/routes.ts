@@ -2703,6 +2703,72 @@ ${researchList}
     }
   });
 
+  // ========== 배당 일정 (KRX 데이터 기반) ==========
+  app.get("/api/markets/dividend-calendar", async (req, res) => {
+    try {
+      // 최근 거래일 계산 (주말 제외)
+      const now = new Date();
+      let trdDate = new Date(now);
+      const day = trdDate.getDay();
+      if (day === 0) trdDate.setDate(trdDate.getDate() - 2); // 일→금
+      else if (day === 6) trdDate.setDate(trdDate.getDate() - 1); // 토→금
+
+      const trdDd = `${trdDate.getFullYear()}${String(trdDate.getMonth() + 1).padStart(2, "0")}${String(trdDate.getDate()).padStart(2, "0")}`;
+
+      const response = await axios.post(
+        "https://data.krx.co.kr/comm/bldAttendant/getJsonData.cmd",
+        new URLSearchParams({
+          bld: "dbms/MDC/STAT/standard/MDCSTAT03901",
+          locale: "ko_KR",
+          searchType: "1",
+          mktId: "ALL",
+          trdDd: trdDd,
+        }).toString(),
+        {
+          headers: {
+            "User-Agent": UA,
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Referer": "https://data.krx.co.kr/contents/MDC/MDI/mdiLoader/index.cmd?menuId=MDC0201030104",
+          },
+          timeout: 15000,
+        }
+      );
+
+      const rawData = response.data?.OutBlock_1 || [];
+
+      // 배당수익률 > 0인 종목만 필터링, 배당수익률 내림차순 정렬, 상위 50개
+      const dividendStocks = rawData
+        .filter((item: any) => parseFloat(item.DVD_YLD) > 0)
+        .map((item: any) => ({
+          code: item.ISU_SRT_CD,
+          name: item.ISU_ABBRV,
+          market: item.MKT_NM,
+          closePrice: item.TDD_CLSPRC?.replace(/,/g, "") || "0",
+          change: item.CMPPRVDD_PRC?.replace(/,/g, "") || "0",
+          changeRate: item.FLUC_RT || "0",
+          changeSign: item.FLUC_TP_CD || "",
+          eps: item.EPS?.replace(/,/g, "") || "-",
+          per: item.PER || "-",
+          bps: item.BPS?.replace(/,/g, "") || "-",
+          pbr: item.PBR || "-",
+          dps: item.DPS?.replace(/,/g, "") || "0", // 주당배당금
+          dividendYield: item.DVD_YLD || "0", // 배당수익률(%)
+        }))
+        .sort((a: any, b: any) => parseFloat(b.dividendYield) - parseFloat(a.dividendYield))
+        .slice(0, 50);
+
+      res.json({
+        stocks: dividendStocks,
+        tradingDate: trdDd,
+        totalCount: rawData.filter((item: any) => parseFloat(item.DVD_YLD) > 0).length,
+        updatedAt: new Date().toLocaleString("ko-KR"),
+      });
+    } catch (error: any) {
+      console.error("[DividendCalendar] Error:", error.message);
+      res.status(500).json({ message: "배당 일정 조회 실패" });
+    }
+  });
+
   // ========== ETC Markets (채권·환율·크립토·원자재) ==========
 
   // --- 1) 채권/금리 ---

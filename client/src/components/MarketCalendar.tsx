@@ -9,7 +9,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, ExternalLink, Calendar, RefreshCw, Star, Globe, TrendingUp, BarChart3 } from "lucide-react";
+import { Loader2, ExternalLink, Calendar, RefreshCw, Star, Globe, TrendingUp, BarChart3, DollarSign } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 interface CalendarEvent {
@@ -29,6 +29,22 @@ interface IpoItem {
   price: string;
   exchange: string;
   url: string;
+}
+
+interface DividendStock {
+  code: string;
+  name: string;
+  market: string;
+  closePrice: string;
+  change: string;
+  changeRate: string;
+  changeSign: string;
+  eps: string;
+  per: string;
+  bps: string;
+  pbr: string;
+  dps: string;
+  dividendYield: string;
 }
 
 // 국가별 플래그 이모지
@@ -91,14 +107,32 @@ export default function MarketCalendar() {
     staleTime: 600000,
   });
 
+  // 배당 데이터
+  const { data: dividendData, isLoading: isLoadingDividend, refetch: refetchDividend } = useQuery<{
+    stocks: DividendStock[];
+    tradingDate: string;
+    totalCount: number;
+    updatedAt: string;
+  }>({
+    queryKey: ["/api/markets/dividend-calendar"],
+    queryFn: async () => {
+      const res = await fetch("/api/markets/dividend-calendar");
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+    staleTime: 600000,
+  });
+
   const events = calendarData?.events || {};
   const ipos = ipoData?.ipos || [];
+  const dividendStocks = dividendData?.stocks || [];
   const dateEntries = Object.entries(events);
 
   const quickLinks = [
     { label: "Investing.com 경제캘린더", url: "https://kr.investing.com/economic-calendar/", icon: "📊" },
     { label: "네이버 해외증시", url: "https://finance.naver.com/world/", icon: "🌍" },
     { label: "38커뮤니케이션 IPO", url: "https://www.38.co.kr/html/fund/index.htm?o=k", icon: "📋" },
+    { label: "KRX 배당정보", url: "https://data.krx.co.kr/contents/MDC/MDI/mdiLoader/index.cmd?menuId=MDC0201030104", icon: "💰" },
     { label: "KRX 한국거래소", url: "https://kind.krx.co.kr/main.do", icon: "🏛️" },
     { label: "네이버 시장지표", url: "https://finance.naver.com/marketindex/", icon: "📈" },
     { label: "FRED 경제데이터", url: "https://fred.stlouisfed.org/", icon: "🇺🇸" },
@@ -119,7 +153,7 @@ export default function MarketCalendar() {
             variant="ghost"
             size="sm"
             className="h-7 w-7 p-0"
-            onClick={() => { refetchCalendar(); refetchIpo(); }}
+            onClick={() => { refetchCalendar(); refetchIpo(); refetchDividend(); }}
           >
             <RefreshCw className="w-3.5 h-3.5" />
           </Button>
@@ -149,10 +183,14 @@ export default function MarketCalendar() {
 
       {/* 탭 */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-2 h-auto">
+        <TabsList className="grid w-full grid-cols-3 h-auto">
           <TabsTrigger value="economic" className="text-xs py-1.5 gap-1">
             <Globe className="w-3.5 h-3.5" />
-            경제지표 일정
+            경제지표
+          </TabsTrigger>
+          <TabsTrigger value="dividend" className="text-xs py-1.5 gap-1">
+            <DollarSign className="w-3.5 h-3.5" />
+            배당일정
           </TabsTrigger>
           <TabsTrigger value="ipo" className="text-xs py-1.5 gap-1">
             <TrendingUp className="w-3.5 h-3.5" />
@@ -241,6 +279,113 @@ export default function MarketCalendar() {
                   <span className="ml-2">출처: Investing.com</span>
                 </div>
               )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* 배당일정 */}
+        <TabsContent value="dividend">
+          <Card>
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <DollarSign className="w-4 h-4 text-amber-500" />
+                  고배당주 TOP 50
+                  <span className="text-xs text-muted-foreground font-normal">(배당수익률 기준)</span>
+                </CardTitle>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs gap-1"
+                  onClick={() => window.open("https://data.krx.co.kr/contents/MDC/MDI/mdiLoader/index.cmd?menuId=MDC0201030104", "_blank", "noopener,noreferrer")}
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  KRX
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-0">
+              {isLoadingDividend ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                </div>
+              ) : dividendStocks.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b text-muted-foreground">
+                        <th className="text-left py-1.5 px-1 w-8">#</th>
+                        <th className="text-left py-1.5 px-1">종목명</th>
+                        <th className="text-right py-1.5 px-1">현재가</th>
+                        <th className="text-right py-1.5 px-1">등락률</th>
+                        <th className="text-right py-1.5 px-1 text-amber-600 font-semibold">배당수익률</th>
+                        <th className="text-right py-1.5 px-1">주당배당금</th>
+                        <th className="text-right py-1.5 px-1">PER</th>
+                        <th className="text-right py-1.5 px-1">PBR</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dividendStocks.map((stock, i) => {
+                        const changeVal = parseFloat(stock.changeRate);
+                        const isUp = changeVal > 0;
+                        const isDown = changeVal < 0;
+                        return (
+                          <tr
+                            key={stock.code}
+                            className="border-b border-muted/30 hover:bg-muted/40 cursor-pointer transition-colors"
+                            onClick={() => window.open(`https://finance.naver.com/item/main.naver?code=${stock.code}`, "_blank", "noopener,noreferrer")}
+                          >
+                            <td className="py-1.5 px-1 text-muted-foreground font-mono">{i + 1}</td>
+                            <td className="py-1.5 px-1">
+                              <div className="font-medium">{stock.name}</div>
+                              <div className="text-[10px] text-muted-foreground">{stock.market}</div>
+                            </td>
+                            <td className="py-1.5 px-1 text-right font-mono">
+                              {parseInt(stock.closePrice).toLocaleString()}
+                            </td>
+                            <td className={`py-1.5 px-1 text-right font-mono ${isUp ? "text-red-500" : isDown ? "text-blue-500" : ""}`}>
+                              {isUp ? "+" : ""}{stock.changeRate}%
+                            </td>
+                            <td className="py-1.5 px-1 text-right font-semibold text-amber-600 font-mono">
+                              {stock.dividendYield}%
+                            </td>
+                            <td className="py-1.5 px-1 text-right font-mono">
+                              {parseInt(stock.dps).toLocaleString()}원
+                            </td>
+                            <td className="py-1.5 px-1 text-right text-muted-foreground font-mono">
+                              {stock.per}
+                            </td>
+                            <td className="py-1.5 px-1 text-right text-muted-foreground font-mono">
+                              {stock.pbr}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="text-center py-8 text-sm text-muted-foreground">
+                  배당 데이터를 불러올 수 없습니다.
+                </div>
+              )}
+
+              {dividendData && (
+                <div className="mt-3 pt-2 border-t text-xs text-muted-foreground text-center">
+                  기준일: {dividendData.tradingDate?.replace(/(\d{4})(\d{2})(\d{2})/, "$1-$2-$3")}
+                  {dividendData.totalCount > 0 && <span className="ml-2">배당 지급 종목: {dividendData.totalCount}개</span>}
+                  <span className="ml-2">출처: KRX 한국거래소</span>
+                </div>
+              )}
+
+              {/* 배당 안내 */}
+              <div className="mt-3 p-3 bg-muted/30 rounded-lg text-xs text-muted-foreground space-y-1">
+                <p className="font-medium text-foreground">📌 배당 참고 사항</p>
+                <p>• 한국 주식의 연간 배당기준일은 대부분 <strong>12월 말</strong>입니다.</p>
+                <p>• 배당을 받으려면 <strong>배당기준일 2영업일 전(배당락일 전날)</strong>까지 매수해야 합니다.</p>
+                <p>• 분기배당/반기배당 종목은 3월, 6월, 9월 말에도 배당기준일이 있습니다.</p>
+                <p>• 종목 클릭 시 네이버 증권 상세 페이지로 이동합니다.</p>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
