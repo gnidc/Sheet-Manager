@@ -2508,8 +2508,15 @@ ${researchList}
   // --- 4) 글로벌 뉴스 (네이버 금융 해외증시 뉴스) ---
   app.get("/api/markets/global/news", async (_req, res) => {
     try {
-      const newsRes = await axios.get("https://finance.naver.com/world/news/newsList.naver", {
-        params: { page: 1 },
+      // 네이버 금융 해외증시 뉴스 목록 (해외증시 카테고리: section_id3=403)
+      const newsRes = await axios.get("https://finance.naver.com/news/news_list.naver", {
+        params: {
+          mode: "LSS3D",
+          section_id: 101,
+          section_id2: 258,
+          section_id3: 403,
+          page: 1,
+        },
         headers: { "User-Agent": UA },
         timeout: 8000,
         responseType: "arraybuffer",
@@ -2519,11 +2526,15 @@ ${researchList}
       const $ = cheerio.load(html);
 
       const news: any[] = [];
-      $(".newsList li, .realtimeNewsList li, ul li").each((_i, el) => {
+
+      // 방법 1: 뉴스 리스트의 articleSubject에서 추출
+      $("dd.articleSubject").each((_i, el) => {
         const a = $(el).find("a");
-        const title = a.text().trim();
+        const title = (a.attr("title") || a.text()).trim();
         const href = a.attr("href") || "";
-        const date = $(el).find(".date, .wdate, span").last().text().trim();
+        // 같은 dl 내의 wdate 가져오기
+        const dateEl = $(el).closest("dl").find("span.wdate");
+        const date = dateEl.text().trim();
         if (title && title.length > 5 && news.length < 15) {
           news.push({
             title,
@@ -2532,6 +2543,30 @@ ${researchList}
           });
         }
       });
+
+      // 방법 1에서 결과가 없으면 방법 2: section_news에서 추출 (해외증시 메인)
+      if (news.length === 0) {
+        const worldRes = await axios.get("https://finance.naver.com/world/", {
+          headers: { "User-Agent": UA },
+          timeout: 8000,
+          responseType: "arraybuffer",
+        });
+        const worldHtml = iconv.default.decode(Buffer.from(worldRes.data), "euc-kr");
+        const $w = cheerio.load(worldHtml);
+
+        $w(".section_news p").each((_i, el) => {
+          const a = $w(el).find("a");
+          const title = a.text().trim();
+          const href = a.attr("href") || "";
+          if (title && title.length > 5 && news.length < 15) {
+            news.push({
+              title,
+              url: href.startsWith("http") ? href : `https://finance.naver.com${href}`,
+              date: "",
+            });
+          }
+        });
+      }
 
       res.json({ news, updatedAt: new Date().toLocaleString("ko-KR") });
     } catch (error: any) {
