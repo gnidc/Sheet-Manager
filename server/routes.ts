@@ -108,6 +108,13 @@ if (process.env.VERCEL) {
   console.log("DATABASE_URL exists:", !!process.env.DATABASE_URL);
   console.log("GOOGLE_CLIENT_ID exists:", !!GOOGLE_CLIENT_ID);
   console.log("NODE_ENV:", process.env.NODE_ENV);
+  console.log("=== KIS API 환경 변수 ===");
+  console.log("KIS_APP_KEY exists:", !!process.env.KIS_APP_KEY);
+  console.log("KIS_APP_SECRET exists:", !!process.env.KIS_APP_SECRET);
+  console.log("KIS_ACCOUNT_NO exists:", !!process.env.KIS_ACCOUNT_NO);
+  console.log("KIS_MOCK_TRADING:", process.env.KIS_MOCK_TRADING);
+  console.log("GEMINI_API_KEY exists:", !!process.env.GEMINI_API_KEY);
+  console.log("OPENAI_API_KEY exists:", !!process.env.OPENAI_API_KEY);
 }
 
 function requireAdmin(req: Request, res: Response, next: NextFunction) {
@@ -586,6 +593,23 @@ export async function registerRoutes(
     }
   });
 
+  // KIS API 진단 (admin 전용)
+  app.get("/api/trading/diagnose", requireAdmin, async (_req, res) => {
+    const status = kisApi.getTradingStatus();
+    res.json({
+      kisAppKey: !!process.env.KIS_APP_KEY,
+      kisAppSecret: !!process.env.KIS_APP_SECRET,
+      kisAccountNo: !!process.env.KIS_ACCOUNT_NO,
+      kisAccountNoPrefix: process.env.KIS_ACCOUNT_NO ? process.env.KIS_ACCOUNT_NO.slice(0, 4) + "****" : "미설정",
+      kisMockTrading: process.env.KIS_MOCK_TRADING,
+      kisMockTradingParsed: process.env.KIS_MOCK_TRADING === "true",
+      tradingConfigured: status.tradingConfigured,
+      geminiKey: !!process.env.GEMINI_API_KEY,
+      openaiKey: !!process.env.OPENAI_API_KEY,
+      ...status,
+    });
+  });
+
   // KIS API 연결 상태
   app.get("/api/trading/status", requireUser, async (req, res) => {
     try {
@@ -615,13 +639,20 @@ export async function registerRoutes(
     try {
       const userCreds = await getUserCredentials(req);
       if (userCreds) {
+        console.log(`[Balance] User ${userCreds.userId} - mockTrading: ${userCreds.creds.mockTrading}, accountNo: ${userCreds.creds.accountNo?.slice(0,4)}****`);
         const balance = await kisApi.getUserAccountBalance(userCreds.userId, userCreds.creds);
         return res.json(balance);
+      }
+      // Admin: env 기반
+      const status = kisApi.getTradingStatus();
+      console.log(`[Balance] Admin - configured: ${status.tradingConfigured}, mockTrading: ${status.mockTrading}, accountNo: ${status.accountNo}`);
+      if (!status.tradingConfigured) {
+        return res.status(400).json({ message: "KIS API가 설정되지 않았습니다. Vercel 환경변수에 KIS_APP_KEY, KIS_APP_SECRET, KIS_ACCOUNT_NO를 설정해주세요." });
       }
       const balance = await kisApi.getAccountBalance();
       res.json(balance);
     } catch (error: any) {
-      console.error("Failed to get balance:", error);
+      console.error("[Balance] Failed:", error.message, error.response?.data || "");
       res.status(500).json({ message: error.message || "잔고 조회 실패" });
     }
   });
