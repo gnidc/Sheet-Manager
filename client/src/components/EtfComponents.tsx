@@ -754,21 +754,32 @@ export default function EtfComponents() {
                           </span>
                         </TableCell>
                         <TableCell>
-                          <div
-                            className="flex items-center gap-2 min-w-[140px] cursor-pointer group/etfname"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              const isin = getKrIsin(etf.code);
-                              window.open(`https://www.funetf.co.kr/product/etf/view/${isin}`, "_blank", "noopener,noreferrer");
-                            }}
-                          >
-                            <div>
+                          <div className="flex items-center gap-2 min-w-[140px]">
+                            <div
+                              className="flex-1 min-w-0 cursor-pointer group/etfname"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const isin = getKrIsin(etf.code);
+                                window.open(`https://www.funetf.co.kr/product/etf/view/${isin}`, "_blank", "noopener,noreferrer");
+                              }}
+                            >
                               <div className="font-medium text-sm leading-tight group-hover/etfname:text-primary group-hover/etfname:underline flex items-center gap-1">
                                 {etf.name}
                                 <ExternalLink className="w-3 h-3 text-muted-foreground opacity-0 group-hover/etfname:opacity-100 transition-opacity" />
                               </div>
                               <div className="text-xs text-muted-foreground font-mono">{etf.code}</div>
                             </div>
+                            <button
+                              className="inline-flex items-center px-1 py-0 text-[9px] text-red-500 hover:text-red-700 border border-red-300 hover:border-red-500 rounded shrink-0 leading-tight"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const url = `/stock-detail?code=${etf.code}&name=${encodeURIComponent(etf.name)}&market=domestic&exchange=KOSPI&type=etf`;
+                                window.open(url, `stock_${etf.code}`, "width=1000,height=800,scrollbars=yes,resizable=yes");
+                              }}
+                              title="상세보기"
+                            >
+                              상세
+                            </button>
                           </div>
                         </TableCell>
                         <TableCell className="text-right tabular-nums font-semibold text-sm">
@@ -937,12 +948,23 @@ export default function EtfComponents() {
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2 min-w-[140px]">
-                            <div>
+                            <div className="flex-1 min-w-0">
                               <div className="font-medium text-sm leading-tight hover:text-primary">
                                 {etf.name}
                               </div>
                               <div className="text-xs text-muted-foreground font-mono">{etf.code}</div>
                             </div>
+                            <button
+                              className="inline-flex items-center px-1 py-0 text-[9px] text-red-500 hover:text-red-700 border border-red-300 hover:border-red-500 rounded shrink-0 leading-tight"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const url = `/stock-detail?code=${etf.code}&name=${encodeURIComponent(etf.name)}&market=domestic&exchange=KOSPI&type=etf`;
+                                window.open(url, `stock_${etf.code}`, "width=1000,height=800,scrollbars=yes,resizable=yes");
+                              }}
+                              title="상세보기"
+                            >
+                              상세
+                            </button>
                           </div>
                         </TableCell>
                         <TableCell className="text-right tabular-nums font-semibold text-sm">

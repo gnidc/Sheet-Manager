@@ -7302,11 +7302,11 @@ ${etfListStr}
 
   // ========== 신규ETF 관리 (저장된 ETF) ==========
 
-  // 저장된 ETF 목록 조회
+  // 저장된 ETF 목록 조회 (모든 로그인 사용자가 전체 목록 조회 가능)
   app.get("/api/saved-etfs", requireUser, async (req, res) => {
     try {
-      const userId = req.session?.userId || undefined;
-      const etfs = await storage.getSavedEtfs(userId);
+      // userId를 전달하지 않아 전체 목록을 반환 (admin이 등록한 ETF를 일반계정도 볼 수 있도록)
+      const etfs = await storage.getSavedEtfs();
       res.json(etfs);
     } catch (error: any) {
       console.error("Failed to get saved ETFs:", error);
@@ -7798,6 +7798,8 @@ ${etfListStr}
       // 5) 사용자 AI 키 조회
       let userKey: UserAiKeyOption | undefined;
       const userId = req.session?.userId;
+      const isAdminUser = req.session?.isAdmin;
+
       if (userId) {
         const userAiConfig = await storage.getUserAiConfig(userId);
         if (userAiConfig && userAiConfig.useOwnKey) {
@@ -7809,7 +7811,14 @@ ${etfListStr}
         }
       }
 
-      // 6) AI 호출 (사용자 키 → 서버 기본 키 순으로 사용)
+      // 일반 계정은 반드시 본인 API 키를 사용해야 함 (admin 키 사용 불가)
+      if (!isAdminUser && !userKey) {
+        return res.status(400).json({
+          message: "AI 분석을 위해 개인 API 키를 등록해주세요. 설정에서 Gemini 또는 OpenAI API 키를 입력하세요.",
+        });
+      }
+
+      // 6) AI 호출 (admin: 서버 기본 키 사용 가능, 일반 유저: 본인 키만 사용)
       const analysis = await callAI(finalPrompt, userKey);
 
       res.json({
@@ -7836,25 +7845,55 @@ ${etfListStr}
   app.get("/api/strategy-reports/:period", requireUser, async (req, res) => {
     try {
       const { period } = req.params;
+      const scope = req.query.scope as string | undefined; // "common" | "shared" | "my" | undefined
       const userId = req.session?.userId || null;
-      const reports = await storage.getStrategyReports(period, 20);
-      // 공유된 보고서 + 본인 보고서만 표시
-      const filtered = reports.filter(r => 
-        r.isShared === true || r.isShared === null || // 공유 or 기존(null) 데이터
-        (userId && r.userId === userId) ||             // 본인 보고서
-        req.session?.isAdmin                           // admin은 모두 조회
-      );
-      const parsed = filtered.map(r => ({
-        id: r.id.toString(),
-        title: r.title,
-        periodLabel: r.periodLabel,
-        createdAt: r.createdAt.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }),
-        report: JSON.parse(r.reportData),
-        userId: r.userId,
-        createdBy: r.createdBy || "Admin",
-        isShared: r.isShared ?? true,
-        isOwner: req.session?.isAdmin || (userId != null && r.userId === userId),
-      }));
+      const isAdminUser = !!req.session?.isAdmin;
+      const reports = await storage.getStrategyReports(period, 50);
+
+      // 보고서 분류:
+      // - 공통(common): admin이 생성 (userId가 null이거나 createdBy가 Admin)
+      // - 공유(shared): 일반 유저가 생성 + isShared=true
+      // - 개인(my): 현재 유저가 생성한 모든 보고서
+      const classify = (r: any) => {
+        const isCommon = r.userId === null || (r.createdBy === "Admin" && !r.userId);
+        return isCommon ? "common" : "user";
+      };
+
+      let filtered = reports;
+      if (scope === "common") {
+        // 공통보고서만 (admin 생성)
+        filtered = reports.filter(r => classify(r) === "common");
+      } else if (scope === "shared") {
+        // 공유보고서만 (일반 유저 생성 + isShared=true, 본인 제외)
+        filtered = reports.filter(r => classify(r) === "user" && r.isShared === true && r.userId !== userId);
+      } else if (scope === "my") {
+        // 개인보고서만 (본인 생성)
+        filtered = reports.filter(r => userId != null && r.userId === userId);
+      } else {
+        // 기본: 모두 보이되 권한 체크
+        filtered = reports.filter(r =>
+          classify(r) === "common" ||                    // 공통보고서
+          (r.isShared === true) ||                        // 공유된 보고서
+          (userId && r.userId === userId) ||              // 본인 보고서
+          isAdminUser                                     // admin은 모두 조회
+        );
+      }
+
+      const parsed = filtered.map(r => {
+        const isCommon = classify(r) === "common";
+        return {
+          id: r.id.toString(),
+          title: r.title,
+          periodLabel: r.periodLabel,
+          createdAt: r.createdAt.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }),
+          report: JSON.parse(r.reportData),
+          userId: r.userId,
+          createdBy: r.createdBy || "Admin",
+          isShared: r.isShared ?? true,
+          isOwner: isAdminUser || (userId != null && r.userId === userId),
+          reportType: isCommon ? "common" : (r.isShared ? "shared" : "personal"),
+        };
+      });
       res.json({ reports: parsed });
     } catch (error: any) {
       console.error("[StrategyReports] GET error:", error.message);
@@ -7862,12 +7901,16 @@ ${etfListStr}
     }
   });
 
-  // 전략 시장 보고서 저장 (모든 로그인 유저)
+  // 전략 시장 보고서 저장 (일반 유저는 daily만 가능)
   app.post("/api/strategy-reports", requireUser, async (req, res) => {
     try {
       const { period, title, periodLabel, report, isShared } = req.body;
       if (!period || !report) {
         return res.status(400).json({ message: "period와 report가 필요합니다." });
+      }
+      // 일반 유저는 daily만 생성 가능
+      if (!req.session?.isAdmin && period !== "daily") {
+        return res.status(403).json({ message: "일반 계정은 일일 보고서만 생성할 수 있습니다." });
       }
       const userId = req.session?.userId || null;
       const userName = req.session?.userName || req.session?.userEmail || (req.session?.isAdmin ? "Admin" : "사용자");
@@ -7938,31 +7981,53 @@ ${etfListStr}
     }
   });
 
-  // 전략 AI 분석 조회 (모든 로그인 유저 - 공유된 분석 + 본인 분석)
+  // 전략 AI 분석 조회 (모든 로그인 유저 - scope별 필터링)
   app.get("/api/strategy-analyses/:period", requireUser, async (req, res) => {
     try {
       const { period } = req.params;
+      const scope = req.query.scope as string | undefined; // "common" | "shared" | "my" | undefined
       const userId = req.session?.userId || null;
-      const analyses = await storage.getStrategyAnalyses(period, 20);
-      // 공유된 분석 + 본인 분석만 표시
-      const filtered = analyses.filter(a =>
-        a.isShared === true || a.isShared === null || // 공유 or 기존(null) 데이터
-        (userId && a.userId === userId) ||             // 본인 분석
-        req.session?.isAdmin                           // admin은 모두 조회
-      );
-      const parsed = filtered.map(a => ({
-        id: a.id.toString(),
-        createdAt: a.createdAt.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }),
-        prompt: a.prompt,
-        urls: JSON.parse(a.urls),
-        fileNames: JSON.parse(a.fileNames),
-        source: a.source || "strategy",
-        result: JSON.parse(a.analysisResult),
-        userId: a.userId,
-        createdBy: a.createdBy || "Admin",
-        isShared: a.isShared ?? true,
-        isOwner: req.session?.isAdmin || (userId != null && a.userId === userId),
-      }));
+      const isAdminUser = !!req.session?.isAdmin;
+      const analyses = await storage.getStrategyAnalyses(period, 50);
+
+      const classify = (a: any) => {
+        const isCommon = a.userId === null || (a.createdBy === "Admin" && !a.userId);
+        return isCommon ? "common" : "user";
+      };
+
+      let filtered = analyses;
+      if (scope === "common") {
+        filtered = analyses.filter(a => classify(a) === "common");
+      } else if (scope === "shared") {
+        filtered = analyses.filter(a => classify(a) === "user" && a.isShared === true && a.userId !== userId);
+      } else if (scope === "my") {
+        filtered = analyses.filter(a => userId != null && a.userId === userId);
+      } else {
+        filtered = analyses.filter(a =>
+          classify(a) === "common" ||
+          (a.isShared === true) ||
+          (userId && a.userId === userId) ||
+          isAdminUser
+        );
+      }
+
+      const parsed = filtered.map(a => {
+        const isCommon = classify(a) === "common";
+        return {
+          id: a.id.toString(),
+          createdAt: a.createdAt.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }),
+          prompt: a.prompt,
+          urls: JSON.parse(a.urls),
+          fileNames: JSON.parse(a.fileNames),
+          source: a.source || "strategy",
+          result: JSON.parse(a.analysisResult),
+          userId: a.userId,
+          createdBy: a.createdBy || "Admin",
+          isShared: a.isShared ?? true,
+          isOwner: isAdminUser || (userId != null && a.userId === userId),
+          reportType: isCommon ? "common" : (a.isShared ? "shared" : "personal"),
+        };
+      });
       res.json({ analyses: parsed });
     } catch (error: any) {
       console.error("[StrategyAnalyses] GET error:", error.message);
@@ -7970,12 +8035,16 @@ ${etfListStr}
     }
   });
 
-  // 전략 AI 분석 저장 (모든 로그인 유저)
+  // 전략 AI 분석 저장 (일반 유저는 daily만 가능)
   app.post("/api/strategy-analyses", requireUser, async (req, res) => {
     try {
       const { period, prompt, urls, fileNames, source, result, isShared } = req.body;
       if (!period || !result) {
         return res.status(400).json({ message: "period와 result가 필요합니다." });
+      }
+      // 일반 유저는 daily만 생성 가능
+      if (!req.session?.isAdmin && period !== "daily") {
+        return res.status(403).json({ message: "일반 계정은 일일 분석만 생성할 수 있습니다." });
       }
       const userId = req.session?.userId || null;
       const userName = req.session?.userName || req.session?.userEmail || (req.session?.isAdmin ? "Admin" : "사용자");

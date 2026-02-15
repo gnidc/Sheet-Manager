@@ -259,9 +259,9 @@ export default function Home() {
                   </DropdownMenuTrigger>
                   <DropdownMenuContent side="right" align="start" className="min-w-[130px]">
                     <DropdownMenuItem onClick={() => setActiveTab("strategy-daily")} className="gap-2 cursor-pointer">📋 일일 보고서</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setActiveTab("strategy-weekly")} className="gap-2 cursor-pointer">📊 주간 보고서</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setActiveTab("strategy-monthly")} className="gap-2 cursor-pointer">📈 월간 보고서</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setActiveTab("strategy-yearly")} className="gap-2 cursor-pointer">📉 연간 보고서</DropdownMenuItem>
+                    {isAdmin && <DropdownMenuItem onClick={() => setActiveTab("strategy-weekly")} className="gap-2 cursor-pointer">📊 주간 보고서</DropdownMenuItem>}
+                    {isAdmin && <DropdownMenuItem onClick={() => setActiveTab("strategy-monthly")} className="gap-2 cursor-pointer">📈 월간 보고서</DropdownMenuItem>}
+                    {isAdmin && <DropdownMenuItem onClick={() => setActiveTab("strategy-yearly")} className="gap-2 cursor-pointer">📉 연간 보고서</DropdownMenuItem>}
                   </DropdownMenuContent>
                 </DropdownMenu>
               ) : (
@@ -271,9 +271,11 @@ export default function Home() {
                   active={activeTab.startsWith("strategy-")}
                   items={[
                     { label: "📋 일일 보고서", value: "strategy-daily" },
-                    { label: "📊 주간 보고서", value: "strategy-weekly" },
-                    { label: "📈 월간 보고서", value: "strategy-monthly" },
-                    { label: "📉 연간 보고서", value: "strategy-yearly" },
+                    ...(isAdmin ? [
+                      { label: "📊 주간 보고서", value: "strategy-weekly" },
+                      { label: "📈 월간 보고서", value: "strategy-monthly" },
+                      { label: "📉 연간 보고서", value: "strategy-yearly" },
+                    ] : []),
                   ]}
                   activeTab={activeTab}
                   onSelect={setActiveTab}
@@ -389,9 +391,9 @@ export default function Home() {
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="center" className="min-w-[110px]">
                   <DropdownMenuItem onClick={() => setActiveTab("strategy-daily")} className="gap-2 cursor-pointer text-xs">📋 일일</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setActiveTab("strategy-weekly")} className="gap-2 cursor-pointer text-xs">📊 주간</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setActiveTab("strategy-monthly")} className="gap-2 cursor-pointer text-xs">📈 월간</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setActiveTab("strategy-yearly")} className="gap-2 cursor-pointer text-xs">📉 연간</DropdownMenuItem>
+                  {isAdmin && <DropdownMenuItem onClick={() => setActiveTab("strategy-weekly")} className="gap-2 cursor-pointer text-xs">📊 주간</DropdownMenuItem>}
+                  {isAdmin && <DropdownMenuItem onClick={() => setActiveTab("strategy-monthly")} className="gap-2 cursor-pointer text-xs">📈 월간</DropdownMenuItem>}
+                  {isAdmin && <DropdownMenuItem onClick={() => setActiveTab("strategy-yearly")} className="gap-2 cursor-pointer text-xs">📉 연간</DropdownMenuItem>}
                 </DropdownMenuContent>
               </DropdownMenu>
                 {isAdmin && (

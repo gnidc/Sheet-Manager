@@ -157,6 +157,8 @@ interface AiAnalysisResult {
   };
 }
 
+type ReportType = "common" | "shared" | "personal";
+
 interface SavedReport {
   id: string;
   title: string;
@@ -167,6 +169,7 @@ interface SavedReport {
   createdBy?: string;
   isShared?: boolean;
   isOwner?: boolean;
+  reportType?: ReportType;
 }
 
 interface SavedAnalysis {
@@ -181,6 +184,7 @@ interface SavedAnalysis {
   createdBy?: string;
   isShared?: boolean;
   isOwner?: boolean;
+  reportType?: ReportType;
 }
 
 interface SavedPromptItem {
@@ -807,6 +811,7 @@ export default function DailyStrategy({ period = "daily" }: DailyStrategyProps) 
   const [savedAnalyses, setSavedAnalyses] = useState<SavedAnalysis[]>([]);
   const [activeReport, setActiveReport] = useState<MarketReport | null>(null);
   const [showPromptHistory, setShowPromptHistory] = useState(false);
+  const [reportListFilter, setReportListFilter] = useState<"all" | "common" | "shared" | "my">("all");
   const [promptHistory, setPromptHistory] = useState<SavedPromptItem[]>(() => getPromptHistory(period, userId));
   const [viewingReport, setViewingReport] = useState<SavedReport | null>(null);
   const [viewingAnalysis, setViewingAnalysis] = useState<SavedAnalysis | null>(null);
@@ -892,6 +897,7 @@ export default function DailyStrategy({ period = "daily" }: DailyStrategyProps) 
       isShared: r.isShared ?? true,
       createdBy: r.createdBy || undefined,
       isOwner: !!r.isOwner,
+      reportType: r.reportType || (r.userId === null ? "common" : r.isShared ? "shared" : "personal"),
     });
     const mapAnalysis = (a: any): SavedAnalysis => ({
       id: String(a.id),
@@ -905,6 +911,7 @@ export default function DailyStrategy({ period = "daily" }: DailyStrategyProps) 
       isShared: a.isShared ?? true,
       createdBy: a.createdBy || undefined,
       isOwner: !!a.isOwner,
+      reportType: a.reportType || (a.userId === null ? "common" : a.isShared ? "shared" : "personal"),
     });
 
     // 서버에서 보고서 조회 (서버가 공유 + 본인 + admin 필터링 처리)
@@ -1308,20 +1315,31 @@ export default function DailyStrategy({ period = "daily" }: DailyStrategyProps) 
   return (
     <div className="space-y-6">
       {/* ===== API 키 미등록 안내 배너 (일반 유저, 키 없을 때) ===== */}
-      {isLoggedIn && !isAdmin && !hasAiKey && (
+      {isLoggedIn && !isAdmin && !hasAiKey && period === "daily" && (
         <Card className="border-amber-300 bg-amber-50/50 dark:bg-amber-900/10">
           <CardContent className="flex items-center gap-3 py-4">
             <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0" />
             <div className="flex-1">
               <p className="text-sm font-medium">AI API 키가 등록되지 않았습니다</p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                보고서를 생성하려면 개인 AI API 키(Gemini 또는 OpenAI)를 등록해주세요. 서버에 기본 키가 설정된 경우 키 없이도 사용 가능합니다.
+                AI 분석 보고서를 생성하려면 개인 API 키(Gemini 또는 OpenAI)를 등록해주세요. 일반 계정은 관리자 API를 사용할 수 없습니다.
               </p>
             </div>
             <Button size="sm" onClick={() => setShowApiKeySetup(true)} className="gap-1.5 shrink-0">
               <KeyRound className="w-4 h-4" />
               API 키 등록
             </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ===== 일반 계정: 주간/월간/연간 보고서 생성 불가 안내 ===== */}
+      {isLoggedIn && !isAdmin && period !== "daily" && (
+        <Card className="border-muted">
+          <CardContent className="flex flex-col items-center justify-center py-10 gap-3">
+            <AlertTriangle className="w-8 h-8 text-muted-foreground" />
+            <p className="text-sm font-medium text-muted-foreground">일반 계정은 일일 보고서만 생성할 수 있습니다.</p>
+            <p className="text-xs text-muted-foreground">주간/월간/연간 보고서 생성은 관리자(Admin) 전용 기능입니다. 관리자가 생성한 공통 보고서는 아래에서 확인할 수 있습니다.</p>
           </CardContent>
         </Card>
       )}
@@ -1376,8 +1394,8 @@ export default function DailyStrategy({ period = "daily" }: DailyStrategyProps) 
         </DialogContent>
       </Dialog>
 
-      {/* ===== 프롬프트 입력 영역 (로그인 유저 모두 사용 가능) ===== */}
-      {isLoggedIn && (
+      {/* ===== 프롬프트 입력 영역 (admin은 모든 기간, 일반 유저는 daily만) ===== */}
+      {isLoggedIn && (isAdmin || period === "daily") && (
       <Card className="border-primary/30">
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
@@ -1395,6 +1413,20 @@ export default function DailyStrategy({ period = "daily" }: DailyStrategyProps) 
           <p className="text-xs text-muted-foreground">
             프롬프트에 참고 URL이나 파일을 함께 첨부하면 AI가 내용을 분석에 포함합니다. 프롬프트는 계정별로 자동 저장됩니다.
           </p>
+          {!isAdmin && !hasAiKey && (
+            <div className="mt-2 p-3 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-700">
+              <p className="text-xs font-medium text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
+                ⚠️ AI 분석을 사용하려면 개인 API 키를 등록해야 합니다.
+              </p>
+              <p className="text-[11px] text-amber-700 dark:text-amber-400 mt-1">
+                일반 계정은 관리자(Admin)의 API를 사용할 수 없습니다. 상단의 "API 키 등록" 버튼을 클릭하여 개인 Gemini 또는 OpenAI API 키를 등록해주세요.
+              </p>
+              <Button variant="outline" size="sm" onClick={() => setShowApiKeySetup(true)} className="mt-2 h-7 text-xs gap-1 border-amber-400 text-amber-700 hover:bg-amber-100 dark:border-amber-600 dark:text-amber-300 dark:hover:bg-amber-900/50">
+                <KeyRound className="w-3 h-3" />
+                API 키 등록하기
+              </Button>
+            </div>
+          )}
         </CardHeader>
         <CardContent className="space-y-3">
           <Textarea
@@ -1491,14 +1523,21 @@ export default function DailyStrategy({ period = "daily" }: DailyStrategyProps) 
                 <RefreshCw className="w-3 h-3 mr-1" />
                 기본 프롬프트
               </Button>
-              <Button onClick={handleGenerate} disabled={isFetching || isLoading} variant="outline" className="h-8 gap-1.5 px-3 text-xs">
+              <Button onClick={handleGenerate} disabled={isFetching || isLoading || (!isAdmin && period !== "daily")} variant="outline" className="h-8 gap-1.5 px-3 text-xs">
                 {isFetching || isLoading ? (
                   <><Loader2 className="w-3.5 h-3.5 animate-spin" /> 시장 데이터</>
                 ) : (
                   <><BarChart3 className="w-3.5 h-3.5" /> 시장 데이터 보고서</>
                 )}
               </Button>
-              <Button onClick={() => aiAnalyzeMutation.mutate()} disabled={aiAnalyzeMutation.isPending || !prompt.trim()} className="h-8 gap-1.5 px-4">
+              <Button onClick={() => {
+                if (!isAdmin && !hasAiKey) {
+                  toast({ title: "API 키 필요", description: "AI 분석을 사용하려면 개인 API 키를 먼저 등록해주세요.", variant: "destructive" });
+                  setShowApiKeySetup(true);
+                  return;
+                }
+                aiAnalyzeMutation.mutate();
+              }} disabled={aiAnalyzeMutation.isPending || !prompt.trim() || (!isAdmin && period !== "daily")} className="h-8 gap-1.5 px-4">
                 {aiAnalyzeMutation.isPending ? (
                   <><Loader2 className="w-4 h-4 animate-spin" /> AI 분석 중...</>
                 ) : (
@@ -1592,42 +1631,95 @@ export default function DailyStrategy({ period = "daily" }: DailyStrategyProps) 
         </Card>
       )}
 
-      {/* ===== 최근 보고서 목차 (최대 5개) ===== */}
+      {/* ===== 보고서 목록 (공통/공유/개인 분류) ===== */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
-            <FileText className="w-5 h-5 text-indigo-500" />
-            최근 보고서
-            <span className="text-xs text-muted-foreground font-normal ml-1">
-              (최대 5개 저장)
-            </span>
-          </CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base flex items-center gap-2">
+              <FileText className="w-5 h-5 text-indigo-500" />
+              보고서 목록
+            </CardTitle>
+          </div>
+          {/* 필터 탭 */}
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            {([
+              { key: "all", label: "전체", icon: "📋" },
+              { key: "common", label: "공통보고서", icon: "📌" },
+              { key: "shared", label: "공유보고서", icon: "🌐" },
+              { key: "my", label: "개인보고서", icon: "🔒" },
+            ] as const).map(({ key, label, icon }) => {
+              const countFn = (filter: string) => {
+                const items = [...savedReports, ...savedAnalyses];
+                if (filter === "all") return items.length;
+                return items.filter(i => i.reportType === filter).length;
+              };
+              const cnt = countFn(key);
+              return (
+                <Button
+                  key={key}
+                  variant={reportListFilter === key ? "default" : "outline"}
+                  size="sm"
+                  className="h-7 text-xs gap-1"
+                  onClick={() => setReportListFilter(key)}
+                >
+                  {icon} {label}
+                  {cnt > 0 && <span className="text-[10px] opacity-70">({cnt})</span>}
+                </Button>
+              );
+            })}
+          </div>
         </CardHeader>
         <CardContent>
-          {savedReports.length === 0 && savedAnalyses.length === 0 ? (
-            <div className="py-8 text-center text-muted-foreground">
-              <FileText className="w-10 h-10 mx-auto mb-3 opacity-20" />
-              <p className="text-sm">저장된 보고서가 없습니다.</p>
-              <p className="text-xs mt-1">
-                {isLoggedIn
-                  ? '"시장 데이터 보고서" 또는 "AI 분석 실행" 버튼으로 보고서를 생성하세요.'
-                  : "로그인하면 보고서를 생성하고 공유된 보고서를 확인할 수 있습니다."}
-              </p>
-            </div>
-          ) : (
-            <div className="divide-y">
-              {/* 시간순 통합 리스트: AI 분석 + 시장 보고서 */}
-              {(() => {
-                type MergedItem =
-                  | { type: "analysis"; data: typeof savedAnalyses[0] }
-                  | { type: "report"; data: typeof savedReports[0] };
-                const merged: MergedItem[] = [
-                  ...savedAnalyses.map((a) => ({ type: "analysis" as const, data: a })),
-                  ...savedReports.map((r) => ({ type: "report" as const, data: r })),
-                ];
-                // id는 Date.now() 기반이므로 내림차순 정렬 (최신 먼저)
-                merged.sort((a, b) => Number(b.data.id) - Number(a.data.id));
-                return merged.map((item, idx) => {
+          {(() => {
+            type MergedItem =
+              | { type: "analysis"; data: typeof savedAnalyses[0] }
+              | { type: "report"; data: typeof savedReports[0] };
+
+            // 필터링
+            const filterFn = (item: { reportType?: string }) => {
+              if (reportListFilter === "all") return true;
+              // 개인보고서: 본인이 만든 보고서 중 공유하지 않은 것
+              if (reportListFilter === "my") return item.reportType === "personal" || (item.reportType !== "common" && item.reportType !== "shared");
+              return item.reportType === reportListFilter;
+            };
+
+            const filteredAnalyses = savedAnalyses.filter(filterFn);
+            const filteredReports = savedReports.filter(filterFn);
+
+            if (filteredReports.length === 0 && filteredAnalyses.length === 0) {
+              const emptyMessages: Record<string, string> = {
+                all: "저장된 보고서가 없습니다.",
+                common: "공통보고서가 없습니다. 관리자가 생성한 보고서가 여기에 표시됩니다.",
+                shared: "공유된 보고서가 없습니다. 다른 사용자가 공유한 보고서가 여기에 표시됩니다.",
+                my: "개인보고서가 없습니다. 직접 생성한 보고서가 여기에 표시됩니다.",
+              };
+              return (
+                <div className="py-8 text-center text-muted-foreground">
+                  <FileText className="w-10 h-10 mx-auto mb-3 opacity-20" />
+                  <p className="text-sm">{emptyMessages[reportListFilter]}</p>
+                  {reportListFilter === "all" && isLoggedIn && (
+                    <p className="text-xs mt-1">"시장 데이터 보고서" 또는 "AI 분석 실행" 버튼으로 보고서를 생성하세요.</p>
+                  )}
+                </div>
+              );
+            }
+
+            const merged: MergedItem[] = [
+              ...filteredAnalyses.map((a) => ({ type: "analysis" as const, data: a })),
+              ...filteredReports.map((r) => ({ type: "report" as const, data: r })),
+            ];
+            merged.sort((a, b) => Number(b.data.id) - Number(a.data.id));
+
+            const reportTypeBadge = (rt?: ReportType) => {
+              if (rt === "common") return <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400 font-medium flex-shrink-0">📌 공통</span>;
+              if (rt === "shared") return <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400 font-medium flex-shrink-0"><Globe className="w-2.5 h-2.5 inline mr-0.5" />공유</span>;
+              if (rt === "personal") return <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 font-medium flex-shrink-0"><Lock className="w-2.5 h-2.5 inline mr-0.5" />개인</span>;
+              return null;
+            };
+
+            return (
+              <div className="divide-y">
+                {merged.map((item, idx) => {
                   if (item.type === "analysis") {
                     const saved = item.data;
                     const isEtfSource = (saved as any).source === "etf-realtime";
@@ -1640,11 +1732,11 @@ export default function DailyStrategy({ period = "daily" }: DailyStrategyProps) 
                             <span className="text-sm font-medium truncate hover:text-primary transition-colors">
                               {isEtfSource ? "실시간ETF AI 분석" : "AI 분석 보고서"}
                             </span>
-                            {idx === 0 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-bold flex-shrink-0">최신</span>}
+                            {idx === 0 && reportListFilter === "all" && <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-bold flex-shrink-0">최신</span>}
+                            {reportTypeBadge(saved.reportType)}
                             {isEtfSource && <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400 font-medium flex-shrink-0">📈 ETF</span>}
-                            {saved.urls.length > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-600 font-medium flex-shrink-0">🔗 URL {saved.urls.length}</span>}
-                            {saved.fileNames.length > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-600 font-medium flex-shrink-0">📎 파일 {saved.fileNames.length}</span>}
-                            {saved.isShared && <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400 font-medium flex-shrink-0"><Globe className="w-2.5 h-2.5 inline mr-0.5" />공유</span>}
+                            {saved.urls.length > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-600 font-medium flex-shrink-0">🔗 {saved.urls.length}</span>}
+                            {saved.fileNames.length > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-600 font-medium flex-shrink-0">📎 {saved.fileNames.length}</span>}
                           </div>
                           <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
                             <Clock className="w-3 h-3" />
@@ -1658,7 +1750,7 @@ export default function DailyStrategy({ period = "daily" }: DailyStrategyProps) 
                           <Button variant="ghost" size="icon" className="h-7 w-7" title="상세 보기" onClick={() => { setViewingAnalysis(saved); setAnalysisFontSize(DEFAULT_FONT_SIZE); }}>
                             <Eye className="w-3.5 h-3.5" />
                           </Button>
-                          {canManage && (
+                          {canManage && saved.reportType !== "common" && (
                             <>
                               <Button variant="ghost" size="icon" className="h-7 w-7" title={saved.isShared ? "공유 해제" : "공유하기"} onClick={() => handleToggleShareAnalysis(saved.id, !!saved.isShared)}>
                                 {saved.isShared ? <Globe className="w-3.5 h-3.5 text-green-500" /> : <Lock className="w-3.5 h-3.5 text-muted-foreground" />}
@@ -1667,6 +1759,11 @@ export default function DailyStrategy({ period = "daily" }: DailyStrategyProps) 
                                 <Trash2 className="w-3.5 h-3.5" />
                               </Button>
                             </>
+                          )}
+                          {isAdmin && saved.reportType === "common" && (
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" title="삭제" onClick={() => handleDeleteAnalysis(saved.id)}>
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </Button>
                           )}
                         </div>
                       </div>
@@ -1680,8 +1777,8 @@ export default function DailyStrategy({ period = "daily" }: DailyStrategyProps) 
                         <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { setViewingReport(saved); setReportFontSize(DEFAULT_FONT_SIZE); }}>
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-sm font-medium truncate hover:text-primary transition-colors">{saved.title}</span>
-                            {idx === 0 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400 font-bold flex-shrink-0">최신</span>}
-                            {saved.isShared && <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400 font-medium flex-shrink-0"><Globe className="w-2.5 h-2.5 inline mr-0.5" />공유</span>}
+                            {idx === 0 && reportListFilter === "all" && <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400 font-bold flex-shrink-0">최신</span>}
+                            {reportTypeBadge(saved.reportType)}
                           </div>
                           <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
                             <Clock className="w-3 h-3" />
@@ -1700,7 +1797,7 @@ export default function DailyStrategy({ period = "daily" }: DailyStrategyProps) 
                           <Button variant="ghost" size="icon" className="h-7 w-7" title="HTML 보고서" onClick={() => openReportHtml(saved.report, saved.periodLabel)}>
                             <FileOutput className="w-3.5 h-3.5" />
                           </Button>
-                          {canManage && (
+                          {canManage && saved.reportType !== "common" && (
                             <>
                               <Button variant="ghost" size="icon" className="h-7 w-7" title={saved.isShared ? "공유 해제" : "공유하기"} onClick={() => handleToggleShareReport(saved.id, !!saved.isShared)}>
                                 {saved.isShared ? <Globe className="w-3.5 h-3.5 text-green-500" /> : <Lock className="w-3.5 h-3.5 text-muted-foreground" />}
@@ -1710,14 +1807,19 @@ export default function DailyStrategy({ period = "daily" }: DailyStrategyProps) 
                               </Button>
                             </>
                           )}
+                          {isAdmin && saved.reportType === "common" && (
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" title="삭제" onClick={() => handleDelete(saved.id)}>
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </Button>
+                          )}
                         </div>
                       </div>
                     );
                   }
-                });
-              })()}
-            </div>
-          )}
+                })}
+              </div>
+            );
+          })()}
         </CardContent>
       </Card>
 
@@ -1740,7 +1842,7 @@ export default function DailyStrategy({ period = "daily" }: DailyStrategyProps) 
               <p className="text-sm font-medium text-destructive">보고서 생성 실패</p>
               <p className="text-xs text-muted-foreground">{(error as Error)?.message}</p>
             </div>
-            <Button variant="outline" size="sm" onClick={handleGenerate} className="h-7 text-xs">
+            <Button variant="outline" size="sm" onClick={handleGenerate} disabled={!isAdmin && period !== "daily"} className="h-7 text-xs">
               다시 시도
             </Button>
           </CardContent>
@@ -1766,7 +1868,7 @@ export default function DailyStrategy({ period = "daily" }: DailyStrategyProps) 
         </div>
         {isLoggedIn && (
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={handleGenerate} disabled={isFetching} className="gap-2">
+          <Button variant="outline" size="sm" onClick={handleGenerate} disabled={isFetching || (!isAdmin && period !== "daily")} className="gap-2">
             {isFetching ? <Loader2 className="w-4 h-4 animate-spin" /> : <FilePlus className="w-4 h-4" />}
             새로 생성
           </Button>
