@@ -787,18 +787,97 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
   const [reportFontSize, setReportFontSize] = useState(DEFAULT_FONT_SIZE);
   const [analysisFontSize, setAnalysisFontSize] = useState(DEFAULT_FONT_SIZE);
 
-  // ===== 서버에서 보고서/분석 목록 로딩 =====
+  // ===== 서버에서 보고서/분석 목록 로딩 + localStorage → DB 마이그레이션 =====
   useEffect(() => {
+    // localStorage → 서버 마이그레이션 함수 (admin만)
+    const migrateReportsToServer = async (localReports: SavedReport[]) => {
+      if (!isAdmin || localReports.length === 0) return;
+      const migrated: SavedReport[] = [];
+      for (const r of localReports) {
+        try {
+          const res = await fetch("/api/strategy-reports", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({
+              period,
+              title: r.title,
+              periodLabel: r.periodLabel,
+              report: r.report,
+            }),
+          });
+          if (res.ok) {
+            const serverSaved = await res.json();
+            migrated.push(serverSaved);
+          }
+        } catch { /* 개별 실패 무시 */ }
+      }
+      if (migrated.length > 0) {
+        setSavedReports(migrated);
+        // 마이그레이션 완료 후 localStorage 정리
+        localStorage.removeItem(storageKey(SAVED_REPORTS_BASE, period));
+        console.log(`[Strategy] ${period} 보고서 ${migrated.length}건 DB 마이그레이션 완료`);
+      }
+    };
+
+    const migrateAnalysesToServer = async (localAnalyses: SavedAnalysis[]) => {
+      if (!isAdmin || localAnalyses.length === 0) return;
+      const migrated: SavedAnalysis[] = [];
+      for (const a of localAnalyses) {
+        try {
+          const res = await fetch("/api/strategy-analyses", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({
+              period,
+              prompt: a.prompt,
+              urls: a.urls,
+              fileNames: a.fileNames,
+              source: a.source || "strategy",
+              result: a.result,
+            }),
+          });
+          if (res.ok) {
+            const serverSaved = await res.json();
+            migrated.push(serverSaved);
+          }
+        } catch { /* 개별 실패 무시 */ }
+      }
+      if (migrated.length > 0) {
+        setSavedAnalyses(migrated);
+        // 마이그레이션 완료 후 localStorage 정리
+        localStorage.removeItem(storageKey(AI_ANALYSIS_BASE, period));
+        console.log(`[Strategy] ${period} AI분석 ${migrated.length}건 DB 마이그레이션 완료`);
+      }
+    };
+
     // 서버에서 저장된 보고서 조회
     fetch(`/api/strategy-reports/${period}`, { credentials: "include" })
       .then(res => res.ok ? res.json() : { reports: [] })
       .then(data => {
         if (data.reports?.length > 0) {
           setSavedReports(data.reports);
+          // 서버에 이미 있어도, localStorage에 남아있으면 추가 마이그레이션
+          if (isAdmin) {
+            const localReports = getSavedReports(period);
+            if (localReports.length > 0) {
+              migrateReportsToServer(localReports).then(() => {
+                // 마이그레이션 후 서버에서 다시 로딩
+                fetch(`/api/strategy-reports/${period}`, { credentials: "include" })
+                  .then(res => res.ok ? res.json() : null)
+                  .then(refreshed => { if (refreshed?.reports?.length > 0) setSavedReports(refreshed.reports); })
+                  .catch(() => {});
+              });
+            }
+          }
         } else {
-          // 서버에 없으면 localStorage에서 마이그레이션 (admin만)
+          // 서버에 없으면 localStorage에서 마이그레이션
           const localReports = getSavedReports(period);
-          if (localReports.length > 0) setSavedReports(localReports);
+          if (localReports.length > 0) {
+            setSavedReports(localReports); // 먼저 화면에 표시
+            migrateReportsToServer(localReports); // 백그라운드로 DB 업로드
+          }
         }
       })
       .catch(() => {
@@ -812,17 +891,31 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
       .then(data => {
         if (data.analyses?.length > 0) {
           setSavedAnalyses(data.analyses);
+          // 서버에 이미 있어도, localStorage에 남아있으면 추가 마이그레이션
+          if (isAdmin) {
+            const localAnalyses = getSavedAnalyses(period);
+            if (localAnalyses.length > 0) {
+              migrateAnalysesToServer(localAnalyses).then(() => {
+                fetch(`/api/strategy-analyses/${period}`, { credentials: "include" })
+                  .then(res => res.ok ? res.json() : null)
+                  .then(refreshed => { if (refreshed?.analyses?.length > 0) setSavedAnalyses(refreshed.analyses); })
+                  .catch(() => {});
+              });
+            }
+          }
         } else {
-          // 서버에 없으면 localStorage에서 마이그레이션 (admin만)
           const localAnalyses = getSavedAnalyses(period);
-          if (localAnalyses.length > 0) setSavedAnalyses(localAnalyses);
+          if (localAnalyses.length > 0) {
+            setSavedAnalyses(localAnalyses);
+            migrateAnalysesToServer(localAnalyses);
+          }
         }
       })
       .catch(() => {
         const localAnalyses = getSavedAnalyses(period);
         if (localAnalyses.length > 0) setSavedAnalyses(localAnalyses);
       });
-  }, [period]);
+  }, [period, isAdmin]);
 
   // ===== Auto-save prompt =====
   useEffect(() => {
