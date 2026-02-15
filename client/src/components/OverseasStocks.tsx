@@ -399,7 +399,7 @@ export default function OverseasStocks() {
       case "SSE": prefix = "SHS"; break;
       default: prefix = "NAS";
     }
-    return `https://stock.naver.com/world/item/${prefix}${code}`;
+    return `https://stock.naver.com/world/stock/${prefix}${code}`;
   };
 
   const toggleCheck = (code: string) => {
