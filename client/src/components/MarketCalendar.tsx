@@ -161,14 +161,14 @@ export default function MarketCalendar() {
       </div>
 
       {/* 바로가기 링크 */}
-      <Card>
-        <CardContent className="p-3">
+      <div>
+        <div className="p-3">
           <div className="flex flex-wrap gap-2 items-center">
             <span className="text-xs font-medium text-muted-foreground mr-1">📌 바로가기</span>
             {quickLinks.map(({ label, url, icon }) => (
               <Button
                 key={label}
-                variant="outline"
+                variant="ghost"
                 size="sm"
                 className="h-7 text-xs gap-1"
                 onClick={() => window.open(url, "_blank", "noopener,noreferrer")}
@@ -178,8 +178,8 @@ export default function MarketCalendar() {
               </Button>
             ))}
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* 탭 */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
