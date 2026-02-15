@@ -6060,7 +6060,10 @@ ${newsSummary}`;
   });
 
   // ===== 네이버 OAuth + 카페 글쓰기 (관리자 전용) =====
-  const NAVER_REDIRECT_URI = `${process.env.VERCEL ? "https://" + process.env.VERCEL_URL : "http://localhost:" + (process.env.PORT || 3000)}/api/auth/naver/callback`;
+  // SITE_URL 환경변수 우선, 없으면 VERCEL_URL, 로컬이면 localhost
+  const SITE_BASE_URL = process.env.SITE_URL
+    || (process.env.VERCEL ? "https://lifefit1.vercel.app" : `http://localhost:${process.env.PORT || 3000}`);
+  const NAVER_REDIRECT_URI = `${SITE_BASE_URL}/api/auth/naver/callback`;
 
   // 네이버 OAuth 로그인 시작
   app.get("/api/auth/naver", requireAdmin, (req, res) => {
