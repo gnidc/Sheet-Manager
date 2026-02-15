@@ -347,6 +347,7 @@ export default function ResearchList() {
     bgColor: string = "bg-muted/50",
     showCategory: boolean = false,
     showReadCount: boolean = false,
+    showFileIcon: boolean = false, // 투자전략 리포트: file 아이콘 + finance.naver.com 링크
   ) => (
     <CardContent className="p-0">
       <div className="overflow-x-auto">
@@ -376,6 +377,8 @@ export default function ResearchList() {
             {items.map((item, index) => {
               const isChecked = checked.has(index);
               const isAlreadyKey = keyResearchItems.some(k => k.title === item.title && k.source === item.source);
+              // finance.naver.com 링크가 있으면 우선 사용
+              const clickLink = (showFileIcon && item.file) ? item.file : item.link;
               return (
                 <TableRow
                   key={index}
@@ -396,10 +399,13 @@ export default function ResearchList() {
                   )}
                   <TableCell
                     className="cursor-pointer"
-                    onClick={() => { if (item.link) window.open(item.link, "_blank", "noopener,noreferrer"); }}
+                    onClick={() => { if (clickLink) window.open(clickLink, "_blank", "noopener,noreferrer"); }}
                   >
                     <div className="flex items-center gap-2">
                       {isAlreadyKey && <Star className="w-3 h-3 text-amber-500 fill-amber-500 flex-shrink-0" />}
+                      {showFileIcon && (
+                        <FileText className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
+                      )}
                       <span className="font-medium text-sm group-hover:text-primary transition-colors line-clamp-2">
                         {item.title}
                       </span>
@@ -558,6 +564,7 @@ export default function ResearchList() {
             "bg-blue-50/50 dark:bg-blue-950/10",
             false, // showCategory (all same)
             true,  // showReadCount
+            true,  // showFileIcon: finance.naver.com 링크 + 파일 아이콘
           )
         ) : (
           <CardContent className="py-8 text-center">

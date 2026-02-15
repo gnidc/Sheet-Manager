@@ -1517,16 +1517,31 @@ export async function registerRoutes(
       ]);
 
       // stock.naver.com API 응답을 공통 포맷으로 변환
-      const mapItem = (item: any) => ({
-        title: item.title || "",
-        link: (item.endUrl || "").replace("m.stock.naver.com", "stock.naver.com"),
-        source: item.brokerName || "",
-        date: item.writeDate || "",
-        file: "", // stock.naver.com API에는 PDF 직접 링크 없음
-        readCount: item.readCount || "0",
-        category: item.category || item.researchCategory || "",
-        analyst: item.analyst || "",
-      });
+      const mapItem = (item: any) => {
+        const link = (item.endUrl || "").replace("m.stock.naver.com", "stock.naver.com");
+        return {
+          title: item.title || "",
+          link,
+          source: item.brokerName || "",
+          date: item.writeDate || "",
+          file: "", // stock.naver.com API에는 PDF 직접 링크 없음
+          readCount: item.readCount || "0",
+          category: item.category || item.researchCategory || "",
+          analyst: item.analyst || "",
+        };
+      };
+
+      // 투자전략 리포트용 매퍼: finance.naver.com 링크 생성
+      const mapStrategyItem = (item: any) => {
+        const base = mapItem(item);
+        // endUrl에서 nid 추출 (예: /research/invest/37905 또는 /research/INVEST/37905)
+        const urlMatch = (item.endUrl || "").match(/\/(\d+)(?:\?.*)?$/);
+        const nid = item.nid || item.investCode || item.seq || (urlMatch ? urlMatch[1] : "");
+        if (nid) {
+          base.file = `https://finance.naver.com/research/invest_read.naver?nid=${nid}&page=1`;
+        }
+        return base;
+      };
 
       // 요즘 많이 보는 리포트 (다양한 카테고리)
       let popularItems: any[] = [];
@@ -1535,11 +1550,11 @@ export async function registerRoutes(
         popularItems = rawPopular.map(mapItem);
       }
 
-      // 투자전략 최신 리포트
+      // 투자전략 최신 리포트 (finance.naver.com 링크 포함)
       let strategyItems: any[] = [];
       if (strategyRes.status === "fulfilled" && strategyRes.value?.data) {
         const rawStrategy = strategyRes.value.data?.content || (Array.isArray(strategyRes.value.data) ? strategyRes.value.data : []);
-        strategyItems = rawStrategy.map(mapItem);
+        strategyItems = rawStrategy.map(mapStrategyItem);
       }
 
       res.json({
