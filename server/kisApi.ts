@@ -1,7 +1,7 @@
 import axios from "axios";
 
 // ========== KIS API 설정 ==========
-const KIS_MOCK_TRADING = process.env.KIS_MOCK_TRADING === "true";
+const KIS_MOCK_TRADING = process.env.KIS_MOCK_TRADING?.toLowerCase() === "true";
 const KIS_REAL_URL = "https://openapi.koreainvestment.com:9443";
 const KIS_MOCK_URL = "https://openapivts.koreainvestment.com:29443";
 // 매매용 URL (모의/실전 분리)
