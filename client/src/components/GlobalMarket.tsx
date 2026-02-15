@@ -347,7 +347,7 @@ export default function GlobalMarket() {
                         <TableCell className="text-xs text-muted-foreground font-mono">{i + 1}</TableCell>
                         <TableCell>
                           <a
-                            href={stock.code ? `https://stock.naver.com/world/stock/${stock.code}` : "#"}
+                            href={stock.code ? `https://stock.naver.com/worldstock/stock/${stock.code}.O/price` : "#"}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="hover:text-primary hover:underline"
