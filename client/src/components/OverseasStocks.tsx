@@ -588,6 +588,7 @@ export default function OverseasStocks() {
               공통 관심종목
               <span className="text-xs text-muted-foreground font-normal">({commonStocks.length}종목)</span>
             </CardTitle>
+            <p className="text-[11px] text-muted-foreground mt-1">상세 버튼을 누르면 해당종목 상세내용을 확인할 수 있습니다.</p>
           </CardHeader>
           <CardContent className="px-2 pb-2">
             {commonStocks.length === 0 ? (
@@ -649,6 +650,7 @@ export default function OverseasStocks() {
               개인 관심종목
               <span className="text-xs text-muted-foreground font-normal">({personalStocks.length}종목)</span>
             </CardTitle>
+            <p className="text-[11px] text-muted-foreground mt-1">상세 버튼을 누르면 해당종목 상세내용을 확인할 수 있습니다.</p>
           </CardHeader>
           <CardContent className="px-2 pb-2">
             {personalStocks.length === 0 ? (
