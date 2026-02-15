@@ -252,132 +252,91 @@ function formatReportToMarkdown(report: any): string {
   return parts.join('\n');
 }
 
-// 한국어 날짜 문자열을 Date 객체로 파싱 (예: "2026. 2. 15. 오후 1:33:13")
-function parseKoreanDate(dateStr: string): Date {
-  try {
-    // "2026. 2. 15. 오후 1:33:13" 같은 형식 처리
-    const cleaned = dateStr
-      .replace(/\./g, "")
-      .replace(/오후/g, "PM")
-      .replace(/오전/g, "AM")
-      .trim();
-    const d = new Date(cleaned);
-    if (!isNaN(d.getTime())) return d;
-    // fallback: 원본 문자열로 시도
-    return new Date(dateStr);
-  } catch {
-    return new Date(0);
-  }
-}
-
-// DB에서 모든 기간의 최신 공통보고서를 가져와 가장 최근 것을 반환
+// DB에서 일일보고서 > 공통보고서의 최신 항목을 가져오기
 async function fetchLatestReportFromDB(): Promise<{ text: string; periodLabel: string } | null> {
   try {
-    const periods = ["daily", "weekly", "monthly", "yearly"] as const;
-
-    // 모든 기간의 AI분석 + 시장보고서를 병렬로 가져오기
-    type Candidate = { text: string; periodLabel: string; createdAt: Date; type: string };
-    const candidates: Candidate[] = [];
-
-    const fetches = periods.flatMap(p => [
-      // AI 분석
-      fetch(`/api/strategy-analyses/${p}?scope=common`, { credentials: "include" })
-        .then(res => res.ok ? res.json() : null)
-        .then(data => {
-          if (!data) return;
-          const analyses = data.analyses || [];
-          if (analyses.length > 0) {
-            const newest = analyses[0];
-            const analysis = newest.result?.analysis || "";
-            if (analysis) {
-              candidates.push({
-                text: analysis,
-                periodLabel: PERIOD_LABELS[p] || p,
-                createdAt: parseKoreanDate(newest.createdAt),
-                type: "analysis",
-              });
-            }
+    // 1) 일일 AI 분석 (공통보고서) - 최신 1건
+    try {
+      const res = await fetch(`/api/strategy-analyses/daily?scope=common`, { credentials: "include" });
+      if (res.ok) {
+        const data = await res.json();
+        const analyses = data.analyses || [];
+        if (analyses.length > 0) {
+          const newest = analyses[0]; // 서버에서 최신순 반환
+          const analysis = newest.result?.analysis || "";
+          if (analysis) {
+            const lines: string[] = [];
+            lines.push(`# Comment`);
+            lines.push(''); lines.push(''); lines.push('');
+            lines.push(`# 📊 AI 일간 분석 보고서`);
+            lines.push('');
+            lines.push(`> 생성 시간: ${newest.createdAt}`);
+            lines.push('');
+            lines.push(analysis);
+            lines.push('');
+            lines.push('---');
+            lines.push('*이 보고서는 AI가 자동 수집 데이터를 기반으로 생성한 내용입니다.*');
+            lines.push('*데이터 출처: 네이버 금융, Yahoo Finance, CoinGecko, 한국투자증권 API 등*');
+            return { text: lines.join('\n'), periodLabel: "일간" };
           }
-        })
-        .catch(() => {}),
-      // 시장 보고서
-      fetch(`/api/strategy-reports/${p}?scope=common`, { credentials: "include" })
-        .then(res => res.ok ? res.json() : null)
-        .then(data => {
-          if (!data) return;
-          const reports = data.reports || [];
-          if (reports.length > 0) {
-            const newest = reports[0];
-            if (newest.report) {
-              candidates.push({
-                text: formatReportToMarkdown(newest.report),
-                periodLabel: PERIOD_LABELS[p] || p,
-                createdAt: parseKoreanDate(newest.createdAt),
-                type: "report",
-              });
-            }
+        }
+      }
+    } catch { /* skip */ }
+
+    // 2) 일일 시장 보고서 (공통보고서) - AI분석이 없으면
+    try {
+      const res = await fetch(`/api/strategy-reports/daily?scope=common`, { credentials: "include" });
+      if (res.ok) {
+        const data = await res.json();
+        const reports = data.reports || [];
+        if (reports.length > 0) {
+          const newest = reports[0];
+          if (newest.report) {
+            const body = formatReportToMarkdown(newest.report);
+            const lines: string[] = [];
+            lines.push(`# Comment`);
+            lines.push(''); lines.push(''); lines.push('');
+            lines.push(`# 📊 일간 시장 보고서`);
+            lines.push('');
+            lines.push(`> 생성 시간: ${newest.createdAt}`);
+            lines.push('');
+            lines.push(body);
+            lines.push('');
+            lines.push('---');
+            lines.push('*이 보고서는 자동 수집된 시장 데이터를 기반으로 생성한 보고서입니다.*');
+            return { text: lines.join('\n'), periodLabel: "일간" };
           }
-        })
-        .catch(() => {}),
-    ]);
-
-    await Promise.all(fetches);
-
-    // 가장 최신 것을 선택 (AI분석 우선, 같은 시간이면 분석 > 보고서)
-    if (candidates.length > 0) {
-      candidates.sort((a, b) => {
-        const timeDiff = b.createdAt.getTime() - a.createdAt.getTime();
-        if (timeDiff !== 0) return timeDiff;
-        // 같은 시간이면 AI분석 우선
-        return a.type === "analysis" ? -1 : 1;
-      });
-
-      const best = candidates[0];
-      const isAnalysis = best.type === "analysis";
-      const lines: string[] = [];
-      lines.push(`# Comment`);
-      lines.push(''); lines.push(''); lines.push('');
-      lines.push(`# 📊 ${isAnalysis ? `AI ${best.periodLabel} 분석` : `${best.periodLabel} 시장`} 보고서`);
-      lines.push('');
-      lines.push(`> 생성 시간: ${best.createdAt.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}`);
-      lines.push('');
-      lines.push(best.text);
-      lines.push('');
-      lines.push('---');
-      lines.push(isAnalysis
-        ? '*이 보고서는 AI가 자동 수집 데이터를 기반으로 생성한 내용입니다.*\n*데이터 출처: 네이버 금융, Yahoo Finance, CoinGecko, 한국투자증권 API 등*'
-        : '*이 보고서는 자동 수집된 시장 데이터를 기반으로 생성한 보고서입니다.*'
-      );
-      return { text: lines.join('\n'), periodLabel: best.periodLabel };
-    }
+        }
+      }
+    } catch { /* skip */ }
 
     // 3) ETF 실시간 분석 결과 (localStorage fallback)
-    const etfSaved = localStorage.getItem("etf_analysis_result");
-    if (etfSaved) {
-      try {
+    try {
+      const etfSaved = localStorage.getItem("etf_analysis_result");
+      if (etfSaved) {
         const etfData = JSON.parse(etfSaved) as {
           analysis: string;
           analyzedAt: string;
           dataPoints?: { risingCount: number; fallingCount: number; newsCount: number; market: string };
         };
         if (etfData.analysis) {
-            const lines: string[] = [];
-            lines.push(`# Comment`);
-            lines.push(''); lines.push(''); lines.push('');
-            lines.push(`# 📊 AI 트렌드 분석 보고서`);
-            lines.push('');
-            lines.push(`> 분석 시간: ${etfData.analyzedAt}`);
-            if (etfData.dataPoints) {
-              lines.push(`> 📈 상승 ETF ${etfData.dataPoints.risingCount}개 | 📉 하락 ETF ${etfData.dataPoints.fallingCount}개 | 📰 뉴스 ${etfData.dataPoints.newsCount}건 | ${etfData.dataPoints.market || ""}`);
-            }
-            lines.push(''); lines.push(etfData.analysis); lines.push('');
-            lines.push('---');
-            lines.push('*이 보고서는 AI(Gemini)가 실시간 데이터를 기반으로 자동 생성한 내용입니다.*');
-            lines.push('*데이터 출처: 네이버 금융, FnGuide, 한국투자증권 API*');
-            return { text: lines.join('\n'), periodLabel: "실시간ETF" };
+          const lines: string[] = [];
+          lines.push(`# Comment`);
+          lines.push(''); lines.push(''); lines.push('');
+          lines.push(`# 📊 AI 트렌드 분석 보고서`);
+          lines.push('');
+          lines.push(`> 분석 시간: ${etfData.analyzedAt}`);
+          if (etfData.dataPoints) {
+            lines.push(`> 📈 상승 ETF ${etfData.dataPoints.risingCount}개 | 📉 하락 ETF ${etfData.dataPoints.fallingCount}개 | 📰 뉴스 ${etfData.dataPoints.newsCount}건 | ${etfData.dataPoints.market || ""}`);
+          }
+          lines.push(''); lines.push(etfData.analysis); lines.push('');
+          lines.push('---');
+          lines.push('*이 보고서는 AI(Gemini)가 실시간 데이터를 기반으로 자동 생성한 내용입니다.*');
+          lines.push('*데이터 출처: 네이버 금융, FnGuide, 한국투자증권 API*');
+          return { text: lines.join('\n'), periodLabel: "실시간ETF" };
         }
-      } catch { /* skip */ }
-    }
+      }
+    } catch { /* skip */ }
 
     return null;
   } catch {
