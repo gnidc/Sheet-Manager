@@ -143,44 +143,92 @@ const DEFAULT_TEMPLATE = `# 📊 ETF 시장 일일 보고서
 
 const DEFAULT_TAGS = ["kr", "krsuccess", "avle", "investment"];
 
-// ===== localStorage에서 AI 분석 보고서 불러오기 (일간/주간/월간/연간 중 가장 최근 보고서) =====
+// ===== DB API에서 AI 분석 보고서 불러오기 (공통보고서 우선) =====
 const PERIOD_LABELS: Record<string, string> = {
   daily: "일간", weekly: "주간", monthly: "월간", yearly: "연간",
 };
 
-function loadAIAnalysisFromStorage(): { text: string; periodLabel: string } | null {
+// DB에서 최신 공통 일일보고서/AI분석을 비동기로 가져오기
+async function fetchLatestReportFromDB(): Promise<{ text: string; periodLabel: string } | null> {
   try {
-    // 1) 투자전략(DailyStrategy)에서 저장된 일간/주간/월간/연간 AI 분석 보고서 검색
+    // 1) 투자전략 AI 분석 (공통보고서) - 일간부터 우선 검색
     const periods = ["daily", "weekly", "monthly", "yearly"] as const;
-    let latestAnalysis: { analysis: string; createdAt: string; period: string } | null = null;
-    let latestTs = 0;
 
     for (const p of periods) {
-      const raw = localStorage.getItem(`strategy_ai_analysis_${p}`);
-      if (!raw) continue;
       try {
-        const all = JSON.parse(raw) as Array<{
-          id: string;
-          createdAt: string;
-          result: { analysis: string; analyzedAt?: string };
-        }>;
-        if (!all.length) continue;
-        // id가 Date.now() 기반이므로 숫자로 정렬
-        const sorted = [...all].sort((a, b) => Number(b.id) - Number(a.id));
-        const newest = sorted[0];
-        const ts = Number(newest.id);
-        if (ts > latestTs && newest.result?.analysis) {
-          latestTs = ts;
-          latestAnalysis = {
-            analysis: newest.result.analysis,
-            createdAt: newest.createdAt,
-            period: p,
-          };
+        const res = await fetch(`/api/strategy-analyses/${p}?scope=common`, { credentials: "include" });
+        if (!res.ok) continue;
+        const data = await res.json();
+        const analyses = data.analyses || [];
+        if (analyses.length > 0) {
+          const newest = analyses[0]; // 서버에서 최신순으로 반환
+          const analysis = newest.result?.analysis || "";
+          if (analysis) {
+            const pLabel = PERIOD_LABELS[p] || p;
+            const lines: string[] = [];
+            lines.push(`# Comment`);
+            lines.push(''); lines.push(''); lines.push('');
+            lines.push(`# 📊 AI ${pLabel} 분석 보고서`);
+            lines.push('');
+            lines.push(`> 생성 시간: ${newest.createdAt}`);
+            lines.push('');
+            lines.push(analysis);
+            lines.push('');
+            lines.push('---');
+            lines.push('*이 보고서는 AI가 자동 수집 데이터를 기반으로 생성한 내용입니다.*');
+            lines.push('*데이터 출처: 네이버 금융, Yahoo Finance, CoinGecko, 한국투자증권 API 등*');
+            return { text: lines.join('\n'), periodLabel: pLabel };
+          }
         }
-      } catch { /* skip */ }
+      } catch { /* skip this period */ }
     }
 
-    // 2) 기존 ETF 실시간 분석 결과도 후보로 확인
+    // 2) 투자전략 시장 보고서 (공통보고서) - AI분석이 없으면 시장보고서
+    for (const p of periods) {
+      try {
+        const res = await fetch(`/api/strategy-reports/${p}?scope=common`, { credentials: "include" });
+        if (!res.ok) continue;
+        const data = await res.json();
+        const reports = data.reports || [];
+        if (reports.length > 0) {
+          const newest = reports[0];
+          const reportContent = newest.report;
+          if (reportContent) {
+            const pLabel = PERIOD_LABELS[p] || p;
+            // report 객체를 마크다운으로 변환
+            let body = "";
+            if (typeof reportContent === "string") {
+              body = reportContent;
+            } else if (reportContent.fullReport) {
+              body = reportContent.fullReport;
+            } else {
+              // 섹션들을 합쳐서 표시
+              const sections: string[] = [];
+              if (reportContent.market) sections.push(`## 시장 동향\n${reportContent.market}`);
+              if (reportContent.analysis) sections.push(`## 분석\n${reportContent.analysis}`);
+              if (reportContent.strategy) sections.push(`## 전략\n${reportContent.strategy}`);
+              if (reportContent.summary) sections.push(`## 요약\n${reportContent.summary}`);
+              body = sections.join('\n\n') || JSON.stringify(reportContent, null, 2);
+            }
+
+            const lines: string[] = [];
+            lines.push(`# Comment`);
+            lines.push(''); lines.push(''); lines.push('');
+            lines.push(`# 📊 ${pLabel} 시장 보고서`);
+            lines.push('');
+            lines.push(`> 생성 시간: ${newest.createdAt}`);
+            lines.push('');
+            lines.push(body);
+            lines.push('');
+            lines.push('---');
+            lines.push('*이 보고서는 AI가 자동 수집 데이터를 기반으로 생성한 내용입니다.*');
+            return { text: lines.join('\n'), periodLabel: pLabel };
+          }
+        }
+      } catch { /* skip this period */ }
+    }
+
+    // 3) 기존 ETF 실시간 분석 결과 (localStorage fallback)
     const etfSaved = localStorage.getItem("etf_analysis_result");
     if (etfSaved) {
       try {
@@ -189,45 +237,23 @@ function loadAIAnalysisFromStorage(): { text: string; periodLabel: string } | nu
           analyzedAt: string;
           dataPoints?: { risingCount: number; fallingCount: number; newsCount: number; market: string };
         };
-        // analyzedAt 시간 문자열에서 대략적 타임스탬프 추정 (최근 것인지 비교)
         if (etfData.analysis) {
-          // etf_analysis_result에는 id/타임스탬프가 없으므로 0으로 설정 (투자전략 결과 우선)
-          if (!latestAnalysis) {
-            const lines: string[] = [];
-            lines.push(`# Comment`);
-            lines.push(''); lines.push(''); lines.push('');
-            lines.push(`# 📊 AI 트렌드 분석 보고서`);
-            lines.push('');
-            lines.push(`> 분석 시간: ${etfData.analyzedAt}`);
-            if (etfData.dataPoints) {
-              lines.push(`> 📈 상승 ETF ${etfData.dataPoints.risingCount}개 | 📉 하락 ETF ${etfData.dataPoints.fallingCount}개 | 📰 뉴스 ${etfData.dataPoints.newsCount}건 | ${etfData.dataPoints.market || ""}`);
-            }
-            lines.push(''); lines.push(etfData.analysis); lines.push('');
-            lines.push('---');
-            lines.push('*이 보고서는 AI(Gemini)가 실시간 데이터를 기반으로 자동 생성한 내용입니다.*');
-            lines.push('*데이터 출처: 네이버 금융, FnGuide, 한국투자증권 API*');
-            return { text: lines.join('\n'), periodLabel: "실시간ETF" };
+          const lines: string[] = [];
+          lines.push(`# Comment`);
+          lines.push(''); lines.push(''); lines.push('');
+          lines.push(`# 📊 AI 트렌드 분석 보고서`);
+          lines.push('');
+          lines.push(`> 분석 시간: ${etfData.analyzedAt}`);
+          if (etfData.dataPoints) {
+            lines.push(`> 📈 상승 ETF ${etfData.dataPoints.risingCount}개 | 📉 하락 ETF ${etfData.dataPoints.fallingCount}개 | 📰 뉴스 ${etfData.dataPoints.newsCount}건 | ${etfData.dataPoints.market || ""}`);
           }
+          lines.push(''); lines.push(etfData.analysis); lines.push('');
+          lines.push('---');
+          lines.push('*이 보고서는 AI(Gemini)가 실시간 데이터를 기반으로 자동 생성한 내용입니다.*');
+          lines.push('*데이터 출처: 네이버 금융, FnGuide, 한국투자증권 API*');
+          return { text: lines.join('\n'), periodLabel: "실시간ETF" };
         }
       } catch { /* skip */ }
-    }
-
-    // 3) 투자전략 보고서가 있으면 포맷팅
-    if (latestAnalysis) {
-      const pLabel = PERIOD_LABELS[latestAnalysis.period] || latestAnalysis.period;
-      const lines: string[] = [];
-      lines.push(`# Comment`);
-      lines.push(''); lines.push(''); lines.push('');
-      lines.push(`# 📊 AI ${pLabel} 분석 보고서`);
-      lines.push('');
-      lines.push(`> 생성 시간: ${latestAnalysis.createdAt}`);
-      lines.push('');
-      lines.push(latestAnalysis.analysis);
-      lines.push('');
-      lines.push('---');
-      lines.push('*이 보고서는 AI가 자동 수집 데이터를 기반으로 생성한 내용입니다.*');
-      lines.push('*데이터 출처: 네이버 금융, Yahoo Finance, CoinGecko, 한국투자증권 API 등*');
-      return { text: lines.join('\n'), periodLabel: pLabel };
     }
 
     return null;
@@ -264,18 +290,38 @@ export default function SteemReport() {
 
   // ===== 폼 상태 =====
   const [steemAccount, setSteemAccount] = useState(() => localStorage.getItem("steem_account") || "seraphim502");
-  const [postTitle, setPostTitle] = useState(() => {
-    const loaded = loadAIAnalysisFromStorage();
-    return getDefaultTitle(loaded?.periodLabel);
-  });
-  const [postBody, setPostBody] = useState(() => loadAIAnalysisFromStorage()?.text || "");
+  const [postTitle, setPostTitle] = useState(() => getDefaultTitle());
+  const [postBody, setPostBody] = useState("");
   const [tagsInput, setTagsInput] = useState(DEFAULT_TAGS.join(", "));
   const [mainTag, setMainTag] = useState("kr");
   const [isPosting, setIsPosting] = useState(false);
+  const [isLoadingReport, setIsLoadingReport] = useState(false);
   const [viewingPost, setViewingPost] = useState<SteemPost | null>(null);
   const [editingDraft, setEditingDraft] = useState<SteemPost | null>(null);
 
   const bodyRef = useRef<HTMLTextAreaElement>(null);
+  const initialLoadDone = useRef(false);
+
+  // ===== 컴포넌트 마운트 시 DB에서 최신 보고서 자동 로드 =====
+  useEffect(() => {
+    if (initialLoadDone.current) return;
+    initialLoadDone.current = true;
+    
+    (async () => {
+      setIsLoadingReport(true);
+      try {
+        const report = await fetchLatestReportFromDB();
+        if (report) {
+          setPostBody(report.text);
+          setPostTitle(getDefaultTitle(report.periodLabel));
+        }
+      } catch {
+        // 실패 시 빈 상태 유지
+      } finally {
+        setIsLoadingReport(false);
+      }
+    })();
+  }, []);
 
   // ===== Steem Keychain 감지 =====
   useEffect(() => {
@@ -560,19 +606,30 @@ export default function SteemReport() {
     toast({ title: "초안을 편집 모드로 불러왔습니다" });
   }, []);
 
-  // ===== AI 분석 보고서 불러오기 (일간/주간/월간/연간 중 가장 최근) =====
-  const handleLoadAIReport = useCallback(() => {
-    const aiReport = loadAIAnalysisFromStorage();
-    if (aiReport) {
-      setPostBody(aiReport.text);
-      setPostTitle(getDefaultTitle(aiReport.periodLabel));
-      toast({ title: `✅ AI ${aiReport.periodLabel} 분석 보고서를 불러왔습니다` });
-    } else {
+  // ===== AI 분석 보고서 불러오기 (DB API에서 가져오기) =====
+  const handleLoadAIReport = useCallback(async () => {
+    setIsLoadingReport(true);
+    try {
+      const aiReport = await fetchLatestReportFromDB();
+      if (aiReport) {
+        setPostBody(aiReport.text);
+        setPostTitle(getDefaultTitle(aiReport.periodLabel));
+        toast({ title: `✅ AI ${aiReport.periodLabel} 분석 보고서를 불러왔습니다` });
+      } else {
+        toast({
+          title: "보고서 없음",
+          description: "AI 분석 보고서가 없습니다. 투자전략 탭에서 먼저 AI 분석을 실행해주세요.",
+          variant: "destructive",
+        });
+      }
+    } catch {
       toast({
-        title: "보고서 없음",
-        description: "AI 분석 보고서가 없습니다. 투자전략 탭에서 먼저 AI 분석을 실행해주세요.",
+        title: "불러오기 실패",
+        description: "보고서를 불러오는 중 오류가 발생했습니다.",
         variant: "destructive",
       });
+    } finally {
+      setIsLoadingReport(false);
     }
   }, []);
 
@@ -696,8 +753,8 @@ export default function SteemReport() {
               {editingDraft ? "초안 편집" : "새 포스팅 작성"}
             </CardTitle>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={handleLoadAIReport} className="gap-1 text-xs text-purple-600 border-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950">
-                <BrainCircuit className="w-3 h-3" /> AI 보고서
+              <Button variant="outline" size="sm" onClick={handleLoadAIReport} disabled={isLoadingReport} className="gap-1 text-xs text-purple-600 border-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950">
+                {isLoadingReport ? <Loader2 className="w-3 h-3 animate-spin" /> : <BrainCircuit className="w-3 h-3" />} AI 보고서
               </Button>
               <Button variant="outline" size="sm" onClick={loadTemplate} className="gap-1 text-xs">
                 <FileText className="w-3 h-3" /> 템플릿
@@ -768,16 +825,27 @@ export default function SteemReport() {
           <div>
             <div className="flex items-center justify-between mb-1">
               <Label htmlFor="post-body" className="text-sm font-medium">본문 (Markdown)</Label>
-              <span className="text-xs text-muted-foreground">{postBody.length} 자</span>
+              <span className="text-xs text-muted-foreground">
+                {isLoadingReport ? "보고서 불러오는 중..." : `${postBody.length} 자`}
+              </span>
             </div>
-            <Textarea
-              ref={bodyRef}
-              id="post-body"
-              value={postBody}
-              onChange={(e) => setPostBody(e.target.value)}
-              placeholder="마크다운 형식으로 본문을 작성하세요..."
-              className="min-h-[400px] font-mono text-sm"
-            />
+            {isLoadingReport ? (
+              <div className="min-h-[400px] flex items-center justify-center border rounded-md bg-muted/20">
+                <div className="text-center">
+                  <Loader2 className="w-6 h-6 animate-spin mx-auto text-primary mb-2" />
+                  <p className="text-sm text-muted-foreground">DB에서 최신 보고서를 불러오는 중...</p>
+                </div>
+              </div>
+            ) : (
+              <Textarea
+                ref={bodyRef}
+                id="post-body"
+                value={postBody}
+                onChange={(e) => setPostBody(e.target.value)}
+                placeholder="마크다운 형식으로 본문을 작성하세요... (AI 보고서 버튼으로 최신 보고서를 불러올 수 있습니다)"
+                className="min-h-[400px] font-mono text-sm"
+              />
+            )}
           </div>
 
           {/* 액션 버튼 */}
