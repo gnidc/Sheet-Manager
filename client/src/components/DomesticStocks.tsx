@@ -131,15 +131,12 @@ function StockTable({
                               {stock.sharedBy.substring(0, 3)}***
                             </span>
                           )}
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-5 px-1.5 text-[10px] text-primary hover:text-primary shrink-0"
+                          <button
+                            className="inline-flex items-center px-1 py-0 text-[9px] text-muted-foreground hover:text-primary border border-border rounded shrink-0 leading-tight"
                             onClick={(e) => { e.stopPropagation(); onShowDetail(stock); }}
                           >
-                            <ExternalLink className="h-3 w-3 mr-0.5" />
                             상세
-                          </Button>
+                          </button>
                         </div>
                       </TableCell>
                       <TableCell className="text-center text-[10px]">{stock.exchange || "-"}</TableCell>
