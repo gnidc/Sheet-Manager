@@ -112,7 +112,12 @@ function StockTable({
                     <TableRow
                       key={stock.id}
                       className={`cursor-pointer hover:bg-muted/50 ${isChecked ? "bg-primary/5" : ""}`}
-                      onClick={() => window.open(getStockDetailUrl(stock.stockCode, stock.exchange), "_blank", "noopener,noreferrer")}
+                      onClick={() => {
+                        // window.open을 비동기로 호출하여 INP 개선
+                        requestAnimationFrame(() => {
+                          window.open(getStockDetailUrl(stock.stockCode, stock.exchange), "_blank", "noopener,noreferrer");
+                        });
+                      }}
                     >
                       <TableCell className="p-1 text-center" onClick={(e) => e.stopPropagation()}>
                         <Checkbox
