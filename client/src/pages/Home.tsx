@@ -633,7 +633,9 @@ function SidebarAccordion({ icon, label, active, items, activeTab, onSelect }: {
           {items.map((item) => (
             <button
               key={item.value}
-              onClick={() => onSelect(item.value)}
+              onClick={() => {
+                requestAnimationFrame(() => onSelect(item.value));
+              }}
               className={`w-full text-left rounded-md px-2.5 py-1.5 text-xs font-medium transition-all duration-150 ${
                 activeTab === item.value
                   ? 'bg-primary/10 text-primary dark:bg-primary/15'
