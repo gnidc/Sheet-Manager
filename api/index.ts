@@ -1,23 +1,15 @@
-// Vercel 서버리스 함수용 Express 앱 래퍼
-// Vercel 환경에서는 환경 변수가 자동으로 주입되므로 dotenv 불필요
-// 로컬 개발 환경에서만 dotenv 사용
+// Vercel 서버리스 함수 - Express를 직접 사용 (serverless-http 불필요)
 import { config } from "dotenv";
-// Vercel 환경에서는 .env 파일이 없으므로 config()가 아무것도 로드하지 않음
-// 하지만 dotenv가 "injecting env (0)" 로그를 출력하므로 조건부로 실행
 if (!process.env.VERCEL) {
-  config(); // Load .env file (로컬 개발 환경에서만)
+  config();
 }
 
 import express from "express";
 import cookieSession from "cookie-session";
 import { registerRoutes } from "../server/routes.js";
-import { serveStatic } from "../server/static.js";
 import { createServer } from "http";
-import serverless from "serverless-http";
 
 const app = express();
-// Vercel 서버리스 환경에서는 httpServer가 필요 없지만,
-// registerRoutes가 httpServer를 요구하므로 생성 (실제로는 사용되지 않음)
 const httpServer = createServer(app);
 
 declare module "express" {
@@ -36,100 +28,57 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.set("trust proxy", 1);
 
-// 모든 API 응답에 Content-Type 헤더 설정 및 응답 완료 보장
-app.use((req, res, next) => {
-  // API 경로인 경우에만 JSON Content-Type 설정
-  if (req.path.startsWith("/api/")) {
-    res.setHeader("Content-Type", "application/json");
-    
-    // serverless-http가 응답을 제대로 감지하도록 보장
-    // 원본 res.json을 래핑하여 응답 완료를 명확히 함
-    // Vercel 환경에서는 추가 작업 없이 원본 동작 유지
-    const originalJson = res.json.bind(res);
-    res.json = function(body: any) {
-      return originalJson(body);
-      // res.json()은 내부적으로 res.end()를 호출하므로 추가 호출 불필요
-      // 추가 작업은 오히려 문제를 일으킬 수 있음
-    };
-  }
-  next();
-});
-
-// Vercel에서는 cookie-session 사용 (타이머를 사용하지 않음)
-// cookie-session은 쿠키에 직접 저장하므로 setInterval 타이머가 없어 Vercel에 적합
-// express-session의 MemoryStore는 setInterval을 사용하여 함수 종료를 방해함
-const isVercel = !!process.env.VERCEL;
-
-console.log(`Using cookie-session (no timers) - isVercel: ${isVercel}`);
-
+// cookie-session (타이머 없음 - Vercel 서버리스에 적합)
 app.use(
   cookieSession({
     name: "session",
     keys: [process.env.SESSION_SECRET || "default-secret-change-in-production"],
-    // maxAge 미설정 → 브라우저 종료 시 세션 쿠키 만료 (기본값)
-    // "로그인 유지" 체크 시 로그인 핸들러에서 req.sessionOptions.maxAge = 24시간으로 동적 설정
     secure: process.env.NODE_ENV === "production",
     httpOnly: true,
     sameSite: "lax" as const,
   })
 );
 
-// Express 앱 초기화 (비동기)
-let appInitialized = false;
+// 헬스체크 (DB 미사용)
+app.get("/api/ping", (_req, res) => {
+  res.json({ ok: true, time: new Date().toISOString(), env: !!process.env.VERCEL });
+});
+
+// 초기화
+let initialized = false;
 let initPromise: Promise<void> | null = null;
-let handler: ReturnType<typeof serverless> | null = null;
 
 async function initializeApp() {
-  if (appInitialized && handler) {
-    console.log("App already initialized, reusing handler");
-    return;
-  }
-  if (initPromise) {
-    console.log("App initialization in progress, waiting...");
-    return initPromise;
-  }
+  if (initialized) return;
+  if (initPromise) return initPromise;
 
   initPromise = (async () => {
-    const initStart = Date.now();
+    const start = Date.now();
     try {
-      console.log("Starting app initialization...");
-      
-      // registerRoutes는 빠르게 실행되어야 함 (DB 연결 없이)
-      const routesStart = Date.now();
+      console.log("[Init] Starting route registration...");
       await registerRoutes(httpServer, app);
-      const routesTime = Date.now() - routesStart;
-      console.log(`Routes registered in ${routesTime}ms`);
+      console.log(`[Init] Routes registered in ${Date.now() - start}ms`);
 
-      // 404 핸들러는 registerRoutes 내부에서 처리되므로 여기서는 에러 핸들러만 설정
-      app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-        console.error("Express error:", err);
-        const status = err.status || err.statusCode || 500;
-        const message = err.message || "Internal Server Error";
-        // 응답이 아직 전송되지 않았다면 에러 응답 전송
+      // 404 핸들러 - 매칭되지 않는 라우트
+      app.use((req, res) => {
         if (!res.headersSent) {
-          res.status(status).json({ message });
+          res.status(404).json({ message: "API endpoint not found", path: req.path });
         }
       });
 
-      // 프로덕션에서는 정적 파일 서빙 (API 경로 제외)
-      if (process.env.NODE_ENV === "production") {
-        serveStatic(app);
-      }
-
-      // serverless-http로 래핑
-      // Vercel의 요청 객체 구조에 맞게 설정
-      // serverless-http는 기본적으로 Vercel을 지원하며 별도의 provider 설정 불필요
-      handler = serverless(app, {
-        binary: ["image/*", "application/pdf"],
-        requestId: 'x-vercel-id',
+      // 에러 핸들러
+      app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+        console.error("[Error]", err.message);
+        if (!res.headersSent) {
+          res.status(err.status || 500).json({ message: err.message || "Internal Server Error" });
+        }
       });
 
-      appInitialized = true;
-      const initTime = Date.now() - initStart;
-      console.log(`App initialized successfully in ${initTime}ms`);
+      initialized = true;
+      console.log(`[Init] Complete in ${Date.now() - start}ms`);
     } catch (error: any) {
-      console.error("Error initializing app:", error);
-      console.error("Error stack:", error.stack);
+      console.error("[Init] FAILED:", error.message);
+      initPromise = null; // 다음 요청에서 재시도 가능
       throw error;
     }
   })();
@@ -137,135 +86,18 @@ async function initializeApp() {
   return initPromise;
 }
 
-// Vercel 서버리스 함수 핸들러
-export default async function (req: any, res: any) {
-  const startTime = Date.now();
-  
-  // Vercel 요청 객체에서 경로가 누락되는 것을 방지
-  // Vercel은 req.url 대신 다른 속성을 사용할 수 있으므로 확인
-  if (!req.url) {
-    // Vercel의 요청 객체 구조에 맞게 경로 추출
-    // Vercel은 headers['x-vercel-path'] 또는 query string에서 경로를 제공할 수 있음
-    req.url = req.path || req.originalUrl || req.headers?.['x-vercel-path'] || req.headers?.['x-invoke-path'] || '/';
-    console.log(`경로 복구 - path: ${req.path}, originalUrl: ${req.originalUrl}, url: ${req.url}, headers:`, {
-      'x-vercel-path': req.headers?.['x-vercel-path'],
-      'x-invoke-path': req.headers?.['x-invoke-path']
-    });
-  }
-  
-  // Express가 인식할 수 있도록 req.path도 설정
-  if (!req.path && req.url) {
-    req.path = req.url.split('?')[0]; // 쿼리 문자열 제거
-  }
-  
-  // originalUrl도 설정 (Express 라우터가 사용)
-  if (!req.originalUrl && req.url) {
-    req.originalUrl = req.url;
-  }
-  
-  // Vercel의 타임아웃은 10초 (Hobby), 60초 (Pro), 300초 (Enterprise)
-  // ETF 크롤링 등 긴 작업을 위해 60초로 설정 (Pro 플랜 기준)
-  // Hobby 플랜 사용자는 Vercel의 10초 제한에 걸릴 수 있음
-  const TIMEOUT_MS = 60000; // 60초로 증가
-  let timeoutCleared = false;
-  const timeout = setTimeout(() => {
-    if (!timeoutCleared && !res.headersSent) {
-      console.error(`Request timeout after ${TIMEOUT_MS}ms`);
-      res.status(504).json({ 
-        message: "Gateway timeout",
-        hint: "The server is taking too long to respond. Please try again."
-      });
-    }
-  }, TIMEOUT_MS);
-
+// Vercel 서버리스 핸들러
+export default async function handler(req: any, res: any) {
   try {
-    // 초기화 시작 (빠르게 완료되어야 함)
-    const initStart = Date.now();
     await initializeApp();
-    const initTime = Date.now() - initStart;
-    
-    if (initTime > 2000) {
-      console.warn(`Slow initialization: ${initTime}ms (should be < 2000ms)`);
-    } else {
-      console.log(`App initialization took ${initTime}ms`);
-    }
-    
-    timeoutCleared = true;
-    clearTimeout(timeout);
-    
-    if (!handler) {
-      console.error("Handler not initialized");
-      if (!res.headersSent) {
-        return res.status(500).json({ message: "Handler not initialized" });
-      }
-      return;
-    }
-    
-    // handler 실행
-    const handlerStart = Date.now();
-    console.log(`Handler 시작 - url: ${req.url}, path: ${req.path}, originalUrl: ${req.originalUrl}, method: ${req.method}`);
-    
-    // 1. 요청 처리
-    await handler(req, res);
-    
-    const handlerTime = Date.now() - handlerStart;
-    const totalTime = Date.now() - startTime;
-    console.log(`Handler 완료 - handler: ${handlerTime}ms, total: ${totalTime}ms`);
-    
-    // 2. 강제 종료 신호 (핵심)
-    // res.finished는 응답이 완전히 나갔음을 의미합니다.
-    if (res.finished || res.headersSent) {
-      console.log("Response finalized. Terminating execution context.");
-      // AWS Lambda/Vercel 특유의 설정: 
-      // 이벤트 루프가 비어있지 않아도 즉시 종료하도록 유도합니다.
-      // 명시적으로 return하여 Vercel에게 함수 종료를 알림
-      return; 
-    } else {
-      // 응답이 전송되지 않은 경우 (이론적으로는 발생하지 않아야 함)
-      console.warn("Response not sent but handler completed");
-      return; // 그래도 return하여 함수 종료
-    }
   } catch (error: any) {
-    timeoutCleared = true;
-    clearTimeout(timeout);
-    const totalTime = Date.now() - startTime;
-    console.error(`Critical Handler Error (after ${totalTime}ms):`, error);
-    console.error("Error details:", {
-      message: error.message,
-      code: error.code,
-      name: error.name,
-    });
-    
-    // 에러 발생 시에도 반드시 JSON 응답 전송
-    if (!res.headersSent && !res.finished) {
-      res.status(500).json({ 
-        message: "Internal server error", 
-        error: process.env.NODE_ENV === "development" ? error.message : undefined 
-      });
-    }
-    
-    // 에러 발생 시에도 명시적으로 return하여 함수 종료
-    console.log("Error handler completed. Terminating execution context.");
+    console.error("[Handler] Init failed:", error.message);
+    res.statusCode = 500;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ message: "Server initialization failed", error: error.message }));
     return;
-  } finally {
-    timeoutCleared = true;
-    clearTimeout(timeout);
-    
-    // Vercel 환경에서는 Client를 직접 사용하므로 Pool 정리가 필요 없음
-    // 각 쿼리마다 새로운 Client를 생성하고 즉시 닫으므로 추가 정리 불필요
-    if (!process.env.VERCEL || process.env.NODE_ENV !== "production") {
-      // 로컬 환경에서만 Pool 정리
-      try {
-        const { resetPool } = await import("../server/db.js");
-        await resetPool();
-      } catch (err) {
-        console.warn("Failed to reset pool:", err);
-      }
-    }
-    
-    // 함수 종료를 명시적으로 처리
-    // Vercel 서버리스 함수는 이 시점에서 종료되어야 함
-    console.log("Request handler completed, function should exit now");
   }
-}
 
+  // Express에 직접 전달 (serverless-http 불필요)
+  return app(req, res);
+}
