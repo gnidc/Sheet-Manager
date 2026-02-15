@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback, useTransition, memo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
@@ -45,7 +45,7 @@ interface RealtimeStock extends WatchlistStock {
 }
 
 // 종목 테이블 컴포넌트
-function StockTable({
+const StockTable = memo(function StockTable({
   stocks,
   realtimeData,
   canDelete,
@@ -181,7 +181,7 @@ function StockTable({
       ))}
     </>
   );
-}
+});
 
 export default function DomesticStocks() {
   const { isAdmin, isLoggedIn } = useAuth();
@@ -375,14 +375,17 @@ export default function DomesticStocks() {
     setAddDialogOpen(true);
   };
 
-  const toggleCheck = (code: string) => {
-    setCheckedStocks((prev) => {
-      const next = new Set(prev);
-      if (next.has(code)) next.delete(code);
-      else next.add(code);
-      return next;
+  const [, startTransition] = useTransition();
+  const toggleCheck = useCallback((code: string) => {
+    startTransition(() => {
+      setCheckedStocks((prev) => {
+        const next = new Set(prev);
+        if (next.has(code)) next.delete(code);
+        else next.add(code);
+        return next;
+      });
     });
-  };
+  }, []);
 
   const handleBuySelected = () => {
     if (checkedStocks.size === 0) return;
