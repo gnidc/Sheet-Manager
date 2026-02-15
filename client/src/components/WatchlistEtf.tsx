@@ -235,7 +235,7 @@ function EtfTable({
                           title="클릭하면 네이버 증권에서 배당 상세를 확인합니다"
                           onClick={(e) => {
                             e.stopPropagation();
-                            window.open(`https://stock.naver.com/etf/${etf.etfCode}/dividend`, "_blank");
+                            window.open(`https://stock.naver.com/domestic/stock/${etf.etfCode}/info/dividend`, "_blank");
                           }}
                         >
                           {md.dividendYield.toFixed(2)}%
