@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef, useTransition, memo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
@@ -119,6 +119,13 @@ interface EtfSearchProps {
 export default function EtfSearch({ isAdmin, onNavigate }: EtfSearchProps) {
   const { toast } = useToast();
   const [activeSection, setActiveSection] = useState("search");
+  const [isPending, startTransition] = useTransition();
+
+  const handleTabChange = useCallback((value: string) => {
+    startTransition(() => {
+      setActiveSection(value);
+    });
+  }, []);
 
   return (
     <div className="space-y-4">
@@ -136,7 +143,7 @@ export default function EtfSearch({ isAdmin, onNavigate }: EtfSearchProps) {
       </div>
 
       {/* 섹션 탭 */}
-      <Tabs value={activeSection} onValueChange={setActiveSection}>
+      <Tabs value={activeSection} onValueChange={handleTabChange}>
         <TabsList className="grid w-full grid-cols-5 h-auto">
           <TabsTrigger value="search" className="text-xs sm:text-sm gap-1 py-2">
             <Search className="h-3.5 w-3.5" /> 검색
