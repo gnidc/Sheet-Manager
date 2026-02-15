@@ -1076,10 +1076,22 @@ export default function EtfComponents() {
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2 min-w-[140px]">
-                          <div>
+                          <div className="flex-1 min-w-0">
                             <div className="font-medium text-sm leading-tight">{etf.name}</div>
                             <div className="text-xs text-muted-foreground font-mono">{etf.code}</div>
                           </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-6 w-10 text-[9px] text-red-500 border-red-500 hover:bg-red-50 hover:text-white shrink-0"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              window.open(`https://finance.naver.com/item/main.naver?code=${etf.code}`, "_blank", "noopener,noreferrer");
+                            }}
+                            title="상세보기"
+                          >
+                            상세
+                          </Button>
                         </div>
                       </TableCell>
                       <TableCell className="text-right tabular-nums font-semibold text-sm">

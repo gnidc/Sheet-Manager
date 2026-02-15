@@ -181,7 +181,23 @@ function EtfTable({
                     </TableCell>
                   )}
                   <TableCell className="text-xs font-mono text-muted-foreground">{etf.etfCode}</TableCell>
-                  <TableCell className="text-sm font-medium whitespace-nowrap">{etf.etfName}</TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm font-medium whitespace-nowrap">{etf.etfName}</span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-6 w-10 text-[9px] text-red-500 border-red-500 hover:bg-red-50 hover:text-white shrink-0"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          window.open(`https://finance.naver.com/item/main.naver?code=${etf.etfCode}`, "_blank", "noopener,noreferrer");
+                        }}
+                        title="상세보기"
+                      >
+                        상세
+                      </Button>
+                    </div>
+                  </TableCell>
                   <TableCell className="text-right text-sm font-medium whitespace-nowrap">
                     {md ? (
                       <span className={isUp ? "text-red-500" : isDown ? "text-blue-500" : ""}>

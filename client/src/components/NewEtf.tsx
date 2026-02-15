@@ -279,7 +279,23 @@ export default function NewEtf() {
                           />
                         </TableCell>
                         <TableCell className="font-mono text-sm">{etf.etfCode}</TableCell>
-                        <TableCell className="font-medium">{etf.etfName}</TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-medium">{etf.etfName}</span>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-6 w-10 text-[9px] text-red-500 border-red-500 hover:bg-red-50 hover:text-white shrink-0"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                window.open(`https://finance.naver.com/item/main.naver?code=${etf.etfCode}`, "_blank", "noopener,noreferrer");
+                              }}
+                              title="상세보기"
+                            >
+                              상세
+                            </Button>
+                          </div>
+                        </TableCell>
                         <TableCell className="text-sm text-muted-foreground">{etf.category || "-"}</TableCell>
                         <TableCell className="text-right text-sm text-muted-foreground whitespace-nowrap">{etf.totalAsset || "-"}</TableCell>
                         <TableCell className="text-right text-sm text-muted-foreground whitespace-nowrap">{etf.expense || "-"}</TableCell>
