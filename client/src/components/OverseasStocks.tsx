@@ -393,6 +393,8 @@ export default function OverseasStocks() {
   };
 
   // 네이버 해외주식 상세 링크 생성 (finance.naver.com 사용)
+  // 네이버 해외주식 상세 링크 생성
+  // 실제 URL 형식: https://stock.naver.com/worldstock/stock/AAPL.O/price
   const getStockDetailUrl = (code: string, exchangeName: string | null) => {
     let suffix = ".O"; // 기본값: NASDAQ
     switch (exchangeName?.toUpperCase()) {
@@ -404,7 +406,7 @@ export default function OverseasStocks() {
       case "SSE": suffix = ".SS"; break;
       default: suffix = ".O";
     }
-    return `https://finance.naver.com/world/sise.naver?symbol=${code}${suffix}`;
+    return `https://stock.naver.com/worldstock/stock/${code}${suffix}/price`;
   };
 
   const toggleCheck = (code: string) => {
