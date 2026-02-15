@@ -287,10 +287,8 @@ export default function NewEtf() {
                         <TableCell>
                           <div className="flex items-center gap-1.5">
                             <span className="font-medium">{etf.etfName}</span>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-6 w-10 text-[9px] text-red-500 border-red-500 hover:bg-red-50 hover:text-white shrink-0"
+                            <button
+                              className="inline-flex items-center px-1 py-0 text-[9px] text-red-500 hover:text-red-700 border border-red-300 hover:border-red-500 rounded shrink-0 leading-tight"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setComponentEtfCode(etf.etfCode);
@@ -300,7 +298,7 @@ export default function NewEtf() {
                               title="상세보기"
                             >
                               상세
-                            </Button>
+                            </button>
                           </div>
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">{etf.category || "-"}</TableCell>

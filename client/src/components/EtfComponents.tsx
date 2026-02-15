@@ -1085,10 +1085,8 @@ export default function EtfComponents() {
                             <div className="font-medium text-sm leading-tight">{etf.name}</div>
                             <div className="text-xs text-muted-foreground font-mono">{etf.code}</div>
                           </div>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-6 w-10 text-[9px] text-red-500 border-red-500 hover:bg-red-50 hover:text-white shrink-0"
+                          <button
+                            className="inline-flex items-center px-1 py-0 text-[9px] text-red-500 hover:text-red-700 border border-red-300 hover:border-red-500 rounded shrink-0 leading-tight"
                             onClick={(e) => {
                               e.stopPropagation();
                               setDetailEtfCode(etf.code);
@@ -1098,7 +1096,7 @@ export default function EtfComponents() {
                             title="상세보기"
                           >
                             상세
-                          </Button>
+                          </button>
                         </div>
                       </TableCell>
                       <TableCell className="text-right tabular-nums font-semibold text-sm">
