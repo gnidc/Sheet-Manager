@@ -6,7 +6,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { EtfDetailDialog } from "@/components/EtfDetailDialog";
+
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -322,10 +322,7 @@ export default function WatchlistEtfComponent({ listType = "core" }: WatchlistEt
   const [filterSector, setFilterSector] = useState<string | null>(null);
   const [memoDialogOpen, setMemoDialogOpen] = useState(false);
   const [selectedMemoEtf, setSelectedMemoEtf] = useState<WatchlistEtf | null>(null);
-  // ETF 상세정보 팝업 (구성종목/차트)
-  const [componentDialogOpen, setComponentDialogOpen] = useState(false);
-  const [componentEtfCode, setComponentEtfCode] = useState("");
-  const [componentEtfName, setComponentEtfName] = useState("");
+  // ETF 상세: /stock-detail 페이지로 새 창 열기 (ETF통합검색과 동일)
 
   // ===== API 조회 =====
 
@@ -658,7 +655,7 @@ export default function WatchlistEtfComponent({ listType = "core" }: WatchlistEt
                       onEdit={handleEdit}
                       onDelete={handleDelete}
                       onMemoClick={handleMemoClick}
-                      onDetailClick={(code, name) => { setComponentEtfCode(code); setComponentEtfName(name); setComponentDialogOpen(true); }}
+                      onDetailClick={(code, name) => { window.open(`/stock-detail?code=${code}&name=${encodeURIComponent(name)}&market=domestic&exchange=KOSPI&type=etf`, `stock_${code}`, "width=1000,height=800,scrollbars=yes,resizable=yes"); }}
                     />
                   </div>
                 ))}
@@ -775,7 +772,7 @@ export default function WatchlistEtfComponent({ listType = "core" }: WatchlistEt
                 onEdit={handleEdit}
                 onDelete={handleDelete}
                 onMemoClick={handleMemoClick}
-                onDetailClick={(code, name) => { setComponentEtfCode(code); setComponentEtfName(name); setComponentDialogOpen(true); }}
+                onDetailClick={(code, name) => { window.open(`/stock-detail?code=${code}&name=${encodeURIComponent(name)}&market=domestic&exchange=KOSPI&type=etf`, `stock_${code}`, "width=1000,height=800,scrollbars=yes,resizable=yes"); }}
               />
             )}
           </div>
@@ -815,7 +812,7 @@ export default function WatchlistEtfComponent({ listType = "core" }: WatchlistEt
                   onEdit={handleEdit}
                   onDelete={handleDelete}
                   onMemoClick={handleMemoClick}
-                  onDetailClick={(code, name) => { setComponentEtfCode(code); setComponentEtfName(name); setComponentDialogOpen(true); }}
+                  onDetailClick={(code, name) => { window.open(`/stock-detail?code=${code}&name=${encodeURIComponent(name)}&market=domestic&exchange=KOSPI&type=etf`, `stock_${code}`, "width=1000,height=800,scrollbars=yes,resizable=yes"); }}
                 />
               )}
             </div>
@@ -843,13 +840,7 @@ export default function WatchlistEtfComponent({ listType = "core" }: WatchlistEt
       {renderEditDialog()}
       {renderMemoDialog()}
 
-      {/* ETF 구성종목/차트 상세 팝업 */}
-      <EtfDetailDialog
-        open={componentDialogOpen}
-        onOpenChange={setComponentDialogOpen}
-        etfCode={componentEtfCode}
-        etfName={componentEtfName}
-      />
+      {/* ETF 상세: /stock-detail 페이지로 새 창 열기 (ETF통합검색과 동일) */}
     </div>
   );
 

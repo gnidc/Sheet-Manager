@@ -5,7 +5,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { EtfDetailDialog } from "@/components/EtfDetailDialog";
+
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -204,10 +204,7 @@ export default function EtfComponents() {
   const [satCheckedCodes, setSatCheckedCodes] = useState<Set<string>>(new Set());
   const [chartPeriod, setChartPeriod] = useState<"day" | "week" | "month" | "year">("day");
   const [chartType, setChartType] = useState<"candle" | "area">("candle");
-  // 상세 팝업 다이얼로그
-  const [detailDialogOpen, setDetailDialogOpen] = useState(false);
-  const [detailEtfCode, setDetailEtfCode] = useState("");
-  const [detailEtfName, setDetailEtfName] = useState("");
+  // ETF 상세: /stock-detail 페이지로 새 창 열기 (ETF통합검색과 동일)
   // localStorage에서 이전 분석 결과 복원
   const savedAnalysis = useMemo(() => {
     try {
@@ -1089,9 +1086,8 @@ export default function EtfComponents() {
                             className="inline-flex items-center px-1 py-0 text-[9px] text-red-500 hover:text-red-700 border border-red-300 hover:border-red-500 rounded shrink-0 leading-tight"
                             onClick={(e) => {
                               e.stopPropagation();
-                              setDetailEtfCode(etf.code);
-                              setDetailEtfName(etf.name);
-                              setDetailDialogOpen(true);
+                              const url = `/stock-detail?code=${etf.code}&name=${encodeURIComponent(etf.name)}&market=domestic&exchange=KOSPI&type=etf`;
+                              window.open(url, `stock_${etf.code}`, "width=1000,height=800,scrollbars=yes,resizable=yes");
                             }}
                             title="상세보기"
                           >
@@ -1997,13 +1993,7 @@ export default function EtfComponents() {
         </div>
       )}
 
-      {/* ETF 상세 팝업 다이얼로그 */}
-      <EtfDetailDialog
-        open={detailDialogOpen}
-        onOpenChange={setDetailDialogOpen}
-        etfCode={detailEtfCode}
-        etfName={detailEtfName}
-      />
+      {/* ETF 상세: /stock-detail 페이지로 새 창 열기 (ETF통합검색과 동일) */}
     </div>
   );
 }

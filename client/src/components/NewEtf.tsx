@@ -5,7 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { EtfDetailDialog } from "@/components/EtfDetailDialog";
+
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -83,10 +83,7 @@ export default function NewEtf() {
   const [isEditing, setIsEditing] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [commentEtf, setCommentEtf] = useState<SavedEtf | null>(null);
-  // ETF 상세정보 팝업 (구성종목/차트)
-  const [componentDialogOpen, setComponentDialogOpen] = useState(false);
-  const [componentEtfCode, setComponentEtfCode] = useState("");
-  const [componentEtfName, setComponentEtfName] = useState("");
+  // ETF 상세: /stock-detail 페이지로 새 창 열기 (ETF통합검색과 동일)
 
   // 저장된 ETF 목록 조회
   const { data: savedEtfs, isLoading } = useQuery<SavedEtf[]>({
@@ -291,9 +288,8 @@ export default function NewEtf() {
                               className="inline-flex items-center px-1 py-0 text-[9px] text-red-500 hover:text-red-700 border border-red-300 hover:border-red-500 rounded shrink-0 leading-tight"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setComponentEtfCode(etf.etfCode);
-                                setComponentEtfName(etf.etfName);
-                                setComponentDialogOpen(true);
+                                const url = `/stock-detail?code=${etf.etfCode}&name=${encodeURIComponent(etf.etfName)}&market=domestic&exchange=KOSPI&type=etf`;
+                                window.open(url, `stock_${etf.etfCode}`, "width=1000,height=800,scrollbars=yes,resizable=yes");
                               }}
                               title="상세보기"
                             >
@@ -374,13 +370,7 @@ export default function NewEtf() {
         />
       )}
 
-      {/* ETF 구성종목/차트 상세 팝업 */}
-      <EtfDetailDialog
-        open={componentDialogOpen}
-        onOpenChange={setComponentDialogOpen}
-        etfCode={componentEtfCode}
-        etfName={componentEtfName}
-      />
+      {/* ETF 상세: /stock-detail 페이지로 새 창 열기 (ETF통합검색과 동일) */}
     </div>
   );
 }
