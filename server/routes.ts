@@ -7565,6 +7565,128 @@ ${etfListStr}
     }
   });
 
+  // ========== 전략 보고서 저장/조회 API (DB 기반, 모든 유저 공유) ==========
+
+  // 전략 시장 보고서 조회 (모든 로그인 유저)
+  app.get("/api/strategy-reports/:period", requireUser, async (req, res) => {
+    try {
+      const { period } = req.params;
+      const reports = await storage.getStrategyReports(period, 10);
+      const parsed = reports.map(r => ({
+        id: r.id.toString(),
+        title: r.title,
+        periodLabel: r.periodLabel,
+        createdAt: r.createdAt.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }),
+        report: JSON.parse(r.reportData),
+      }));
+      res.json({ reports: parsed });
+    } catch (error: any) {
+      console.error("[StrategyReports] GET error:", error.message);
+      res.json({ reports: [] });
+    }
+  });
+
+  // 전략 시장 보고서 저장 (admin 전용)
+  app.post("/api/strategy-reports", requireAdmin, async (req, res) => {
+    try {
+      const { period, title, periodLabel, report } = req.body;
+      if (!period || !report) {
+        return res.status(400).json({ message: "period와 report가 필요합니다." });
+      }
+      const saved = await storage.createStrategyReport({
+        period,
+        title: title || `${periodLabel} 시장 전략 보고서`,
+        periodLabel: periodLabel || period,
+        reportData: JSON.stringify(report),
+      });
+      res.json({
+        id: saved.id.toString(),
+        title: saved.title,
+        periodLabel: saved.periodLabel,
+        createdAt: saved.createdAt.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }),
+        report: JSON.parse(saved.reportData),
+      });
+    } catch (error: any) {
+      console.error("[StrategyReports] POST error:", error.message);
+      res.status(500).json({ message: error.message || "보고서 저장 실패" });
+    }
+  });
+
+  // 전략 시장 보고서 삭제 (admin 전용)
+  app.delete("/api/strategy-reports/:id", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.deleteStrategyReport(id);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("[StrategyReports] DELETE error:", error.message);
+      res.status(500).json({ message: error.message || "보고서 삭제 실패" });
+    }
+  });
+
+  // 전략 AI 분석 조회 (모든 로그인 유저)
+  app.get("/api/strategy-analyses/:period", requireUser, async (req, res) => {
+    try {
+      const { period } = req.params;
+      const analyses = await storage.getStrategyAnalyses(period, 10);
+      const parsed = analyses.map(a => ({
+        id: a.id.toString(),
+        createdAt: a.createdAt.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }),
+        prompt: a.prompt,
+        urls: JSON.parse(a.urls),
+        fileNames: JSON.parse(a.fileNames),
+        source: a.source || "strategy",
+        result: JSON.parse(a.analysisResult),
+      }));
+      res.json({ analyses: parsed });
+    } catch (error: any) {
+      console.error("[StrategyAnalyses] GET error:", error.message);
+      res.json({ analyses: [] });
+    }
+  });
+
+  // 전략 AI 분석 저장 (admin 전용)
+  app.post("/api/strategy-analyses", requireAdmin, async (req, res) => {
+    try {
+      const { period, prompt, urls, fileNames, source, result } = req.body;
+      if (!period || !result) {
+        return res.status(400).json({ message: "period와 result가 필요합니다." });
+      }
+      const saved = await storage.createStrategyAnalysis({
+        period,
+        prompt: prompt || "",
+        urls: JSON.stringify(urls || []),
+        fileNames: JSON.stringify(fileNames || []),
+        source: source || "strategy",
+        analysisResult: JSON.stringify(result),
+      });
+      res.json({
+        id: saved.id.toString(),
+        createdAt: saved.createdAt.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }),
+        prompt: saved.prompt,
+        urls: JSON.parse(saved.urls),
+        fileNames: JSON.parse(saved.fileNames),
+        source: saved.source,
+        result: JSON.parse(saved.analysisResult),
+      });
+    } catch (error: any) {
+      console.error("[StrategyAnalyses] POST error:", error.message);
+      res.status(500).json({ message: error.message || "AI 분석 저장 실패" });
+    }
+  });
+
+  // 전략 AI 분석 삭제 (admin 전용)
+  app.delete("/api/strategy-analyses/:id", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.deleteStrategyAnalysis(id);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("[StrategyAnalyses] DELETE error:", error.message);
+      res.status(500).json({ message: error.message || "AI 분석 삭제 실패" });
+    }
+  });
+
   // ========== 시장 보고서 (일일/주간/월간/연간) ==========
   app.get("/api/report/:period", async (req, res) => {
     try {

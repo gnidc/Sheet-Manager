@@ -203,6 +203,36 @@ const aiReports = pgTable("ai_reports", {
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull()
 });
 const insertAiReportSchema = createInsertSchema(aiReports).omit({ id: true, createdAt: true });
+const strategyReports = pgTable("strategy_reports", {
+  id: serial("id").primaryKey(),
+  period: text("period").notNull(),
+  // "daily" | "weekly" | "monthly" | "yearly"
+  title: text("title").notNull(),
+  // 보고서 제목
+  periodLabel: text("period_label").notNull(),
+  // "일일" | "주간" | "월간" | "연간"
+  reportData: text("report_data").notNull(),
+  // MarketReport JSON
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+});
+const insertStrategyReportSchema = createInsertSchema(strategyReports).omit({ id: true, createdAt: true });
+const strategyAnalyses = pgTable("strategy_analyses", {
+  id: serial("id").primaryKey(),
+  period: text("period").notNull(),
+  // "daily" | "weekly" | "monthly" | "yearly"
+  prompt: text("prompt").notNull(),
+  // AI 프롬프트
+  urls: text("urls").notNull(),
+  // URL 목록 JSON
+  fileNames: text("file_names").notNull(),
+  // 파일 이름 목록 JSON
+  source: text("source"),
+  // "strategy" | "etf-realtime"
+  analysisResult: text("analysis_result").notNull(),
+  // AiAnalysisResult JSON
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+});
+const insertStrategyAnalysisSchema = createInsertSchema(strategyAnalyses).omit({ id: true, createdAt: true });
 const gapStrategy = pgTable("gap_strategy", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull(),
@@ -447,6 +477,8 @@ export {
   insertSavedEtfSchema,
   insertSteemPostSchema,
   insertStopLossOrderSchema,
+  insertStrategyAnalysisSchema,
+  insertStrategyReportSchema,
   insertTenbaggerStockSchema,
   insertTradingOrderSchema,
   insertUserTradingConfigSchema,
@@ -461,6 +493,8 @@ export {
   stockAiAnalyses,
   stockComments,
   stopLossOrders,
+  strategyAnalyses,
+  strategyReports,
   tenbaggerStocks,
   tradingOrders,
   userAiConfigs,

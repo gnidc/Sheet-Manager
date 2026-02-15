@@ -75,6 +75,12 @@ import {
   visitLogs,
   type VisitLog,
   type InsertVisitLog,
+  strategyReports,
+  strategyAnalyses,
+  type StrategyReport,
+  type InsertStrategyReport,
+  type StrategyAnalysis,
+  type InsertStrategyAnalysis,
 } from "../shared/schema.js";
 import { eq, and, or, desc, isNull, inArray, sql } from "drizzle-orm";
 
@@ -155,6 +161,16 @@ export interface IStorage {
   getAiReport(id: number): Promise<AiReport | undefined>;
   createAiReport(data: InsertAiReport): Promise<AiReport>;
   deleteAiReport(id: number): Promise<void>;
+
+  // Strategy Reports (전략 보고서 - 일일/주간/월간/연간)
+  getStrategyReports(period: string, limit?: number): Promise<StrategyReport[]>;
+  createStrategyReport(data: InsertStrategyReport): Promise<StrategyReport>;
+  deleteStrategyReport(id: number): Promise<void>;
+
+  // Strategy Analyses (전략 AI 분석)
+  getStrategyAnalyses(period: string, limit?: number): Promise<StrategyAnalysis[]>;
+  createStrategyAnalysis(data: InsertStrategyAnalysis): Promise<StrategyAnalysis>;
+  deleteStrategyAnalysis(id: number): Promise<void>;
 
   // Watchlist Stocks (관심종목)
   getWatchlistStocks(market?: string, listType?: string, userId?: number): Promise<WatchlistStock[]>;
@@ -961,6 +977,80 @@ export class DatabaseStorage implements IStorage {
       });
     }
     await db.delete(aiReports).where(eq(aiReports.id, id));
+  }
+
+  // ========== Strategy Reports (전략 보고서 - 일일/주간/월간/연간) ==========
+
+  async getStrategyReports(period: string, limit: number = 10): Promise<StrategyReport[]> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(strategyReports)
+          .where(eq(strategyReports.period, period))
+          .orderBy(desc(strategyReports.createdAt))
+          .limit(limit);
+      });
+    }
+    return await db.select().from(strategyReports)
+      .where(eq(strategyReports.period, period))
+      .orderBy(desc(strategyReports.createdAt))
+      .limit(limit);
+  }
+
+  async createStrategyReport(data: InsertStrategyReport): Promise<StrategyReport> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [newReport] = await db.insert(strategyReports).values(data).returning();
+        return newReport;
+      });
+    }
+    const [newReport] = await db.insert(strategyReports).values(data).returning();
+    return newReport;
+  }
+
+  async deleteStrategyReport(id: number): Promise<void> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        await db.delete(strategyReports).where(eq(strategyReports.id, id));
+      });
+    }
+    await db.delete(strategyReports).where(eq(strategyReports.id, id));
+  }
+
+  // ========== Strategy Analyses (전략 AI 분석) ==========
+
+  async getStrategyAnalyses(period: string, limit: number = 10): Promise<StrategyAnalysis[]> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(strategyAnalyses)
+          .where(eq(strategyAnalyses.period, period))
+          .orderBy(desc(strategyAnalyses.createdAt))
+          .limit(limit);
+      });
+    }
+    return await db.select().from(strategyAnalyses)
+      .where(eq(strategyAnalyses.period, period))
+      .orderBy(desc(strategyAnalyses.createdAt))
+      .limit(limit);
+  }
+
+  async createStrategyAnalysis(data: InsertStrategyAnalysis): Promise<StrategyAnalysis> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [newAnalysis] = await db.insert(strategyAnalyses).values(data).returning();
+        return newAnalysis;
+      });
+    }
+    const [newAnalysis] = await db.insert(strategyAnalyses).values(data).returning();
+    return newAnalysis;
+  }
+
+  async deleteStrategyAnalysis(id: number): Promise<void> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        await db.delete(strategyAnalyses).where(eq(strategyAnalyses.id, id));
+      });
+    }
+    await db.delete(strategyAnalyses).where(eq(strategyAnalyses.id, id));
   }
 
   // ========== Gap Strategy (시가급등 추세추종) ==========

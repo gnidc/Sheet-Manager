@@ -233,6 +233,38 @@ export const insertAiReportSchema = createInsertSchema(aiReports).omit({ id: tru
 export type AiReport = typeof aiReports.$inferSelect;
 export type InsertAiReport = z.infer<typeof insertAiReportSchema>;
 
+// ========== 전략 보고서 (일일/주간/월간/연간) ==========
+
+// 시장 데이터 보고서 (admin 생성 → 모든 유저 조회)
+export const strategyReports = pgTable("strategy_reports", {
+  id: serial("id").primaryKey(),
+  period: text("period").notNull(),               // "daily" | "weekly" | "monthly" | "yearly"
+  title: text("title").notNull(),                  // 보고서 제목
+  periodLabel: text("period_label").notNull(),     // "일일" | "주간" | "월간" | "연간"
+  reportData: text("report_data").notNull(),       // MarketReport JSON
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const insertStrategyReportSchema = createInsertSchema(strategyReports).omit({ id: true, createdAt: true });
+export type StrategyReport = typeof strategyReports.$inferSelect;
+export type InsertStrategyReport = z.infer<typeof insertStrategyReportSchema>;
+
+// AI 분석 보고서 (admin 생성 → 모든 유저 조회)
+export const strategyAnalyses = pgTable("strategy_analyses", {
+  id: serial("id").primaryKey(),
+  period: text("period").notNull(),               // "daily" | "weekly" | "monthly" | "yearly"
+  prompt: text("prompt").notNull(),                // AI 프롬프트
+  urls: text("urls").notNull(),                    // URL 목록 JSON
+  fileNames: text("file_names").notNull(),         // 파일 이름 목록 JSON
+  source: text("source"),                          // "strategy" | "etf-realtime"
+  analysisResult: text("analysis_result").notNull(),// AiAnalysisResult JSON
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const insertStrategyAnalysisSchema = createInsertSchema(strategyAnalyses).omit({ id: true, createdAt: true });
+export type StrategyAnalysis = typeof strategyAnalyses.$inferSelect;
+export type InsertStrategyAnalysis = z.infer<typeof insertStrategyAnalysisSchema>;
+
 // ========== 시가급등 추세추종 전략 ==========
 
 // 전략 설정

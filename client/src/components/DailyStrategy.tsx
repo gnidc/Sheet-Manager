@@ -774,8 +774,8 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
   });
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [aiAnalysis, setAiAnalysis] = useState<AiAnalysisResult | null>(null);
-  const [savedReports, setSavedReports] = useState<SavedReport[]>(() => getSavedReports(period));
-  const [savedAnalyses, setSavedAnalyses] = useState<SavedAnalysis[]>(() => getSavedAnalyses(period));
+  const [savedReports, setSavedReports] = useState<SavedReport[]>([]);
+  const [savedAnalyses, setSavedAnalyses] = useState<SavedAnalysis[]>([]);
   const [activeReport, setActiveReport] = useState<MarketReport | null>(null);
   const [showPromptHistory, setShowPromptHistory] = useState(false);
   const [promptHistory, setPromptHistory] = useState<SavedPromptItem[]>(() => getPromptHistory(period));
@@ -786,6 +786,43 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
   const DEFAULT_FONT_SIZE = 14;
   const [reportFontSize, setReportFontSize] = useState(DEFAULT_FONT_SIZE);
   const [analysisFontSize, setAnalysisFontSize] = useState(DEFAULT_FONT_SIZE);
+
+  // ===== 서버에서 보고서/분석 목록 로딩 =====
+  useEffect(() => {
+    // 서버에서 저장된 보고서 조회
+    fetch(`/api/strategy-reports/${period}`, { credentials: "include" })
+      .then(res => res.ok ? res.json() : { reports: [] })
+      .then(data => {
+        if (data.reports?.length > 0) {
+          setSavedReports(data.reports);
+        } else {
+          // 서버에 없으면 localStorage에서 마이그레이션 (admin만)
+          const localReports = getSavedReports(period);
+          if (localReports.length > 0) setSavedReports(localReports);
+        }
+      })
+      .catch(() => {
+        const localReports = getSavedReports(period);
+        if (localReports.length > 0) setSavedReports(localReports);
+      });
+
+    // 서버에서 저장된 AI 분석 조회
+    fetch(`/api/strategy-analyses/${period}`, { credentials: "include" })
+      .then(res => res.ok ? res.json() : { analyses: [] })
+      .then(data => {
+        if (data.analyses?.length > 0) {
+          setSavedAnalyses(data.analyses);
+        } else {
+          // 서버에 없으면 localStorage에서 마이그레이션 (admin만)
+          const localAnalyses = getSavedAnalyses(period);
+          if (localAnalyses.length > 0) setSavedAnalyses(localAnalyses);
+        }
+      })
+      .catch(() => {
+        const localAnalyses = getSavedAnalyses(period);
+        if (localAnalyses.length > 0) setSavedAnalyses(localAnalyses);
+      });
+  }, [period]);
 
   // ===== Auto-save prompt =====
   useEffect(() => {
@@ -838,20 +875,46 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
       }
       return res.json() as Promise<AiAnalysisResult>;
     },
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
       setAiAnalysis(data);
-      // Save to analyses
-      const newSaved: SavedAnalysis = {
-        id: Date.now().toString(),
-        createdAt: new Date().toLocaleString("ko-KR"),
-        prompt,
-        urls: urls.filter((u) => u.trim()),
-        fileNames: attachedFiles.map((f) => f.name),
-        result: data,
-      };
-      const updated = [newSaved, ...savedAnalyses].slice(0, MAX_SAVED_ANALYSES);
-      setSavedAnalysesLS(period, updated);
-      setSavedAnalyses(updated);
+      const filteredUrls = urls.filter((u) => u.trim());
+      const fNames = attachedFiles.map((f) => f.name);
+
+      // 서버에 저장
+      try {
+        const saveRes = await fetch("/api/strategy-analyses", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            period,
+            prompt,
+            urls: filteredUrls,
+            fileNames: fNames,
+            source: "strategy",
+            result: data,
+          }),
+        });
+        if (saveRes.ok) {
+          const serverSaved = await saveRes.json();
+          const updated = [serverSaved, ...savedAnalyses].slice(0, MAX_SAVED_ANALYSES);
+          setSavedAnalyses(updated);
+        }
+      } catch {
+        // 서버 저장 실패 시 localStorage에 저장
+        const newSaved: SavedAnalysis = {
+          id: Date.now().toString(),
+          createdAt: new Date().toLocaleString("ko-KR"),
+          prompt,
+          urls: filteredUrls,
+          fileNames: fNames,
+          result: data,
+        };
+        const updated = [newSaved, ...savedAnalyses].slice(0, MAX_SAVED_ANALYSES);
+        setSavedAnalysesLS(period, updated);
+        setSavedAnalyses(updated);
+      }
+
       // Save prompt to history
       savePromptToHistory(prompt, urls, period);
       setPromptHistory(getPromptHistory(period));
@@ -867,19 +930,52 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
     refetch();
   }, [refetch]);
 
-  // Save report when new data arrives
+  // Save report when new data arrives (서버 + localStorage)
   useEffect(() => {
     if (report && !isFetching) {
-      const newSaved: SavedReport = {
-        id: Date.now().toString(),
-        title: `${periodLabel} 시장 보고서`,
-        createdAt: new Date().toLocaleString("ko-KR"),
-        periodLabel,
-        report,
-      };
-      const updated = [newSaved, ...savedReports.filter((r) => r.id !== newSaved.id)].slice(0, MAX_SAVED_REPORTS);
-      setSavedReportsLS(period, updated);
-      setSavedReports(updated);
+      // 서버에 저장
+      fetch("/api/strategy-reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          period,
+          title: `${periodLabel} 시장 보고서`,
+          periodLabel,
+          report,
+        }),
+      })
+        .then(res => res.ok ? res.json() : null)
+        .then(serverSaved => {
+          if (serverSaved) {
+            const updated = [serverSaved, ...savedReports].slice(0, MAX_SAVED_REPORTS);
+            setSavedReports(updated);
+          } else {
+            // 서버 저장 실패 시 localStorage 사용
+            const newSaved: SavedReport = {
+              id: Date.now().toString(),
+              title: `${periodLabel} 시장 보고서`,
+              createdAt: new Date().toLocaleString("ko-KR"),
+              periodLabel,
+              report,
+            };
+            const updated = [newSaved, ...savedReports].slice(0, MAX_SAVED_REPORTS);
+            setSavedReportsLS(period, updated);
+            setSavedReports(updated);
+          }
+        })
+        .catch(() => {
+          const newSaved: SavedReport = {
+            id: Date.now().toString(),
+            title: `${periodLabel} 시장 보고서`,
+            createdAt: new Date().toLocaleString("ko-KR"),
+            periodLabel,
+            report,
+          };
+          const updated = [newSaved, ...savedReports].slice(0, MAX_SAVED_REPORTS);
+          setSavedReportsLS(period, updated);
+          setSavedReports(updated);
+        });
     }
   }, [report]);
 
@@ -910,6 +1006,10 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
   }, []);
 
   const handleDelete = useCallback((id: string) => {
+    // 서버에서 삭제
+    fetch(`/api/strategy-reports/${id}`, { method: "DELETE", credentials: "include" })
+      .catch(() => {});
+    // localStorage에서도 삭제
     const updated = savedReports.filter((r) => r.id !== id);
     setSavedReportsLS(period, updated);
     setSavedReports(updated);
@@ -917,6 +1017,10 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
   }, [savedReports, toast, period]);
 
   const handleDeleteAnalysis = useCallback((id: string) => {
+    // 서버에서 삭제
+    fetch(`/api/strategy-analyses/${id}`, { method: "DELETE", credentials: "include" })
+      .catch(() => {});
+    // localStorage에서도 삭제
     const updated = savedAnalyses.filter((a) => a.id !== id);
     setSavedAnalysesLS(period, updated);
     setSavedAnalyses(updated);
@@ -1306,8 +1410,8 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
         </Card>
       )}
 
-      {/* ===== 현재 생성된 보고서 표시 (Admin 전용) ===== */}
-      {isAdmin && displayReport && !isFetching && (
+      {/* ===== 현재 생성된 보고서 표시 (모든 유저) ===== */}
+      {displayReport && !isFetching && (
         <>
       {/* 보고서 헤더 */}
       <div className="flex items-center justify-between">
@@ -1323,6 +1427,7 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
             <span>{displayReport.reportTime} 생성</span>
           </div>
         </div>
+        {isAdmin && (
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={handleGenerate} disabled={isFetching} className="gap-2">
             {isFetching ? <Loader2 className="w-4 h-4 animate-spin" /> : <FilePlus className="w-4 h-4" />}
@@ -1333,6 +1438,7 @@ export default function DailyStrategy({ period = "daily", isAdmin = false }: Dai
             보고서 작성
           </Button>
         </div>
+        )}
       </div>
 
       {/* 시장 요약 배너 */}
