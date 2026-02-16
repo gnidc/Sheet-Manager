@@ -16,6 +16,7 @@ import {
   Share2, Star, Copy, Check, Settings, Sparkles, ChevronDown, ChevronUp,
   AlertTriangle, ExternalLink, TrendingUp, TrendingDown, BarChart3,
   Search, ShoppingCart, ArrowRight, Eye, Zap, Activity, Mic, MicOff, Volume2,
+  AArrowUp, AArrowDown,
 } from "lucide-react";
 
 interface AiPrompt {
@@ -119,6 +120,10 @@ export default function AiAgent({ isAdmin, onNavigate, compact = false }: { isAd
 
   // 복사 상태
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+  const [chatFontSize, setChatFontSize] = useState(() => {
+    const saved = localStorage.getItem("ai-chat-font-size");
+    return saved ? Number(saved) : 14;
+  });
 
   // Agent 실행 결과
   const [agentResults, setAgentResults] = useState<AgentActionResult[]>([]);
@@ -527,6 +532,14 @@ export default function AiAgent({ isAdmin, onNavigate, compact = false }: { isAd
   });
 
   // 메시지 복사
+  const adjustFontSize = useCallback((delta: number) => {
+    setChatFontSize(prev => {
+      const next = Math.min(24, Math.max(10, prev + delta));
+      localStorage.setItem("ai-chat-font-size", String(next));
+      return next;
+    });
+  }, []);
+
   const handleCopy = (text: string, idx: number) => {
     navigator.clipboard.writeText(text);
     setCopiedIdx(idx);
@@ -740,20 +753,44 @@ export default function AiAgent({ isAdmin, onNavigate, compact = false }: { isAd
             <CardTitle className="text-sm flex items-center gap-1.5">
               <MessageSquare className="h-4 w-4 text-purple-500" />
               AI 대화
-              {chatMessages.length > 0 && (
+              <div className="flex items-center gap-0.5 ml-auto">
+                {/* 폰트 크기 조절 */}
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-6 text-[10px] ml-auto text-muted-foreground"
-                  onClick={() => {
-                    setChatMessages([]);
-                    setAgentResults([]);
-                    setShowAgentResult(false);
-                  }}
+                  className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                  onClick={() => adjustFontSize(-1)}
+                  disabled={chatFontSize <= 10}
+                  title="글자 축소"
                 >
-                  대화 초기화
+                  <AArrowDown className="h-3.5 w-3.5" />
                 </Button>
-              )}
+                <span className="text-[10px] text-muted-foreground w-5 text-center tabular-nums">{chatFontSize}</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                  onClick={() => adjustFontSize(1)}
+                  disabled={chatFontSize >= 24}
+                  title="글자 확대"
+                >
+                  <AArrowUp className="h-3.5 w-3.5" />
+                </Button>
+                {chatMessages.length > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 text-[10px] ml-1 text-muted-foreground"
+                    onClick={() => {
+                      setChatMessages([]);
+                      setAgentResults([]);
+                      setShowAgentResult(false);
+                    }}
+                  >
+                    대화 초기화
+                  </Button>
+                )}
+              </div>
             </CardTitle>
           </CardHeader>
           <CardContent className={`p-0 ${compact ? "flex-1 flex flex-col overflow-hidden" : ""}`}>
@@ -801,7 +838,7 @@ export default function AiAgent({ isAdmin, onNavigate, compact = false }: { isAd
                           : "bg-muted rounded-bl-md"
                       }`}
                     >
-                      <div className="text-sm whitespace-pre-wrap leading-relaxed">{msg.content}</div>
+                      <div className="whitespace-pre-wrap leading-relaxed" style={{ fontSize: `${chatFontSize}px` }}>{msg.content}</div>
                       <div className={`flex items-center gap-1.5 mt-1 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
                         <span className={`text-[10px] ${msg.role === "user" ? "text-purple-200" : "text-muted-foreground"}`}>
                           {msg.timestamp.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}
