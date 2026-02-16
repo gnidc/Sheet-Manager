@@ -202,6 +202,7 @@ export interface IStorage {
 
   // Stock Comments (종목 코멘트)
   getStockComments(stockCode: string, market?: string): Promise<StockComment[]>;
+  getStockComment(id: number): Promise<StockComment | undefined>;
   createStockComment(data: InsertStockComment): Promise<StockComment>;
   deleteStockComment(id: number): Promise<void>;
 
@@ -1307,6 +1308,17 @@ export class DatabaseStorage implements IStorage {
       });
     }
     return await db.select().from(stockComments).where(and(...conditions)).orderBy(desc(stockComments.createdAt));
+  }
+
+  async getStockComment(id: number): Promise<StockComment | undefined> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [comment] = await db.select().from(stockComments).where(eq(stockComments.id, id));
+        return comment;
+      });
+    }
+    const [comment] = await db.select().from(stockComments).where(eq(stockComments.id, id));
+    return comment;
   }
 
   async createStockComment(data: InsertStockComment): Promise<StockComment> {

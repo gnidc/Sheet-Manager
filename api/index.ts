@@ -28,11 +28,12 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.set("trust proxy", 1);
 
-// cookie-session (타이머 없음 - Vercel 서버리스에 적합)
+// cookie-session (24시간 만료 - Vercel 서버리스에 적합)
 app.use(
   cookieSession({
     name: "session",
     keys: [process.env.SESSION_SECRET || "default-secret-change-in-production"],
+    maxAge: 24 * 60 * 60 * 1000, // 24시간 세션 만료
     secure: process.env.NODE_ENV === "production",
     httpOnly: true,
     sameSite: "lax" as const,

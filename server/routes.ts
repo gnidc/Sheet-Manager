@@ -100,22 +100,14 @@ async function callAI(prompt: string, userKey?: UserAiKeyOption): Promise<string
   throw new Error("AI API 키가 설정되지 않았습니다. 설정에서 Gemini 또는 OpenAI API 키를 등록해주세요.");
 }
 
-// 환경 변수 확인 (디버깅)
+// 환경 변수 확인 (최소 로깅 - 민감 정보 제외)
 if (process.env.VERCEL) {
-  console.log("=== Vercel 환경 변수 확인 ===");
-  console.log("ADMIN_USERNAME exists:", !!ADMIN_USERNAME);
-  console.log("ADMIN_PASSWORD_HASH exists:", !!ADMIN_PASSWORD_HASH);
-  console.log("SESSION_SECRET exists:", !!process.env.SESSION_SECRET);
-  console.log("DATABASE_URL exists:", !!process.env.DATABASE_URL);
-  console.log("GOOGLE_CLIENT_ID exists:", !!GOOGLE_CLIENT_ID);
-  console.log("NODE_ENV:", process.env.NODE_ENV);
-  console.log("=== KIS API 환경 변수 ===");
-  console.log("KIS_APP_KEY exists:", !!process.env.KIS_APP_KEY);
-  console.log("KIS_APP_SECRET exists:", !!process.env.KIS_APP_SECRET);
-  console.log("KIS_ACCOUNT_NO exists:", !!process.env.KIS_ACCOUNT_NO);
-  console.log("KIS_MOCK_TRADING:", process.env.KIS_MOCK_TRADING);
-  console.log("GEMINI_API_KEY exists:", !!process.env.GEMINI_API_KEY);
-  console.log("OPENAI_API_KEY exists:", !!process.env.OPENAI_API_KEY);
+  const envCheck = [
+    "ADMIN_USERNAME", "ADMIN_PASSWORD_HASH", "SESSION_SECRET", "DATABASE_URL",
+    "GOOGLE_CLIENT_ID", "KIS_APP_KEY", "GEMINI_API_KEY"
+  ].filter(k => !process.env[k]).join(", ");
+  if (envCheck) console.log("[Init] Missing env vars:", envCheck);
+  else console.log("[Init] All required env vars configured");
 }
 
 function requireAdmin(req: Request, res: Response, next: NextFunction) {
@@ -132,6 +124,38 @@ function requireUser(req: Request, res: Response, next: NextFunction) {
   }
   next();
 }
+
+// 🔒 Rate Limiting (메모리 기반 - IP별 요청 횟수 제한)
+const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
+function rateLimit(maxRequests: number, windowMs: number) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "unknown";
+    const key = `${ip}:${req.path}`;
+    const now = Date.now();
+    const entry = rateLimitMap.get(key);
+    
+    if (!entry || now > entry.resetTime) {
+      rateLimitMap.set(key, { count: 1, resetTime: now + windowMs });
+      return next();
+    }
+    
+    if (entry.count >= maxRequests) {
+      const retryAfter = Math.ceil((entry.resetTime - now) / 1000);
+      res.set("Retry-After", String(retryAfter));
+      return res.status(429).json({ message: `요청이 너무 많습니다. ${retryAfter}초 후 다시 시도해주세요.` });
+    }
+    
+    entry.count++;
+    next();
+  };
+}
+// 오래된 Rate Limit 엔트리 정리 (5분마다)
+setInterval(() => {
+  const now = Date.now();
+  rateLimitMap.forEach((entry, key) => {
+    if (now > entry.resetTime) rateLimitMap.delete(key);
+  });
+}, 5 * 60 * 1000);
 
 export async function registerRoutes(
   httpServer: Server,
@@ -166,7 +190,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/auth/login", async (req, res) => {
+  app.post("/api/auth/login", rateLimit(5, 60 * 1000), async (req, res) => {
     const { username, password, rememberMe } = req.body;
     
     if (!username || !password) {
@@ -178,7 +202,7 @@ export async function registerRoutes(
       return res.status(503).json({ message: "Admin credentials not configured" });
     }
     
-    console.log("Login attempt - input username:", username, "expected:", ADMIN_USERNAME, "match:", username === ADMIN_USERNAME);
+    console.log("Login attempt - match:", username === ADMIN_USERNAME);
     
     if (username !== ADMIN_USERNAME) {
       return res.status(401).json({ message: "Invalid credentials" });
@@ -233,7 +257,6 @@ export async function registerRoutes(
   });
   
   app.get("/api/auth/me", (req, res) => {
-    console.log("/api/auth/me - isAdmin:", req.session?.isAdmin, "userId:", req.session?.userId);
     const response = {
       isAdmin: !!req.session?.isAdmin,
       userId: req.session?.userId || null,
@@ -244,8 +267,8 @@ export async function registerRoutes(
     res.status(200).json(response);
   });
 
-  // Google OAuth 로그인/계정생성
-  app.post("/api/auth/google", async (req, res) => {
+  // Google OAuth 로그인/계정생성 (분당 10회 제한)
+  app.post("/api/auth/google", rateLimit(10, 60 * 1000), async (req, res) => {
     const { credential, accessToken, userInfo, rememberMe } = req.body;
 
     if (!credential && !accessToken) {
@@ -4347,8 +4370,8 @@ ${researchList}
     }
   });
 
-  // SEC 공시자료 AI 분석
-  app.post("/api/stock/disclosures/ai-analyze", async (req, res) => {
+  // SEC 공시자료 AI 분석 (로그인 필수 + 분당 5회 제한)
+  app.post("/api/stock/disclosures/ai-analyze", requireUser, rateLimit(5, 60 * 1000), async (req, res) => {
     try {
       const { items, stockName, stockCode, market } = req.body;
       if (!items || !Array.isArray(items) || items.length === 0) {
@@ -4653,7 +4676,7 @@ ${contentSection}
   // ========== 종목 AI 종합분석 ==========
 
   // 종합분석 실행
-  app.post("/api/stock/ai-comprehensive-analysis", async (req, res) => {
+  app.post("/api/stock/ai-comprehensive-analysis", requireUser, rateLimit(5, 60 * 1000), async (req, res) => {
     try {
       const { stockCode, stockName, market, exchange } = req.body;
       if (!stockCode || !stockName) {
@@ -4828,7 +4851,7 @@ ${newsInfo || "(조회 불가)"}
   });
 
   // 분석 삭제 (본인 작성 또는 admin만 삭제 가능)
-  app.delete("/api/stock/ai-analyses/:id", async (req, res) => {
+  app.delete("/api/stock/ai-analyses/:id", requireUser, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const analysis = await storage.getStockAiAnalysis(id);
@@ -4897,8 +4920,8 @@ ${newsInfo || "(조회 불가)"}
     }
   });
 
-  // AI API 키 테스트
-  app.post("/api/user/ai-config/test", async (req, res) => {
+  // AI API 키 테스트 (로그인 필수)
+  app.post("/api/user/ai-config/test", requireUser, async (req, res) => {
     try {
       const { aiProvider, geminiApiKey, openaiApiKey } = req.body;
       const testPrompt = "안녕하세요. 이것은 API 키 테스트입니다. '키 테스트 성공'이라고 한 줄만 응답해주세요.";
@@ -4938,8 +4961,8 @@ ${newsInfo || "(조회 불가)"}
     }
   });
 
-  // 종목 코멘트 등록
-  app.post("/api/stock-comments", async (req, res) => {
+  // 종목 코멘트 등록 (로그인 필수)
+  app.post("/api/stock-comments", requireUser, async (req, res) => {
     try {
       const userId = req.session?.userId;
       const userName = req.session?.userName || req.session?.userEmail || "사용자";
@@ -4961,10 +4984,15 @@ ${newsInfo || "(조회 불가)"}
     }
   });
 
-  // 종목 코멘트 삭제
-  app.delete("/api/stock-comments/:id", async (req, res) => {
+  // 종목 코멘트 삭제 (로그인 필수 + 소유권 확인)
+  app.delete("/api/stock-comments/:id", requireUser, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      // 소유권 확인: 본인 댓글만 삭제 가능 (admin은 모두 가능)
+      const comment = await storage.getStockComment(id);
+      if (comment && !req.session?.isAdmin && comment.userId !== req.session?.userId) {
+        return res.status(403).json({ message: "본인의 코멘트만 삭제할 수 있습니다." });
+      }
       await storage.deleteStockComment(id);
       res.json({ success: true });
     } catch (error: any) {
@@ -7603,10 +7631,15 @@ ${etfListStr}
         return res.status(400).json({ message: "프롬프트를 입력해주세요." });
       }
 
-      // 1) URL 내용 크롤링
+      // 1) URL 내용 크롤링 (SSRF 방어: 내부 네트워크 접근 차단)
       const urlContents: string[] = [];
+      const blockedPatterns = [/^https?:\/\/(localhost|127\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|0\.0\.0\.0|::1|\[::1\])/i, /^file:/i, /^ftp:/i];
       for (const url of parsedUrls) {
         if (!url.trim()) continue;
+        if (blockedPatterns.some(p => p.test(url.trim()))) {
+          urlContents.push(`\n--- [URL: ${url}] ---\n(차단됨: 내부 네트워크 URL은 허용되지 않습니다)\n`);
+          continue;
+        }
         try {
           console.log(`[AI Report] Fetching URL: ${url}`);
           const urlRes = await axios.get(url.trim(), {
@@ -9592,7 +9625,7 @@ ${etfListStr}
   }
 
   // AI Agent 대화 (2단계 프로세스)
-  app.post("/api/ai-agent/chat", requireUser, async (req, res) => {
+  app.post("/api/ai-agent/chat", requireUser, rateLimit(10, 60 * 1000), async (req, res) => {
     try {
       const userId = req.session?.userId;
       if (!userId) return res.status(401).json({ message: "로그인이 필요합니다." });
