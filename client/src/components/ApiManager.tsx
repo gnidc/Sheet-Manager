@@ -27,6 +27,7 @@ interface TradingConfigItem {
   accountProductCd: string;
   mockTrading: boolean;
   isActive: boolean;
+  isSystem?: boolean; // env 기반 시스템 기본 API (Admin 전용)
   createdAt: string;
   updatedAt: string;
 }
@@ -191,19 +192,32 @@ function TradingApiSection() {
               <div
                 key={c.id}
                 className={`flex items-center justify-between p-3 rounded-lg border transition-colors ${
-                  c.isActive ? "border-amber-300 bg-amber-50/50 dark:border-amber-700 dark:bg-amber-950/20" : "border-border"
+                  c.isActive
+                    ? c.isSystem
+                      ? "border-emerald-300 bg-emerald-50/50 dark:border-emerald-700 dark:bg-emerald-950/20"
+                      : "border-amber-300 bg-amber-50/50 dark:border-amber-700 dark:bg-amber-950/20"
+                    : "border-border"
                 }`}
               >
                 <div className="flex items-center gap-3 min-w-0">
                   {c.isActive ? (
-                    <CheckCircle2 className="w-4 h-4 text-amber-500 shrink-0" />
+                    <CheckCircle2 className={`w-4 h-4 shrink-0 ${c.isSystem ? "text-emerald-500" : "text-amber-500"}`} />
                   ) : (
                     <Circle className="w-4 h-4 text-muted-foreground shrink-0" />
                   )}
                   <div className="min-w-0">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-medium truncate">{c.label}</span>
-                      {c.isActive && <Badge variant="outline" className="text-[9px] px-1 py-0 border-amber-400 text-amber-600">활성</Badge>}
+                      {c.isActive && (
+                        <Badge variant="outline" className={`text-[9px] px-1 py-0 ${c.isSystem ? "border-emerald-400 text-emerald-600" : "border-amber-400 text-amber-600"}`}>
+                          활성
+                        </Badge>
+                      )}
+                      {c.isSystem && (
+                        <Badge variant="outline" className="text-[9px] px-1 py-0 border-emerald-400 text-emerald-600">
+                          <Shield className="w-2.5 h-2.5 mr-0.5" />시스템
+                        </Badge>
+                      )}
                       <Badge variant="secondary" className="text-[9px] px-1 py-0">
                         {c.broker === "kiwoom" ? "키움" : "KIS"}
                       </Badge>
@@ -222,12 +236,16 @@ function TradingApiSection() {
                       <RefreshCw className="w-3 h-3 mr-0.5" />활성화
                     </Button>
                   )}
-                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setEditTarget(c)}>
-                    <Pencil className="w-3 h-3" />
-                  </Button>
-                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-red-500" onClick={() => { if (confirm("이 API 설정을 삭제하시겠습니까?")) deleteMutation.mutate(c.id); }}>
-                    <Trash2 className="w-3 h-3" />
-                  </Button>
+                  {!c.isSystem && (
+                    <>
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setEditTarget(c)}>
+                        <Pencil className="w-3 h-3" />
+                      </Button>
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-red-500" onClick={() => { if (confirm("이 API 설정을 삭제하시겠습니까?")) deleteMutation.mutate(c.id); }}>
+                        <Trash2 className="w-3 h-3" />
+                      </Button>
+                    </>
+                  )}
                 </div>
               </div>
             ))}

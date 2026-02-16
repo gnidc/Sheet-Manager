@@ -647,23 +647,32 @@ export async function registerRoutes(
     };
   }
 
-  // 헬퍼: 현재 세션의 사용자 인증정보를 가져오는 함수 (broker 분기)
-  // admin이면 env 기반 (null 반환), 일반 유저면 DB에서 조회
-  async function getUserCredentials(req: Request): Promise<{ userId: number; broker: string; kisCreds?: kisApi.UserKisCredentials; kiwoomCreds?: kiwoomApi.UserKiwoomCredentials } | null> {
-    if (req.session?.isAdmin) {
-      return null; // admin은 기존 env 기반 사용
-    }
-    const userId = req.session?.userId;
-    if (!userId) return null;
+  // Admin도 DB 기반 멀티 API를 사용할 수 있도록 가상 userId 할당
+  const ADMIN_TRADING_USER_ID = -1;
 
-    const config = await storage.getUserTradingConfig(userId);
-    if (!config) return null;
+  // 헬퍼: 세션에서 거래용 userId를 가져오는 함수
+  function getTradingUserId(req: Request): number | null {
+    if (req.session?.isAdmin) return ADMIN_TRADING_USER_ID;
+    return req.session?.userId || null;
+  }
+
+  // 헬퍼: 현재 세션의 사용자 인증정보를 가져오는 함수 (broker 분기)
+  // admin도 DB에 활성 config가 있으면 DB 기반 사용, 없으면 env 기반 fallback
+  async function getUserCredentials(req: Request): Promise<{ userId: number; broker: string; kisCreds?: kisApi.UserKisCredentials; kiwoomCreds?: kiwoomApi.UserKiwoomCredentials } | null> {
+    const tradingUserId = getTradingUserId(req);
+    if (!tradingUserId) return null;
+
+    const config = await storage.getUserTradingConfig(tradingUserId);
+    if (!config) {
+      // admin이면서 DB config 없으면 null 반환 → env 기반 fallback
+      return null;
+    }
 
     const broker = (config as any).broker || "kis";
     if (broker === "kiwoom") {
-      return { userId, broker, kiwoomCreds: decryptKiwoomCreds(config) };
+      return { userId: tradingUserId, broker, kiwoomCreds: decryptKiwoomCreds(config) };
     }
-    return { userId, broker, kisCreds: decryptKisCreds(config) };
+    return { userId: tradingUserId, broker, kisCreds: decryptKisCreds(config) };
   }
 
   // 헬퍼: userId로 직접 인증정보를 가져오는 함수 (손절 감시 등 백그라운드 작업용)
@@ -787,12 +796,13 @@ export async function registerRoutes(
 
   // ========== 멀티 API 관리 엔드포인트 ==========
 
-  // KIS Trading Configs 전체 목록
+  // Trading Configs 전체 목록 (Admin: env 기반 + DB 기반 모두 표시)
   app.get("/api/trading/configs", requireUser, async (req, res) => {
     try {
-      const userId = req.session?.userId;
-      if (!userId) return res.json([]);
-      const configs = await storage.getUserTradingConfigs(userId);
+      const tradingUserId = getTradingUserId(req);
+      if (!tradingUserId) return res.json([]);
+
+      const configs = await storage.getUserTradingConfigs(tradingUserId);
       const safeConfigs = configs.map((c: any) => ({
         id: c.id,
         broker: c.broker || "kis",
@@ -802,9 +812,32 @@ export async function registerRoutes(
         accountProductCd: c.accountProductCd,
         mockTrading: c.mockTrading,
         isActive: c.isActive,
+        isSystem: false,
         createdAt: c.createdAt,
         updatedAt: c.updatedAt,
       }));
+
+      // Admin인 경우 env 기반 KIS API를 "시스템 기본" 가상 항목으로 추가
+      if (req.session?.isAdmin) {
+        const envStatus = kisApi.getTradingStatus();
+        if (envStatus.tradingConfigured) {
+          const hasActiveDbConfig = safeConfigs.some((c: any) => c.isActive);
+          safeConfigs.unshift({
+            id: -1, // 가상 ID
+            broker: "kis",
+            label: "시스템 기본 (ENV)",
+            appKey: (process.env.KIS_APP_KEY || "").slice(0, 6) + "****",
+            accountNo: envStatus.accountNo || "****",
+            accountProductCd: envStatus.accountProductCd || "01",
+            mockTrading: envStatus.mockTrading ?? true,
+            isActive: !hasActiveDbConfig, // DB에 활성 config 없으면 env가 활성
+            isSystem: true,
+            createdAt: "",
+            updatedAt: "",
+          });
+        }
+      }
+
       res.json(safeConfigs);
     } catch (error: any) {
       res.status(500).json({ message: error.message || "설정 목록 조회 실패" });
@@ -814,7 +847,7 @@ export async function registerRoutes(
   // 자동매매 Config 신규 추가 (KIS / 키움)
   app.post("/api/trading/configs", requireUser, async (req, res) => {
     try {
-      const userId = req.session?.userId;
+      const userId = getTradingUserId(req);
       if (!userId) return res.status(400).json({ message: "로그인 필요" });
 
       // 최대 5개 제한
@@ -872,7 +905,7 @@ export async function registerRoutes(
   // 자동매매 Config 수정
   app.put("/api/trading/configs/:id", requireUser, async (req, res) => {
     try {
-      const userId = req.session?.userId;
+      const userId = getTradingUserId(req);
       if (!userId) return res.status(400).json({ message: "로그인 필요" });
       const configId = parseInt(req.params.id);
 
@@ -899,9 +932,17 @@ export async function registerRoutes(
   // 자동매매 Config 활성화 전환
   app.post("/api/trading/configs/:id/activate", requireUser, async (req, res) => {
     try {
-      const userId = req.session?.userId;
+      const userId = getTradingUserId(req);
       if (!userId) return res.status(400).json({ message: "로그인 필요" });
       const configId = parseInt(req.params.id);
+
+      if (configId === -1) {
+        // Admin 시스템 기본(env) 활성화: DB의 모든 활성 config를 비활성화
+        await storage.deactivateAllTradingConfigs(userId);
+        kisApi.clearUserTokenCache(userId);
+        kiwoomApi.clearUserTokenCache(userId);
+        return res.json({ success: true, message: "시스템 기본 API로 전환되었습니다" });
+      }
 
       await storage.setActiveTradingConfig(configId, userId);
       kisApi.clearUserTokenCache(userId);
@@ -915,7 +956,7 @@ export async function registerRoutes(
   // 자동매매 Config 개별 삭제
   app.delete("/api/trading/configs/:id", requireUser, async (req, res) => {
     try {
-      const userId = req.session?.userId;
+      const userId = getTradingUserId(req);
       if (!userId) return res.status(400).json({ message: "로그인 필요" });
       const configId = parseInt(req.params.id);
 

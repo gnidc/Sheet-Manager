@@ -140,6 +140,7 @@ export interface IStorage {
   updateTradingConfig(id: number, userId: number, updates: Partial<InsertUserTradingConfig>): Promise<UserTradingConfig>;
   deleteTradingConfig(id: number, userId: number): Promise<void>;
   setActiveTradingConfig(id: number, userId: number): Promise<void>;
+  deactivateAllTradingConfigs(userId: number): Promise<void>;
   upsertUserTradingConfig(config: InsertUserTradingConfig): Promise<UserTradingConfig>; // 호환성 유지
   deleteUserTradingConfig(userId: number): Promise<void>; // 호환성 유지
 
@@ -669,6 +670,17 @@ export class DatabaseStorage implements IStorage {
       await database.update(userTradingConfigs)
         .set({ isActive: true, updatedAt: new Date() })
         .where(and(eq(userTradingConfigs.id, id), eq(userTradingConfigs.userId, userId)));
+    };
+    if (process.env.VERCEL) return await executeWithClient(query);
+    return await query(db);
+  }
+
+  // Admin 시스템 기본 전환: DB의 모든 Trading Config를 비활성화
+  async deactivateAllTradingConfigs(userId: number): Promise<void> {
+    const query = async (database: any) => {
+      await database.update(userTradingConfigs)
+        .set({ isActive: false, updatedAt: new Date() })
+        .where(eq(userTradingConfigs.userId, userId));
     };
     if (process.env.VERCEL) return await executeWithClient(query);
     return await query(db);
