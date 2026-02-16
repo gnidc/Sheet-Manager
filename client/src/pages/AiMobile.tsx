@@ -137,8 +137,8 @@ function AiMobileContent() {
       </header>
 
       {/* AI Agent 본체 - 전체 화면 사용 */}
-      <div className="flex-1 overflow-hidden">
-        <AiAgent isAdmin={isAdmin} />
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <AiAgent isAdmin={isAdmin} compact />
       </div>
     </div>
   );

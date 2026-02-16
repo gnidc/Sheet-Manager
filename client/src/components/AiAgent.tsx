@@ -87,7 +87,7 @@ const TAB_NAMES: Record<string, string> = {
   "/trading": "⚡ 자동매매",
 };
 
-export default function AiAgent({ isAdmin, onNavigate }: { isAdmin: boolean; onNavigate?: (tab: string) => void }) {
+export default function AiAgent({ isAdmin, onNavigate, compact = false }: { isAdmin: boolean; onNavigate?: (tab: string) => void; compact?: boolean }) {
   const { isLoggedIn } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -549,8 +549,27 @@ export default function AiAgent({ isAdmin, onNavigate }: { isAdmin: boolean; onN
   }
 
   return (
-    <div className="space-y-4">
+    <div className={compact ? "flex flex-col h-full" : "space-y-4"}>
       {/* 헤더 */}
+      {compact ? (
+        /* 모바일 컴팩트 헤더 */
+        <div className="flex items-center justify-between px-3 py-1.5 border-b shrink-0">
+          <div className="flex items-center gap-1.5">
+            <Badge variant="outline" className="text-[10px] h-5">
+              {hasApiKey ? "🟢 연결됨" : "🔴 미연결"}
+            </Badge>
+            <span className="text-[10px] text-muted-foreground">🎙️ "오버"로 자동전송</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <Button variant="ghost" size="sm" onClick={() => setApiKeyDialogOpen(true)} className="h-6 px-1.5">
+              <Key className="h-3 w-3" />
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setShowPromptManager(!showPromptManager)} className="h-6 px-1.5">
+              <Settings className="h-3 w-3" />
+            </Button>
+          </div>
+        </div>
+      ) : (
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-2">
@@ -589,6 +608,7 @@ export default function AiAgent({ isAdmin, onNavigate }: { isAdmin: boolean; onN
           </Button>
         </div>
       </div>
+      )}
 
       {/* API 키 미등록 안내 */}
       {!hasApiKey && !isConfigLoading && (
@@ -715,8 +735,8 @@ export default function AiAgent({ isAdmin, onNavigate }: { isAdmin: boolean; onN
 
       {/* 대화창 */}
       {hasApiKey && (
-        <Card className="border-purple-200 dark:border-purple-800">
-          <CardHeader className="py-2 px-4 border-b">
+        <Card className={`border-purple-200 dark:border-purple-800 ${compact ? "flex-1 flex flex-col overflow-hidden border-0 rounded-none shadow-none" : ""}`}>
+          <CardHeader className="py-2 px-4 border-b shrink-0">
             <CardTitle className="text-sm flex items-center gap-1.5">
               <MessageSquare className="h-4 w-4 text-purple-500" />
               AI 대화
@@ -736,9 +756,9 @@ export default function AiAgent({ isAdmin, onNavigate }: { isAdmin: boolean; onN
               )}
             </CardTitle>
           </CardHeader>
-          <CardContent className="p-0">
+          <CardContent className={`p-0 ${compact ? "flex-1 flex flex-col overflow-hidden" : ""}`}>
             {/* 대화 메시지 영역 */}
-            <div className="h-[450px] overflow-y-auto p-4 space-y-3">
+            <div className={`${compact ? "flex-1" : "h-[450px]"} overflow-y-auto p-4 space-y-3`}>
               {chatMessages.length === 0 && (
                 <div className="flex flex-col items-center justify-center h-full text-center space-y-3 text-muted-foreground">
                   <div className="relative">
@@ -828,7 +848,7 @@ export default function AiAgent({ isAdmin, onNavigate }: { isAdmin: boolean; onN
             </div>
 
             {/* 입력 영역 */}
-            <div className="border-t p-3">
+            <div className="border-t p-3 shrink-0">
               {/* 음성인식 상태 표시 */}
               {isListening && (
                 <div className="flex items-center gap-2 mb-2 px-2 py-1.5 bg-red-50 dark:bg-red-900/20 rounded-md border border-red-200 dark:border-red-800">
