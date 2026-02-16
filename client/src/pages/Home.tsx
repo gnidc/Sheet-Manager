@@ -60,14 +60,27 @@ export default function Home() {
       });
     });
   }, []);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [darkMode, setDarkMode] = useState(() => {
+  const [sidebarCollapsed, setSidebarCollapsedRaw] = useState(false);
+  const [isSidebarPending, startSidebarTransition] = useTransition();
+  const setSidebarCollapsed = useCallback((val: boolean) => {
+    requestAnimationFrame(() => {
+      startSidebarTransition(() => {
+        setSidebarCollapsedRaw(val);
+      });
+    });
+  }, []);
+  const [darkMode, setDarkModeRaw] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('theme') === 'dark' || 
         (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches);
     }
     return false;
   });
+  const setDarkMode = useCallback((val: boolean) => {
+    requestAnimationFrame(() => {
+      setDarkModeRaw(val);
+    });
+  }, []);
   
   const { toast } = useToast();
   const { isAdmin, isLoggedIn } = useAuth();
@@ -512,7 +525,7 @@ export default function Home() {
           </div>
 
           {/* 오른쪽 콘텐츠 영역 */}
-          <div className={`flex-1 min-w-0 ${isTabPending ? 'opacity-70 transition-opacity duration-150' : ''}`}>
+          <div className={`flex-1 min-w-0 ${isTabPending ? 'opacity-70 transition-opacity duration-150' : ''}`} style={{ contain: 'layout style' }}>
 
           <TabsContent value="home">
             <HomeEmbed onNavigate={setActiveTab} />
