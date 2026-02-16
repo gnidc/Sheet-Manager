@@ -12,8 +12,35 @@ import {
   CheckCircle2, AlertTriangle, XCircle, Zap,
   FileSearch, Bug, Lock, Server,
   Wrench, Ban, Trash2, Plus, ShieldOff, History,
+  Globe, MapPin, Building2, Wifi, X,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+
+interface WhoisInfo {
+  ip: string;
+  country: string;
+  countryCode: string;
+  region: string;
+  city: string;
+  zip: string;
+  lat: number;
+  lon: number;
+  timezone: string;
+  isp: string;
+  org: string;
+  as: string;
+  asName: string;
+  reverse: string;
+  mobile: boolean;
+  proxy: boolean;
+  hosting: boolean;
+  extra?: {
+    type: string | null;
+    connectionType: string | null;
+    continent: string | null;
+    currencyCode: string | null;
+  };
+}
 
 interface AuditCheck {
   name: string;
@@ -173,6 +200,9 @@ export default function SecurityAudit() {
   const [newBlockIp, setNewBlockIp] = useState("");
   const [newBlockReason, setNewBlockReason] = useState("");
   const [remediatingAction, setRemediatingAction] = useState<string | null>(null);
+  const [whoisData, setWhoisData] = useState<WhoisInfo | null>(null);
+  const [whoisLoading, setWhoisLoading] = useState<string | null>(null); // loading IP
+  const [whoisError, setWhoisError] = useState<string | null>(null);
   const { toast } = useToast();
 
   // 보안점검 로그 조회
@@ -320,6 +350,33 @@ export default function SecurityAudit() {
     remediateMutation.mutate({ action });
   };
 
+  // IP 추출 (점검 detail에서 IP:건수 패턴)
+  const extractIpsFromDetail = (detail: string): { ip: string; count: string }[] => {
+    const matches = detail.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):?(\d+건)?/g);
+    if (!matches) return [];
+    return matches.map(m => {
+      const [ip, count] = m.split(":");
+      return { ip, count: count || "" };
+    });
+  };
+
+  // WHOIS 조회
+  const handleWhoisLookup = async (ip: string) => {
+    setWhoisLoading(ip);
+    setWhoisError(null);
+    setWhoisData(null);
+    try {
+      const res = await apiRequest("GET", `/api/admin/security/whois/${ip}`);
+      const data = await res.json();
+      setWhoisData(data);
+    } catch (error: any) {
+      setWhoisError(error.message || "WHOIS 조회 실패");
+      toast({ title: "WHOIS 조회 실패", description: error.message, variant: "destructive" });
+    } finally {
+      setWhoisLoading(null);
+    }
+  };
+
   return (
     <div className="space-y-4">
       {/* 헤더 */}
@@ -456,43 +513,157 @@ export default function SecurityAudit() {
                   </div>
                 </div>
 
-                {/* 상세 항목 + 조치 버튼 */}
+                {/* 상세 항목 + 조치/WHOIS 버튼 */}
                 <div className="border-t">
-                  {parseChecks(selectedAudit.details).map((check, i) => (
-                    <div key={i} className={`flex items-start gap-3 px-4 py-2.5 border-b last:border-b-0 ${
-                      check.status === "critical" ? "bg-red-50/50 dark:bg-red-950/10" :
-                      check.status === "warning" ? "bg-amber-50/30 dark:bg-amber-950/10" : ""
-                    }`}>
-                      <div className="mt-0.5">{STATUS_ICON[check.status]}</div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium flex items-center gap-2 flex-wrap">
-                          {check.name}
-                          {STATUS_BADGE[check.status]}
+                  {parseChecks(selectedAudit.details).map((check, i) => {
+                    const suspiciousIps = check.remediationAction === "block-suspicious-ips"
+                      ? extractIpsFromDetail(check.detail)
+                      : [];
+                    return (
+                      <div key={i} className={`border-b last:border-b-0 ${
+                        check.status === "critical" ? "bg-red-50/50 dark:bg-red-950/10" :
+                        check.status === "warning" ? "bg-amber-50/30 dark:bg-amber-950/10" : ""
+                      }`}>
+                        <div className="flex items-start gap-3 px-4 py-2.5">
+                          <div className="mt-0.5">{STATUS_ICON[check.status]}</div>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-medium flex items-center gap-2 flex-wrap">
+                              {check.name}
+                              {STATUS_BADGE[check.status]}
+                            </div>
+                            <div className="text-xs text-muted-foreground mt-0.5">{check.detail}</div>
+                            {/* 의심 IP별 WHOIS 버튼 */}
+                            {suspiciousIps.length > 0 && (
+                              <div className="flex flex-wrap gap-1.5 mt-2">
+                                {suspiciousIps.map(({ ip, count }) => (
+                                  <Button
+                                    key={ip}
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-6 text-[10px] gap-1 px-2 border-blue-300 text-blue-600 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-400 dark:hover:bg-blue-950"
+                                    disabled={whoisLoading === ip}
+                                    onClick={() => handleWhoisLookup(ip)}
+                                  >
+                                    {whoisLoading === ip ? (
+                                      <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                                    ) : (
+                                      <Globe className="h-2.5 w-2.5" />
+                                    )}
+                                    WHOIS {ip} {count && `(${count})`}
+                                  </Button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          {/* 조치 버튼 */}
+                          <div className="flex gap-1 shrink-0">
+                            {check.remediable && check.remediationAction && (
+                              <Button
+                                variant={check.remediationAction.startsWith("guide-") ? "outline" : "default"}
+                                size="sm"
+                                className="h-7 text-xs gap-1"
+                                disabled={remediatingAction === check.remediationAction}
+                                onClick={() => handleRemediation(check.remediationAction!)}
+                              >
+                                {remediatingAction === check.remediationAction ? (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : check.remediationAction.startsWith("guide-") ? (
+                                  <FileSearch className="h-3 w-3" />
+                                ) : (
+                                  <Wrench className="h-3 w-3" />
+                                )}
+                                {check.remediationLabel || "조치"}
+                              </Button>
+                            )}
+                          </div>
                         </div>
-                        <div className="text-xs text-muted-foreground mt-0.5">{check.detail}</div>
                       </div>
-                      {/* 조치 버튼 */}
-                      {check.remediable && check.remediationAction && (
-                        <Button
-                          variant={check.remediationAction.startsWith("guide-") ? "outline" : "default"}
-                          size="sm"
-                          className="h-7 text-xs gap-1 shrink-0"
-                          disabled={remediatingAction === check.remediationAction}
-                          onClick={() => handleRemediation(check.remediationAction!)}
-                        >
-                          {remediatingAction === check.remediationAction ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                          ) : check.remediationAction.startsWith("guide-") ? (
-                            <FileSearch className="h-3 w-3" />
-                          ) : (
-                            <Wrench className="h-3 w-3" />
-                          )}
-                          {check.remediationLabel || "조치"}
-                        </Button>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* WHOIS 결과 패널 */}
+          {(whoisData || whoisError) && (
+            <Card className="border-blue-300 dark:border-blue-700">
+              <CardHeader className="py-3">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Globe className="h-4 w-4 text-blue-500" />
+                  IP WHOIS 조회 결과
+                  {whoisData && (
+                    <Badge variant="outline" className="text-xs ml-1">{whoisData.ip}</Badge>
+                  )}
+                  <Button variant="ghost" size="sm" className="ml-auto h-6 px-2" onClick={() => { setWhoisData(null); setWhoisError(null); }}>
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="py-2 px-4">
+                {whoisError ? (
+                  <p className="text-xs text-red-500">{whoisError}</p>
+                ) : whoisData && (
+                  <div className="space-y-3">
+                    {/* 위치 정보 */}
+                    <div>
+                      <h4 className="text-xs font-semibold flex items-center gap-1.5 text-muted-foreground mb-1.5">
+                        <MapPin className="h-3 w-3" /> 위치 정보
+                      </h4>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <InfoItem label="국가" value={`${whoisData.country} (${whoisData.countryCode})`} flag={whoisData.countryCode} />
+                        <InfoItem label="지역" value={whoisData.region || "-"} />
+                        <InfoItem label="도시" value={whoisData.city || "-"} />
+                        <InfoItem label="우편번호" value={whoisData.zip || "-"} />
+                        <InfoItem label="위도" value={whoisData.lat?.toString() || "-"} />
+                        <InfoItem label="경도" value={whoisData.lon?.toString() || "-"} />
+                        <InfoItem label="타임존" value={whoisData.timezone || "-"} />
+                      </div>
+                    </div>
+                    {/* 네트워크 정보 */}
+                    <div>
+                      <h4 className="text-xs font-semibold flex items-center gap-1.5 text-muted-foreground mb-1.5">
+                        <Wifi className="h-3 w-3" /> 네트워크 정보
+                      </h4>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <InfoItem label="ISP" value={whoisData.isp || "-"} />
+                        <InfoItem label="조직" value={whoisData.org || "-"} />
+                        <InfoItem label="AS" value={whoisData.asName || whoisData.as || "-"} />
+                        <InfoItem label="Reverse DNS" value={whoisData.reverse || "-"} />
+                      </div>
+                    </div>
+                    {/* 위험 플래그 */}
+                    <div>
+                      <h4 className="text-xs font-semibold flex items-center gap-1.5 text-muted-foreground mb-1.5">
+                        <Shield className="h-3 w-3" /> 보안 플래그
+                      </h4>
+                      <div className="flex gap-2 flex-wrap">
+                        <FlagBadge label="모바일" value={whoisData.mobile} />
+                        <FlagBadge label="프록시/VPN" value={whoisData.proxy} danger />
+                        <FlagBadge label="호스팅/DC" value={whoisData.hosting} warning />
+                        {whoisData.extra?.type && (
+                          <Badge variant="outline" className="text-xs">{whoisData.extra.type}</Badge>
+                        )}
+                        {whoisData.extra?.connectionType && (
+                          <Badge variant="outline" className="text-xs">연결: {whoisData.extra.connectionType}</Badge>
+                        )}
+                      </div>
+                    </div>
+                    {/* 지도 링크 */}
+                    {whoisData.lat && whoisData.lon && (
+                      <div className="pt-1">
+                        <a
+                          href={`https://www.google.com/maps/@${whoisData.lat},${whoisData.lon},12z`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-blue-500 hover:underline flex items-center gap-1"
+                        >
+                          <MapPin className="h-3 w-3" /> Google Maps에서 보기 →
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                )}
               </CardContent>
             </Card>
           )}
@@ -796,7 +967,25 @@ export default function SecurityAudit() {
                     <tbody>
                       {blockedIps.map((ip) => (
                         <tr key={ip.id} className={`border-b hover:bg-muted/30 ${!ip.isActive ? 'opacity-50' : ''}`}>
-                          <td className="px-3 py-2 text-xs font-mono font-medium">{ip.ipAddress}</td>
+                          <td className="px-3 py-2 text-xs font-mono font-medium">
+                            <div className="flex items-center gap-1">
+                              {ip.ipAddress}
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-5 px-1.5 text-[10px] text-blue-500 hover:text-blue-600 gap-0.5"
+                                disabled={whoisLoading === ip.ipAddress}
+                                onClick={() => handleWhoisLookup(ip.ipAddress)}
+                              >
+                                {whoisLoading === ip.ipAddress ? (
+                                  <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                                ) : (
+                                  <Globe className="h-2.5 w-2.5" />
+                                )}
+                                WHOIS
+                              </Button>
+                            </div>
+                          </td>
                           <td className="px-3 py-2 text-xs text-muted-foreground max-w-[200px] truncate">{ip.reason}</td>
                           <td className="text-center px-3 py-2 text-xs">{ip.accessCount || "-"}</td>
                           <td className="text-center px-3 py-2">
@@ -833,6 +1022,76 @@ export default function SecurityAudit() {
               )}
             </CardContent>
           </Card>
+
+          {/* WHOIS 결과 패널 (IP 차단관리 탭) */}
+          {(whoisData || whoisError) && (
+            <Card className="border-blue-300 dark:border-blue-700">
+              <CardHeader className="py-3">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Globe className="h-4 w-4 text-blue-500" />
+                  IP WHOIS 조회 결과
+                  {whoisData && (
+                    <Badge variant="outline" className="text-xs ml-1">{whoisData.ip}</Badge>
+                  )}
+                  <Button variant="ghost" size="sm" className="ml-auto h-6 px-2" onClick={() => { setWhoisData(null); setWhoisError(null); }}>
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="py-2 px-4">
+                {whoisError ? (
+                  <p className="text-xs text-red-500">{whoisError}</p>
+                ) : whoisData && (
+                  <div className="space-y-3">
+                    <div>
+                      <h4 className="text-xs font-semibold flex items-center gap-1.5 text-muted-foreground mb-1.5">
+                        <MapPin className="h-3 w-3" /> 위치 정보
+                      </h4>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <InfoItem label="국가" value={`${whoisData.country} (${whoisData.countryCode})`} flag={whoisData.countryCode} />
+                        <InfoItem label="지역" value={whoisData.region || "-"} />
+                        <InfoItem label="도시" value={whoisData.city || "-"} />
+                        <InfoItem label="타임존" value={whoisData.timezone || "-"} />
+                      </div>
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-semibold flex items-center gap-1.5 text-muted-foreground mb-1.5">
+                        <Wifi className="h-3 w-3" /> 네트워크 정보
+                      </h4>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <InfoItem label="ISP" value={whoisData.isp || "-"} />
+                        <InfoItem label="조직" value={whoisData.org || "-"} />
+                        <InfoItem label="AS" value={whoisData.asName || whoisData.as || "-"} />
+                        <InfoItem label="Reverse DNS" value={whoisData.reverse || "-"} />
+                      </div>
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-semibold flex items-center gap-1.5 text-muted-foreground mb-1.5">
+                        <Shield className="h-3 w-3" /> 보안 플래그
+                      </h4>
+                      <div className="flex gap-2 flex-wrap">
+                        <FlagBadge label="모바일" value={whoisData.mobile} />
+                        <FlagBadge label="프록시/VPN" value={whoisData.proxy} danger />
+                        <FlagBadge label="호스팅/DC" value={whoisData.hosting} warning />
+                      </div>
+                    </div>
+                    {whoisData.lat && whoisData.lon && (
+                      <div className="pt-1">
+                        <a
+                          href={`https://www.google.com/maps/@${whoisData.lat},${whoisData.lon},12z`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-blue-500 hover:underline flex items-center gap-1"
+                        >
+                          <MapPin className="h-3 w-3" /> Google Maps에서 보기 →
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
         </div>
       )}
 
@@ -908,5 +1167,45 @@ export default function SecurityAudit() {
         </div>
       )}
     </div>
+  );
+}
+
+// WHOIS 결과 표시용 헬퍼 컴포넌트
+function InfoItem({ label, value, flag }: { label: string; value: string; flag?: string }) {
+  return (
+    <div className="bg-muted/40 rounded px-2 py-1.5">
+      <div className="text-[10px] text-muted-foreground">{label}</div>
+      <div className="text-xs font-medium truncate flex items-center gap-1">
+        {flag && (
+          <img
+            src={`https://flagcdn.com/16x12/${flag.toLowerCase()}.png`}
+            alt={flag}
+            className="h-3 w-4 object-contain"
+            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+          />
+        )}
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function FlagBadge({ label, value, danger, warning }: { label: string; value: boolean; danger?: boolean; warning?: boolean }) {
+  if (value) {
+    return (
+      <Badge className={`text-xs gap-1 ${
+        danger ? "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400" :
+        warning ? "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400" :
+        "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-400"
+      }`}>
+        {danger ? <AlertTriangle className="h-2.5 w-2.5" /> : <CheckCircle2 className="h-2.5 w-2.5" />}
+        {label}
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="secondary" className="text-xs gap-1 opacity-60">
+      <XCircle className="h-2.5 w-2.5" /> {label} 아님
+    </Badge>
   );
 }

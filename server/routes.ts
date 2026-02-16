@@ -9665,6 +9665,65 @@ ${etfListStr}
     }
   });
 
+  // IP WHOIS 조회 (admin only)
+  app.get("/api/admin/security/whois/:ip", requireAdmin, async (req, res) => {
+    try {
+      const ip = req.params.ip;
+      // IP 형식 검증
+      const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
+      if (!ipRegex.test(ip)) {
+        return res.status(400).json({ message: "올바른 IP 주소 형식이 아닙니다" });
+      }
+
+      // 무료 WHOIS API 사용 (ip-api.com)
+      const response = await axios.get(`http://ip-api.com/json/${ip}?fields=status,message,country,countryCode,region,regionName,city,zip,lat,lon,timezone,isp,org,as,asname,reverse,mobile,proxy,hosting,query`, {
+        timeout: 10000,
+      });
+
+      if (response.data.status === "fail") {
+        return res.status(400).json({ message: response.data.message || "WHOIS 조회 실패" });
+      }
+
+      // RDAP/WHOIS 보조 정보 시도 (ipwhois.io)
+      let extraInfo: any = null;
+      try {
+        const rdapRes = await axios.get(`https://ipwhois.app/json/${ip}`, { timeout: 8000 });
+        if (rdapRes.data && !rdapRes.data.success === false) {
+          extraInfo = {
+            type: rdapRes.data.type || null,
+            connectionType: rdapRes.data.connection_type || null,
+            continent: rdapRes.data.continent || null,
+            currencyCode: rdapRes.data.currency_code || null,
+          };
+        }
+      } catch { /* 보조 API 실패 시 무시 */ }
+
+      res.json({
+        ip: response.data.query,
+        country: response.data.country,
+        countryCode: response.data.countryCode,
+        region: response.data.regionName,
+        city: response.data.city,
+        zip: response.data.zip,
+        lat: response.data.lat,
+        lon: response.data.lon,
+        timezone: response.data.timezone,
+        isp: response.data.isp,
+        org: response.data.org,
+        as: response.data.as,
+        asName: response.data.asname,
+        reverse: response.data.reverse,
+        mobile: response.data.mobile,
+        proxy: response.data.proxy,
+        hosting: response.data.hosting,
+        ...extraInfo && { extra: extraInfo },
+      });
+    } catch (error: any) {
+      console.error("[WHOIS Error]:", error.message);
+      res.status(500).json({ message: error.message || "WHOIS 조회 실패" });
+    }
+  });
+
   // ========== AI Agent 시스템 ==========
 
   // 🔒 프롬프트 내용 보안 검증 (인젝션 패턴 제거)
