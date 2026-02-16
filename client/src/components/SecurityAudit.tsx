@@ -373,10 +373,24 @@ export default function SecurityAudit() {
     setWhoisError(null);
     setWhoisData(null);
     try {
-      const res = await apiRequest("GET", `/api/admin/security/whois?ip=${encodeURIComponent(ip)}`);
+      const url = `/api/admin/security/whois?ip=${encodeURIComponent(ip)}`;
+      console.log("[WHOIS] 요청:", url);
+      const res = await fetch(url, { credentials: "include" });
+      console.log("[WHOIS] 응답 status:", res.status);
       const data = await res.json();
-      setWhoisData(data);
+      console.log("[WHOIS] 응답 data:", data);
+      if (!res.ok) {
+        throw new Error(data.message || `HTTP ${res.status}`);
+      }
+      if (data && data.ip) {
+        setWhoisData(data);
+        toast({ title: "WHOIS 조회 완료", description: `${data.ip} - ${data.country || ""} ${data.city || ""}` });
+      } else {
+        setWhoisError("WHOIS 응답에 유효한 데이터가 없습니다");
+        toast({ title: "WHOIS 조회 실패", description: "유효한 데이터 없음", variant: "destructive" });
+      }
     } catch (error: any) {
+      console.error("[WHOIS] 에러:", error);
       setWhoisError(error.message || "WHOIS 조회 실패");
       toast({ title: "WHOIS 조회 실패", description: error.message, variant: "destructive" });
     } finally {
