@@ -11,6 +11,7 @@ import Home from "@/pages/Home";
 // Lazy-load heavy pages to reduce initial bundle size
 const Trading = lazy(() => import("@/pages/Trading"));
 const StockDetail = lazy(() => import("@/pages/StockDetail"));
+const AiMobile = lazy(() => import("@/pages/AiMobile"));
 
 function PageLoader() {
   return (
@@ -35,6 +36,13 @@ function Router() {
         {() => (
           <Suspense fallback={<PageLoader />}>
             <StockDetail />
+          </Suspense>
+        )}
+      </Route>
+      <Route path="/ai-mobile">
+        {() => (
+          <Suspense fallback={<PageLoader />}>
+            <AiMobile />
           </Suspense>
         )}
       </Route>

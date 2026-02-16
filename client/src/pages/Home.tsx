@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Plus, ExternalLink, TrendingUp, Globe, Loader2, Star, Newspaper, FileText, Trash2, Pencil, Scale, Zap, ChevronDown, Calendar, Home as HomeIcon, Search, X, Eye, ChevronLeft, ChevronRight, PenSquare, Send, LogIn, LogOut, Bell, BellRing, MessageCircle, Heart, UserPlus, FileEdit, BarChart3, Bot, Moon, Sun, PanelLeftClose, PanelLeft } from "lucide-react";
+import { Plus, ExternalLink, TrendingUp, Globe, Loader2, Star, Newspaper, FileText, Trash2, Pencil, Scale, Zap, ChevronDown, Calendar, Home as HomeIcon, Search, X, Eye, ChevronLeft, ChevronRight, PenSquare, Send, LogIn, LogOut, Bell, BellRing, MessageCircle, Heart, UserPlus, FileEdit, BarChart3, Bot, Moon, Sun, PanelLeftClose, PanelLeft, Smartphone, Download } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -128,6 +128,25 @@ export default function Home() {
               >
                 {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
               </button>
+              {/* AI Agent 모바일웹/앱 버튼 */}
+              <a
+                href="/ai-mobile"
+                target="_blank"
+                rel="noopener noreferrer"
+                title="AI Agent 모바일웹"
+                className="inline-flex items-center justify-center w-7 h-7 rounded-md bg-red-500 hover:bg-red-600 text-white text-[10px] font-bold transition-colors shadow-sm"
+              >
+                M
+              </a>
+              <a
+                href="/ai-mobile"
+                target="_blank"
+                rel="noopener noreferrer"
+                title="AI Agent 앱 설치 (PWA)"
+                className="inline-flex items-center justify-center w-7 h-7 rounded-md bg-red-500 hover:bg-red-600 text-white text-[10px] font-bold transition-colors shadow-sm"
+              >
+                A
+              </a>
               <QnABoard />
               {(isAdmin || isLoggedIn) && (
                 <Link href="/trading">
