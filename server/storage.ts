@@ -93,6 +93,9 @@ import {
   securityRemediations,
   type SecurityRemediation,
   type InsertSecurityRemediation,
+  userLinkedAccounts,
+  type UserLinkedAccount,
+  type InsertUserLinkedAccount,
 } from "../shared/schema.js";
 import { eq, and, or, desc, isNull, inArray, sql } from "drizzle-orm";
 
@@ -130,10 +133,27 @@ export interface IStorage {
   getUser(id: number): Promise<User | undefined>;
   getUsers(): Promise<User[]>;
 
-  // User Trading Configs
-  getUserTradingConfig(userId: number): Promise<UserTradingConfig | undefined>;
-  upsertUserTradingConfig(config: InsertUserTradingConfig): Promise<UserTradingConfig>;
-  deleteUserTradingConfig(userId: number): Promise<void>;
+  // User Trading Configs (멀티 API)
+  getUserTradingConfig(userId: number): Promise<UserTradingConfig | undefined>;  // 활성 설정 반환 (호환성)
+  getUserTradingConfigs(userId: number): Promise<UserTradingConfig[]>;           // 전체 목록
+  createTradingConfig(config: InsertUserTradingConfig): Promise<UserTradingConfig>;
+  updateTradingConfig(id: number, userId: number, updates: Partial<InsertUserTradingConfig>): Promise<UserTradingConfig>;
+  deleteTradingConfig(id: number, userId: number): Promise<void>;
+  setActiveTradingConfig(id: number, userId: number): Promise<void>;
+  upsertUserTradingConfig(config: InsertUserTradingConfig): Promise<UserTradingConfig>; // 호환성 유지
+  deleteUserTradingConfig(userId: number): Promise<void>; // 호환성 유지
+
+  // User AI Configs (멀티 API)
+  getUserAiConfigs(userId: number): Promise<UserAiConfig[]>;
+  createAiConfig(data: InsertUserAiConfig): Promise<UserAiConfig>;
+  updateAiConfig(id: number, userId: number, updates: Partial<InsertUserAiConfig>): Promise<UserAiConfig>;
+  deleteAiConfig(id: number, userId: number): Promise<void>;
+  setActiveAiConfig(id: number, userId: number): Promise<void>;
+
+  // Google 계정 연결
+  getLinkedAccounts(primaryUserId: number): Promise<UserLinkedAccount[]>;
+  linkAccount(data: InsertUserLinkedAccount): Promise<UserLinkedAccount>;
+  unlinkAccount(id: number, primaryUserId: number): Promise<void>;
 
   // Stop Loss Orders
   getStopLossOrders(userId?: number): Promise<StopLossOrder[]>;
@@ -242,7 +262,7 @@ export interface IStorage {
   createStockAiAnalysis(data: InsertStockAiAnalysis): Promise<StockAiAnalysis>;
   deleteStockAiAnalysis(id: number): Promise<void>;
 
-  // 사용자별 AI API 설정
+  // 사용자별 AI API 설정 (호환성)
   getUserAiConfig(userId: number): Promise<UserAiConfig | undefined>;
   upsertUserAiConfig(data: InsertUserAiConfig): Promise<UserAiConfig>;
   deleteUserAiConfig(userId: number): Promise<void>;
@@ -572,52 +592,118 @@ export class DatabaseStorage implements IStorage {
 
   // ========== User Trading Configs ==========
 
+  // 활성 Trading Config 반환 (호환성 유지)
   async getUserTradingConfig(userId: number): Promise<UserTradingConfig | undefined> {
-    if (process.env.VERCEL) {
-      return await executeWithClient(async (db) => {
-        const [config] = await db.select().from(userTradingConfigs).where(eq(userTradingConfigs.userId, userId));
-        return config;
-      });
-    }
-    const [config] = await db.select().from(userTradingConfigs).where(eq(userTradingConfigs.userId, userId));
-    return config;
+    const query = async (database: any) => {
+      // isActive=true인 설정 우선, 없으면 첫 번째 설정 반환
+      const [active] = await database.select().from(userTradingConfigs)
+        .where(and(eq(userTradingConfigs.userId, userId), eq(userTradingConfigs.isActive, true)));
+      if (active) return active;
+      const [first] = await database.select().from(userTradingConfigs)
+        .where(eq(userTradingConfigs.userId, userId))
+        .orderBy(userTradingConfigs.createdAt);
+      return first;
+    };
+    if (process.env.VERCEL) return await executeWithClient(query);
+    return await query(db);
   }
 
-  async upsertUserTradingConfig(config: InsertUserTradingConfig): Promise<UserTradingConfig> {
-    if (process.env.VERCEL) {
-      return await executeWithClient(async (db) => {
-        // userId 기준 upsert
-        const existing = await db.select().from(userTradingConfigs).where(eq(userTradingConfigs.userId, config.userId));
-        if (existing.length > 0) {
-          const [updated] = await db.update(userTradingConfigs)
-            .set({ ...config, updatedAt: new Date() })
-            .where(eq(userTradingConfigs.userId, config.userId))
-            .returning();
-          return updated;
-        }
-        const [created] = await db.insert(userTradingConfigs).values(config).returning();
-        return created;
-      });
-    }
-    const existing = await db.select().from(userTradingConfigs).where(eq(userTradingConfigs.userId, config.userId));
-    if (existing.length > 0) {
-      const [updated] = await db.update(userTradingConfigs)
-        .set({ ...config, updatedAt: new Date() })
-        .where(eq(userTradingConfigs.userId, config.userId))
+  // 전체 Trading Config 목록
+  async getUserTradingConfigs(userId: number): Promise<UserTradingConfig[]> {
+    const query = async (database: any) => {
+      return await database.select().from(userTradingConfigs)
+        .where(eq(userTradingConfigs.userId, userId))
+        .orderBy(desc(userTradingConfigs.isActive), userTradingConfigs.createdAt);
+    };
+    if (process.env.VERCEL) return await executeWithClient(query);
+    return await query(db);
+  }
+
+  // Trading Config 신규 생성
+  async createTradingConfig(config: InsertUserTradingConfig): Promise<UserTradingConfig> {
+    const query = async (database: any) => {
+      // 첫 번째 등록이면 자동 활성화
+      const existing = await database.select().from(userTradingConfigs)
+        .where(eq(userTradingConfigs.userId, config.userId));
+      const isFirst = existing.length === 0;
+      const [created] = await database.insert(userTradingConfigs)
+        .values({ ...config, isActive: isFirst })
+        .returning();
+      return created;
+    };
+    if (process.env.VERCEL) return await executeWithClient(query);
+    return await query(db);
+  }
+
+  // Trading Config 수정
+  async updateTradingConfig(id: number, userId: number, updates: Partial<InsertUserTradingConfig>): Promise<UserTradingConfig> {
+    const query = async (database: any) => {
+      const [updated] = await database.update(userTradingConfigs)
+        .set({ ...updates, updatedAt: new Date() })
+        .where(and(eq(userTradingConfigs.id, id), eq(userTradingConfigs.userId, userId)))
         .returning();
       return updated;
-    }
-    const [created] = await db.insert(userTradingConfigs).values(config).returning();
-    return created;
+    };
+    if (process.env.VERCEL) return await executeWithClient(query);
+    return await query(db);
   }
 
+  // Trading Config 개별 삭제
+  async deleteTradingConfig(id: number, userId: number): Promise<void> {
+    const query = async (database: any) => {
+      await database.delete(userTradingConfigs)
+        .where(and(eq(userTradingConfigs.id, id), eq(userTradingConfigs.userId, userId)));
+    };
+    if (process.env.VERCEL) return await executeWithClient(query);
+    return await query(db);
+  }
+
+  // Trading Config 활성화 전환
+  async setActiveTradingConfig(id: number, userId: number): Promise<void> {
+    const query = async (database: any) => {
+      // 모두 비활성화
+      await database.update(userTradingConfigs)
+        .set({ isActive: false, updatedAt: new Date() })
+        .where(eq(userTradingConfigs.userId, userId));
+      // 선택한 것만 활성화
+      await database.update(userTradingConfigs)
+        .set({ isActive: true, updatedAt: new Date() })
+        .where(and(eq(userTradingConfigs.id, id), eq(userTradingConfigs.userId, userId)));
+    };
+    if (process.env.VERCEL) return await executeWithClient(query);
+    return await query(db);
+  }
+
+  // 호환성: upsert (기존 단일 API 방식)
+  async upsertUserTradingConfig(config: InsertUserTradingConfig): Promise<UserTradingConfig> {
+    const query = async (database: any) => {
+      const existing = await database.select().from(userTradingConfigs)
+        .where(eq(userTradingConfigs.userId, config.userId));
+      if (existing.length > 0) {
+        // 활성 설정 업데이트
+        const activeConfig = existing.find((c: any) => c.isActive) || existing[0];
+        const [updated] = await database.update(userTradingConfigs)
+          .set({ ...config, updatedAt: new Date() })
+          .where(eq(userTradingConfigs.id, activeConfig.id))
+          .returning();
+        return updated;
+      }
+      const [created] = await database.insert(userTradingConfigs)
+        .values({ ...config, isActive: true })
+        .returning();
+      return created;
+    };
+    if (process.env.VERCEL) return await executeWithClient(query);
+    return await query(db);
+  }
+
+  // 호환성: 전체 삭제
   async deleteUserTradingConfig(userId: number): Promise<void> {
-    if (process.env.VERCEL) {
-      return await executeWithClient(async (db) => {
-        await db.delete(userTradingConfigs).where(eq(userTradingConfigs.userId, userId));
-      });
-    }
-    await db.delete(userTradingConfigs).where(eq(userTradingConfigs.userId, userId));
+    const query = async (database: any) => {
+      await database.delete(userTradingConfigs).where(eq(userTradingConfigs.userId, userId));
+    };
+    if (process.env.VERCEL) return await executeWithClient(query);
+    return await query(db);
   }
 
   // ========== Stop Loss Orders ==========
@@ -1623,51 +1709,142 @@ export class DatabaseStorage implements IStorage {
 
   // ========== 사용자별 AI API 설정 ==========
 
+  // 활성 AI Config 반환 (호환성 유지)
   async getUserAiConfig(userId: number): Promise<UserAiConfig | undefined> {
-    if (process.env.VERCEL) {
-      return await executeWithClient(async (db) => {
-        const [config] = await db.select().from(userAiConfigs).where(eq(userAiConfigs.userId, userId));
-        return config;
-      });
-    }
-    const [config] = await db.select().from(userAiConfigs).where(eq(userAiConfigs.userId, userId));
-    return config;
+    const query = async (database: any) => {
+      const [active] = await database.select().from(userAiConfigs)
+        .where(and(eq(userAiConfigs.userId, userId), eq(userAiConfigs.isActive, true)));
+      if (active) return active;
+      const [first] = await database.select().from(userAiConfigs)
+        .where(eq(userAiConfigs.userId, userId))
+        .orderBy(userAiConfigs.createdAt);
+      return first;
+    };
+    if (process.env.VERCEL) return await executeWithClient(query);
+    return await query(db);
   }
 
-  async upsertUserAiConfig(data: InsertUserAiConfig): Promise<UserAiConfig> {
-    if (process.env.VERCEL) {
-      return await executeWithClient(async (db) => {
-        const existing = await db.select().from(userAiConfigs).where(eq(userAiConfigs.userId, data.userId));
-        if (existing.length > 0) {
-          const [updated] = await db.update(userAiConfigs)
-            .set({ ...data, updatedAt: new Date() })
-            .where(eq(userAiConfigs.userId, data.userId))
-            .returning();
-          return updated;
-        }
-        const [created] = await db.insert(userAiConfigs).values(data).returning();
-        return created;
-      });
-    }
-    const existing = await db.select().from(userAiConfigs).where(eq(userAiConfigs.userId, data.userId));
-    if (existing.length > 0) {
-      const [updated] = await db.update(userAiConfigs)
-        .set({ ...data, updatedAt: new Date() })
-        .where(eq(userAiConfigs.userId, data.userId))
+  // 전체 AI Config 목록
+  async getUserAiConfigs(userId: number): Promise<UserAiConfig[]> {
+    const query = async (database: any) => {
+      return await database.select().from(userAiConfigs)
+        .where(eq(userAiConfigs.userId, userId))
+        .orderBy(desc(userAiConfigs.isActive), userAiConfigs.createdAt);
+    };
+    if (process.env.VERCEL) return await executeWithClient(query);
+    return await query(db);
+  }
+
+  // AI Config 신규 생성
+  async createAiConfig(data: InsertUserAiConfig): Promise<UserAiConfig> {
+    const query = async (database: any) => {
+      const existing = await database.select().from(userAiConfigs)
+        .where(eq(userAiConfigs.userId, data.userId));
+      const isFirst = existing.length === 0;
+      const [created] = await database.insert(userAiConfigs)
+        .values({ ...data, isActive: isFirst })
+        .returning();
+      return created;
+    };
+    if (process.env.VERCEL) return await executeWithClient(query);
+    return await query(db);
+  }
+
+  // AI Config 수정
+  async updateAiConfig(id: number, userId: number, updates: Partial<InsertUserAiConfig>): Promise<UserAiConfig> {
+    const query = async (database: any) => {
+      const [updated] = await database.update(userAiConfigs)
+        .set({ ...updates, updatedAt: new Date() })
+        .where(and(eq(userAiConfigs.id, id), eq(userAiConfigs.userId, userId)))
         .returning();
       return updated;
-    }
-    const [created] = await db.insert(userAiConfigs).values(data).returning();
-    return created;
+    };
+    if (process.env.VERCEL) return await executeWithClient(query);
+    return await query(db);
   }
 
+  // AI Config 개별 삭제
+  async deleteAiConfig(id: number, userId: number): Promise<void> {
+    const query = async (database: any) => {
+      await database.delete(userAiConfigs)
+        .where(and(eq(userAiConfigs.id, id), eq(userAiConfigs.userId, userId)));
+    };
+    if (process.env.VERCEL) return await executeWithClient(query);
+    return await query(db);
+  }
+
+  // AI Config 활성화 전환
+  async setActiveAiConfig(id: number, userId: number): Promise<void> {
+    const query = async (database: any) => {
+      await database.update(userAiConfigs)
+        .set({ isActive: false, updatedAt: new Date() })
+        .where(eq(userAiConfigs.userId, userId));
+      await database.update(userAiConfigs)
+        .set({ isActive: true, updatedAt: new Date() })
+        .where(and(eq(userAiConfigs.id, id), eq(userAiConfigs.userId, userId)));
+    };
+    if (process.env.VERCEL) return await executeWithClient(query);
+    return await query(db);
+  }
+
+  // 호환성: upsert
+  async upsertUserAiConfig(data: InsertUserAiConfig): Promise<UserAiConfig> {
+    const query = async (database: any) => {
+      const existing = await database.select().from(userAiConfigs)
+        .where(eq(userAiConfigs.userId, data.userId));
+      if (existing.length > 0) {
+        const activeConfig = existing.find((c: any) => c.isActive) || existing[0];
+        const [updated] = await database.update(userAiConfigs)
+          .set({ ...data, updatedAt: new Date() })
+          .where(eq(userAiConfigs.id, activeConfig.id))
+          .returning();
+        return updated;
+      }
+      const [created] = await database.insert(userAiConfigs)
+        .values({ ...data, isActive: true })
+        .returning();
+      return created;
+    };
+    if (process.env.VERCEL) return await executeWithClient(query);
+    return await query(db);
+  }
+
+  // 호환성: 전체 삭제
   async deleteUserAiConfig(userId: number): Promise<void> {
-    if (process.env.VERCEL) {
-      return await executeWithClient(async (db) => {
-        await db.delete(userAiConfigs).where(eq(userAiConfigs.userId, userId));
-      });
-    }
-    await db.delete(userAiConfigs).where(eq(userAiConfigs.userId, userId));
+    const query = async (database: any) => {
+      await database.delete(userAiConfigs).where(eq(userAiConfigs.userId, userId));
+    };
+    if (process.env.VERCEL) return await executeWithClient(query);
+    return await query(db);
+  }
+
+  // ========== Google 계정 연결 ==========
+  async getLinkedAccounts(primaryUserId: number): Promise<UserLinkedAccount[]> {
+    const query = async (database: any) => {
+      return await database.select().from(userLinkedAccounts)
+        .where(eq(userLinkedAccounts.primaryUserId, primaryUserId))
+        .orderBy(userLinkedAccounts.linkedAt);
+    };
+    if (process.env.VERCEL) return await executeWithClient(query);
+    return await query(db);
+  }
+
+  async linkAccount(data: InsertUserLinkedAccount): Promise<UserLinkedAccount> {
+    const query = async (database: any) => {
+      const [created] = await database.insert(userLinkedAccounts).values(data).returning();
+      return created;
+    };
+    if (process.env.VERCEL) return await executeWithClient(query);
+    return await query(db);
+  }
+
+  async unlinkAccount(id: number, primaryUserId: number): Promise<void> {
+    const query = async (database: any) => {
+      await database.delete(userLinkedAccounts)
+        .where(and(eq(userLinkedAccounts.id, id), eq(userLinkedAccounts.primaryUserId, primaryUserId)));
+    };
+    if (process.env.VERCEL) return await executeWithClient(query);
+    return await query(db);
   }
 
   // ========== AI 프롬프트 ==========

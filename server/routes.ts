@@ -216,10 +216,31 @@ async function ensureSecurityTables() {
           executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
         )
       `);
-      console.log("[Security] 보안 테이블 확인/생성 완료");
+      // 멀티 API 지원을 위한 컬럼 추가
+      await db.execute(sql`ALTER TABLE user_trading_configs ADD COLUMN IF NOT EXISTS label TEXT DEFAULT '기본'`);
+      await db.execute(sql`ALTER TABLE user_trading_configs ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT false`);
+      await db.execute(sql`ALTER TABLE user_ai_configs ADD COLUMN IF NOT EXISTS label TEXT DEFAULT '기본'`);
+      await db.execute(sql`ALTER TABLE user_ai_configs ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT false`);
+      // unique 제약 조건 제거 (멀티 API 지원)
+      await db.execute(sql`ALTER TABLE user_trading_configs DROP CONSTRAINT IF EXISTS user_trading_configs_user_id_unique`);
+      await db.execute(sql`ALTER TABLE user_ai_configs DROP CONSTRAINT IF EXISTS user_ai_configs_user_id_unique`);
+      // 기존 단일 설정에 is_active=true 적용
+      await db.execute(sql`UPDATE user_trading_configs SET is_active = true WHERE is_active IS NULL OR is_active = false AND id IN (SELECT MIN(id) FROM user_trading_configs GROUP BY user_id)`);
+      await db.execute(sql`UPDATE user_ai_configs SET is_active = true WHERE is_active IS NULL OR is_active = false AND id IN (SELECT MIN(id) FROM user_ai_configs GROUP BY user_id)`);
+      // Google 계정 연결 테이블
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS user_linked_accounts (
+          id SERIAL PRIMARY KEY,
+          primary_user_id INTEGER NOT NULL,
+          linked_user_id INTEGER NOT NULL,
+          is_active BOOLEAN DEFAULT false,
+          linked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+        )
+      `);
+      console.log("[Security] 보안 테이블 및 멀티 API 테이블 확인/생성 완료");
     });
   } catch (error: any) {
-    console.error("[Security] 보안 테이블 생성 실패:", error.message);
+    console.error("[Security] 테이블 생성/마이그레이션 실패:", error.message);
   }
 }
 
@@ -697,6 +718,335 @@ export async function registerRoutes(
       res.json({ success: true, message: "KIS API 설정이 삭제되었습니다" });
     } catch (error: any) {
       res.status(500).json({ message: error.message || "설정 삭제 실패" });
+    }
+  });
+
+  // ========== 멀티 API 관리 엔드포인트 ==========
+
+  // KIS Trading Configs 전체 목록
+  app.get("/api/trading/configs", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      if (!userId) return res.json([]);
+      const configs = await storage.getUserTradingConfigs(userId);
+      const safeConfigs = configs.map((c: any) => ({
+        id: c.id,
+        label: c.label || "기본",
+        appKey: decrypt(c.appKey).slice(0, 6) + "****",
+        accountNo: decrypt(c.accountNo).slice(0, 4) + "****",
+        accountProductCd: c.accountProductCd,
+        mockTrading: c.mockTrading,
+        isActive: c.isActive,
+        createdAt: c.createdAt,
+        updatedAt: c.updatedAt,
+      }));
+      res.json(safeConfigs);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "설정 목록 조회 실패" });
+    }
+  });
+
+  // KIS Trading Config 신규 추가
+  app.post("/api/trading/configs", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      if (!userId) return res.status(400).json({ message: "로그인 필요" });
+
+      // 최대 5개 제한
+      const existing = await storage.getUserTradingConfigs(userId);
+      if (existing.length >= 5) {
+        return res.status(400).json({ message: "최대 5개까지 등록할 수 있습니다" });
+      }
+
+      const { label, appKey, appSecret, accountNo, accountProductCd, mockTrading } = req.body;
+      if (!appKey || !appSecret || !accountNo) {
+        return res.status(400).json({ message: "앱 키, 앱 시크릿, 계좌번호는 필수입니다" });
+      }
+
+      // 인증 검증
+      const creds: kisApi.UserKisCredentials = {
+        appKey, appSecret, accountNo,
+        accountProductCd: accountProductCd || "01",
+        mockTrading: mockTrading ?? true,
+      };
+      const validation = await kisApi.validateUserCredentials(userId, creds);
+      if (!validation.success) {
+        return res.status(400).json({ message: `인증 실패: ${validation.message}` });
+      }
+
+      const config = await storage.createTradingConfig({
+        userId,
+        label: label || "기본",
+        appKey: encrypt(appKey),
+        appSecret: encrypt(appSecret),
+        accountNo: encrypt(accountNo),
+        accountProductCd: accountProductCd || "01",
+        mockTrading: mockTrading ?? true,
+      });
+
+      res.json({ success: true, message: "KIS API가 등록되었습니다", config: { id: config.id, label: config.label, isActive: config.isActive } });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "설정 등록 실패" });
+    }
+  });
+
+  // KIS Trading Config 수정
+  app.put("/api/trading/configs/:id", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      if (!userId) return res.status(400).json({ message: "로그인 필요" });
+      const configId = parseInt(req.params.id);
+
+      const { label, appKey, appSecret, accountNo, accountProductCd, mockTrading } = req.body;
+      const updates: any = { updatedAt: new Date() };
+      if (label !== undefined) updates.label = label;
+      if (accountProductCd !== undefined) updates.accountProductCd = accountProductCd;
+      if (mockTrading !== undefined) updates.mockTrading = mockTrading;
+      if (appKey) updates.appKey = encrypt(appKey);
+      if (appSecret) updates.appSecret = encrypt(appSecret);
+      if (accountNo) updates.accountNo = encrypt(accountNo);
+
+      const updated = await storage.updateTradingConfig(configId, userId, updates);
+      if (!updated) return res.status(404).json({ message: "설정을 찾을 수 없습니다" });
+
+      kisApi.clearUserTokenCache(userId);
+      res.json({ success: true, message: "설정이 수정되었습니다" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "설정 수정 실패" });
+    }
+  });
+
+  // KIS Trading Config 활성화 전환
+  app.post("/api/trading/configs/:id/activate", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      if (!userId) return res.status(400).json({ message: "로그인 필요" });
+      const configId = parseInt(req.params.id);
+
+      await storage.setActiveTradingConfig(configId, userId);
+      kisApi.clearUserTokenCache(userId);
+      res.json({ success: true, message: "활성 API가 전환되었습니다" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "전환 실패" });
+    }
+  });
+
+  // KIS Trading Config 개별 삭제
+  app.delete("/api/trading/configs/:id", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      if (!userId) return res.status(400).json({ message: "로그인 필요" });
+      const configId = parseInt(req.params.id);
+
+      await storage.deleteTradingConfig(configId, userId);
+      kisApi.clearUserTokenCache(userId);
+      res.json({ success: true, message: "설정이 삭제되었습니다" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "삭제 실패" });
+    }
+  });
+
+  // AI Config 전체 목록
+  app.get("/api/user/ai-configs", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      if (!userId) return res.json([]);
+      const configs = await storage.getUserAiConfigs(userId);
+      const safeConfigs = configs.map((c: any) => ({
+        id: c.id,
+        label: c.label || "기본",
+        aiProvider: c.aiProvider,
+        hasGeminiKey: !!c.geminiApiKey,
+        hasOpenaiKey: !!c.openaiApiKey,
+        geminiApiKey: maskApiKey(c.geminiApiKey),
+        openaiApiKey: maskApiKey(c.openaiApiKey),
+        isActive: c.isActive,
+        createdAt: c.createdAt,
+        updatedAt: c.updatedAt,
+      }));
+      res.json(safeConfigs);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "AI 설정 목록 조회 실패" });
+    }
+  });
+
+  // AI Config 신규 추가
+  app.post("/api/user/ai-configs", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      if (!userId) return res.status(400).json({ message: "로그인 필요" });
+
+      const existing = await storage.getUserAiConfigs(userId);
+      if (existing.length >= 3) {
+        return res.status(400).json({ message: "최대 3개까지 등록할 수 있습니다" });
+      }
+
+      const { label, aiProvider, geminiApiKey, openaiApiKey } = req.body;
+      const config = await storage.createAiConfig({
+        userId,
+        label: label || "기본",
+        aiProvider: aiProvider || "gemini",
+        geminiApiKey: geminiApiKey ? encrypt(geminiApiKey) : null,
+        openaiApiKey: openaiApiKey ? encrypt(openaiApiKey) : null,
+        useOwnKey: true,
+      });
+
+      res.json({ success: true, message: "AI API가 등록되었습니다", config: { id: config.id, label: config.label, isActive: config.isActive } });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "AI 설정 등록 실패" });
+    }
+  });
+
+  // AI Config 수정
+  app.put("/api/user/ai-configs/:id", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      if (!userId) return res.status(400).json({ message: "로그인 필요" });
+      const configId = parseInt(req.params.id);
+
+      const { label, aiProvider, geminiApiKey, openaiApiKey } = req.body;
+      const updates: any = { updatedAt: new Date() };
+      if (label !== undefined) updates.label = label;
+      if (aiProvider !== undefined) updates.aiProvider = aiProvider;
+      if (geminiApiKey !== undefined) updates.geminiApiKey = geminiApiKey ? encrypt(geminiApiKey) : null;
+      if (openaiApiKey !== undefined) updates.openaiApiKey = openaiApiKey ? encrypt(openaiApiKey) : null;
+
+      const updated = await storage.updateAiConfig(configId, userId, updates);
+      if (!updated) return res.status(404).json({ message: "설정을 찾을 수 없습니다" });
+      res.json({ success: true, message: "AI 설정이 수정되었습니다" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "AI 설정 수정 실패" });
+    }
+  });
+
+  // AI Config 활성화 전환
+  app.post("/api/user/ai-configs/:id/activate", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      if (!userId) return res.status(400).json({ message: "로그인 필요" });
+      const configId = parseInt(req.params.id);
+
+      await storage.setActiveAiConfig(configId, userId);
+      res.json({ success: true, message: "활성 AI API가 전환되었습니다" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "전환 실패" });
+    }
+  });
+
+  // AI Config 개별 삭제
+  app.delete("/api/user/ai-configs/:id", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      if (!userId) return res.status(400).json({ message: "로그인 필요" });
+      const configId = parseInt(req.params.id);
+
+      await storage.deleteAiConfig(configId, userId);
+      res.json({ success: true, message: "AI 설정이 삭제되었습니다" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "AI 설정 삭제 실패" });
+    }
+  });
+
+  // Google 계정 연결 목록
+  app.get("/api/user/linked-accounts", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      if (!userId) return res.json({ currentAccount: null, linkedAccounts: [] });
+
+      const user = await storage.getUser(userId);
+      const linked = await storage.getLinkedAccounts(userId);
+
+      // 연결된 계정의 유저 정보 조회
+      const linkedUsers = await Promise.all(
+        linked.map(async (la: any) => {
+          const u = await storage.getUser(la.linkedUserId);
+          return { id: la.id, user: u ? { id: u.id, email: u.email, name: u.name, picture: u.picture } : null, linkedAt: la.linkedAt };
+        })
+      );
+
+      res.json({
+        currentAccount: user ? { id: user.id, email: user.email, name: user.name, picture: user.picture, createdAt: user.createdAt } : null,
+        linkedAccounts: linkedUsers.filter((la: any) => la.user),
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "계정 정보 조회 실패" });
+    }
+  });
+
+  // Google 계정 연결
+  app.post("/api/user/link-account", requireUser, async (req, res) => {
+    try {
+      const primaryUserId = req.session?.userId;
+      if (!primaryUserId) return res.status(400).json({ message: "로그인 필요" });
+
+      const { googleId, email, name, picture } = req.body;
+      if (!googleId || !email) return res.status(400).json({ message: "Google 계정 정보가 필요합니다" });
+
+      // 해당 Google 계정이 이미 등록되어 있는지 확인
+      let linkedUser = await storage.getUserByGoogleId(googleId);
+      if (!linkedUser) {
+        linkedUser = await storage.createUser({ googleId, email, name, picture });
+      }
+
+      if (linkedUser.id === primaryUserId) {
+        return res.status(400).json({ message: "현재 로그인된 계정과 동일한 계정입니다" });
+      }
+
+      // 이미 연결되어 있는지 확인
+      const existing = await storage.getLinkedAccounts(primaryUserId);
+      if (existing.some((la: any) => la.linkedUserId === linkedUser!.id)) {
+        return res.status(400).json({ message: "이미 연결된 계정입니다" });
+      }
+
+      if (existing.length >= 3) {
+        return res.status(400).json({ message: "최대 3개까지 연결할 수 있습니다" });
+      }
+
+      await storage.linkAccount({ primaryUserId, linkedUserId: linkedUser.id });
+      res.json({ success: true, message: "계정이 연결되었습니다" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "계정 연결 실패" });
+    }
+  });
+
+  // Google 계정 연결 해제
+  app.delete("/api/user/linked-accounts/:id", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      if (!userId) return res.status(400).json({ message: "로그인 필요" });
+      const linkId = parseInt(req.params.id);
+
+      await storage.unlinkAccount(linkId, userId);
+      res.json({ success: true, message: "계정 연결이 해제되었습니다" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "계정 연결 해제 실패" });
+    }
+  });
+
+  // Admin: 전체 사용자 API 현황 조회
+  app.get("/api/admin/api-overview", requireAdmin, async (req, res) => {
+    try {
+      const allUsers = await storage.getUsers();
+      const overview = await Promise.all(
+        allUsers.map(async (u: any) => {
+          const tradingConfigs = await storage.getUserTradingConfigs(u.id);
+          const aiConfigs = await storage.getUserAiConfigs(u.id);
+          return {
+            userId: u.id,
+            email: u.email,
+            name: u.name,
+            tradingApis: tradingConfigs.length,
+            activeTradingApi: tradingConfigs.find((c: any) => c.isActive)?.label || null,
+            tradingMock: tradingConfigs.find((c: any) => c.isActive)?.mockTrading ?? null,
+            aiApis: aiConfigs.length,
+            activeAiApi: aiConfigs.find((c: any) => c.isActive)?.label || null,
+            activeAiProvider: aiConfigs.find((c: any) => c.isActive)?.aiProvider || null,
+          };
+        })
+      );
+      res.json(overview.filter((o: any) => o.tradingApis > 0 || o.aiApis > 0));
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "API 현황 조회 실패" });
     }
   });
 

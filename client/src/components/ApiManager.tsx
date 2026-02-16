@@ -1,0 +1,775 @@
+import { useState } from "react";
+import { useAuth } from "@/hooks/use-auth";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
+} from "@/components/ui/dialog";
+import {
+  Key, Zap, Bot, User, Plus, Trash2, CheckCircle2, Circle, Pencil, Shield, Loader2, ExternalLink, AlertTriangle, RefreshCw,
+} from "lucide-react";
+
+// ========== Interfaces ==========
+interface TradingConfigItem {
+  id: number;
+  label: string;
+  appKey: string;
+  accountNo: string;
+  accountProductCd: string;
+  mockTrading: boolean;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface AiConfigItem {
+  id: number;
+  label: string;
+  aiProvider: string;
+  hasGeminiKey: boolean;
+  hasOpenaiKey: boolean;
+  geminiApiKey: string | null;
+  openaiApiKey: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface LinkedAccount {
+  id: number;
+  user: { id: number; email: string; name: string; picture: string | null };
+  linkedAt: string;
+}
+
+interface CurrentAccount {
+  id: number;
+  email: string;
+  name: string;
+  picture: string | null;
+  createdAt: string;
+}
+
+// ========== Main Component ==========
+export default function ApiManager() {
+  const { isAdmin, isLoggedIn } = useAuth();
+  const [activeTab, setActiveTab] = useState("trading");
+
+  if (!isLoggedIn) {
+    return (
+      <Card className="max-w-2xl mx-auto mt-8">
+        <CardContent className="py-12 text-center">
+          <Key className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+          <p className="text-muted-foreground">로그인 후 API 관리 기능을 이용할 수 있습니다.</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <Key className="w-5 h-5 text-primary" />
+        <h2 className="text-lg font-bold">API 관리센터</h2>
+      </div>
+
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="grid w-full grid-cols-3 max-w-lg">
+          <TabsTrigger value="trading" className="gap-1.5 text-xs">
+            <Zap className="h-3.5 w-3.5" />
+            자동매매 API
+          </TabsTrigger>
+          <TabsTrigger value="ai" className="gap-1.5 text-xs">
+            <Bot className="h-3.5 w-3.5" />
+            AI API
+          </TabsTrigger>
+          <TabsTrigger value="google" className="gap-1.5 text-xs">
+            <User className="h-3.5 w-3.5" />
+            Google 계정
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="trading">
+          <TradingApiSection />
+        </TabsContent>
+        <TabsContent value="ai">
+          <AiApiSection />
+        </TabsContent>
+        <TabsContent value="google">
+          <GoogleAccountSection />
+        </TabsContent>
+      </Tabs>
+
+      {isAdmin && (
+        <AdminApiOverview />
+      )}
+    </div>
+  );
+}
+
+// ========== Trading API Section ==========
+function TradingApiSection() {
+  const { toast } = useToast();
+  const [showAdd, setShowAdd] = useState(false);
+  const [editTarget, setEditTarget] = useState<TradingConfigItem | null>(null);
+
+  const { data: configs = [], isLoading } = useQuery<TradingConfigItem[]>({
+    queryKey: ["/api/trading/configs"],
+  });
+
+  const activateMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiRequest("POST", `/api/trading/configs/${id}/activate`);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "✅ 전환 완료", description: "활성 API가 변경되었습니다" });
+      queryClient.invalidateQueries({ queryKey: ["/api/trading/configs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/trading/config"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/trading/status"] });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiRequest("DELETE", `/api/trading/configs/${id}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "🗑️ 삭제 완료", description: "API 설정이 삭제되었습니다" });
+      queryClient.invalidateQueries({ queryKey: ["/api/trading/configs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/trading/config"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/trading/status"] });
+    },
+  });
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Zap className="w-4 h-4 text-amber-500" />
+              KIS 자동매매 API
+            </CardTitle>
+            <CardDescription className="text-xs mt-1">
+              한국투자증권 API를 최대 5개까지 등록하고 전환할 수 있습니다
+            </CardDescription>
+          </div>
+          <Button size="sm" onClick={() => setShowAdd(true)} className="gap-1 text-xs" disabled={configs.length >= 5}>
+            <Plus className="w-3 h-3" /> 추가
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : configs.length === 0 ? (
+          <div className="text-center py-8 text-sm text-muted-foreground">
+            <Zap className="w-8 h-8 mx-auto mb-2 opacity-30" />
+            등록된 KIS API가 없습니다
+            <br />
+            <Button variant="outline" size="sm" className="mt-3 text-xs" onClick={() => setShowAdd(true)}>
+              <Plus className="w-3 h-3 mr-1" /> 첫 번째 API 등록하기
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {configs.map((c) => (
+              <div
+                key={c.id}
+                className={`flex items-center justify-between p-3 rounded-lg border transition-colors ${
+                  c.isActive ? "border-amber-300 bg-amber-50/50 dark:border-amber-700 dark:bg-amber-950/20" : "border-border"
+                }`}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  {c.isActive ? (
+                    <CheckCircle2 className="w-4 h-4 text-amber-500 shrink-0" />
+                  ) : (
+                    <Circle className="w-4 h-4 text-muted-foreground shrink-0" />
+                  )}
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium truncate">{c.label}</span>
+                      {c.isActive && <Badge variant="outline" className="text-[9px] px-1 py-0 border-amber-400 text-amber-600">활성</Badge>}
+                      <Badge variant={c.mockTrading ? "secondary" : "destructive"} className="text-[9px] px-1 py-0">
+                        {c.mockTrading ? "모의" : "실전"}
+                      </Badge>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground font-mono mt-0.5">
+                      {c.appKey} · {c.accountNo}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  {!c.isActive && (
+                    <Button variant="ghost" size="sm" className="h-7 text-[10px] text-amber-600" onClick={() => activateMutation.mutate(c.id)} disabled={activateMutation.isPending}>
+                      <RefreshCw className="w-3 h-3 mr-0.5" />활성화
+                    </Button>
+                  )}
+                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setEditTarget(c)}>
+                    <Pencil className="w-3 h-3" />
+                  </Button>
+                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-red-500" onClick={() => { if (confirm("이 API 설정을 삭제하시겠습니까?")) deleteMutation.mutate(c.id); }}>
+                    <Trash2 className="w-3 h-3" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+
+      {/* 추가 다이얼로그 */}
+      <TradingConfigDialog open={showAdd} onClose={() => setShowAdd(false)} />
+      {/* 수정 다이얼로그 */}
+      {editTarget && (
+        <TradingConfigDialog open={!!editTarget} onClose={() => setEditTarget(null)} editConfig={editTarget} />
+      )}
+    </Card>
+  );
+}
+
+// ========== Trading Config Dialog ==========
+function TradingConfigDialog({ open, onClose, editConfig }: { open: boolean; onClose: () => void; editConfig?: TradingConfigItem }) {
+  const { toast } = useToast();
+  const [label, setLabel] = useState(editConfig?.label || "");
+  const [appKey, setAppKey] = useState("");
+  const [appSecret, setAppSecret] = useState("");
+  const [accountNo, setAccountNo] = useState("");
+  const [accountProductCd, setAccountProductCd] = useState(editConfig?.accountProductCd || "01");
+  const [mockTrading, setMockTrading] = useState(editConfig?.mockTrading ?? true);
+  const [showSecret, setShowSecret] = useState(false);
+
+  const isEdit = !!editConfig;
+
+  const mutation = useMutation({
+    mutationFn: async (data: any) => {
+      if (isEdit) {
+        const res = await apiRequest("PUT", `/api/trading/configs/${editConfig.id}`, data);
+        return res.json();
+      }
+      const res = await apiRequest("POST", "/api/trading/configs", data);
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast({ title: isEdit ? "수정 완료" : "등록 완료", description: data.message });
+      queryClient.invalidateQueries({ queryKey: ["/api/trading/configs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/trading/config"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/trading/status"] });
+      onClose();
+    },
+    onError: (error: Error) => {
+      toast({ title: "실패", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const data: any = { label: label || "기본", accountProductCd, mockTrading };
+    if (!isEdit && (!appKey || !appSecret || !accountNo)) {
+      toast({ title: "입력 오류", description: "앱 키, 앱 시크릿, 계좌번호는 필수입니다", variant: "destructive" });
+      return;
+    }
+    if (appKey) data.appKey = appKey;
+    if (appSecret) data.appSecret = appSecret;
+    if (accountNo) data.accountNo = accountNo;
+    mutation.mutate(data);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="sm:max-w-[460px]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <Zap className="w-4 h-4 text-amber-500" />
+            {isEdit ? "KIS API 수정" : "KIS API 등록"}
+          </DialogTitle>
+          <DialogDescription className="text-xs">
+            {isEdit ? "변경할 항목만 입력하세요. 빈 필드는 기존 값이 유지됩니다." : "한국투자증권 API 인증 정보를 입력하세요."}
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-1.5">
+            <Label className="text-xs">별칭</Label>
+            <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="예: 모의투자용, 실전용" className="text-sm h-9" />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">앱 키 (App Key) {!isEdit && <span className="text-red-500">*</span>}</Label>
+            <Input value={appKey} onChange={(e) => setAppKey(e.target.value)} placeholder={isEdit ? "변경 시 입력" : "PSxxxxxxx..."} className="font-mono text-sm h-9" />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">앱 시크릿 (App Secret) {!isEdit && <span className="text-red-500">*</span>}</Label>
+            <div className="relative">
+              <Input type={showSecret ? "text" : "password"} value={appSecret} onChange={(e) => setAppSecret(e.target.value)} placeholder={isEdit ? "변경 시 입력" : "앱 시크릿"} className="font-mono text-sm h-9 pr-16" />
+              <Button type="button" variant="ghost" size="sm" className="absolute right-1 top-1/2 -translate-y-1/2 h-6 text-[10px]" onClick={() => setShowSecret(!showSecret)}>
+                {showSecret ? "숨기기" : "보기"}
+              </Button>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="col-span-2 space-y-1.5">
+              <Label className="text-xs">계좌번호 (앞 8자리) {!isEdit && <span className="text-red-500">*</span>}</Label>
+              <Input value={accountNo} onChange={(e) => setAccountNo(e.target.value.replace(/\D/g, "").slice(0, 8))} placeholder={isEdit ? "변경 시 입력" : "12345678"} maxLength={8} className="font-mono text-sm h-9" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">상품코드</Label>
+              <Input value={accountProductCd} onChange={(e) => setAccountProductCd(e.target.value.replace(/\D/g, "").slice(0, 2))} placeholder="01" maxLength={2} className="font-mono text-sm h-9" />
+            </div>
+          </div>
+          <div className="flex items-center justify-between bg-muted/50 p-3 rounded-lg">
+            <div>
+              <Label className="text-xs font-medium cursor-pointer">모의투자 모드</Label>
+              <p className="text-[10px] text-muted-foreground mt-0.5">처음 사용 시 모의투자로 테스트하세요</p>
+            </div>
+            <Switch checked={mockTrading} onCheckedChange={setMockTrading} />
+          </div>
+          {!mockTrading && (
+            <div className="flex items-start gap-2 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg p-3">
+              <AlertTriangle className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
+              <p className="text-[11px] text-red-600 dark:text-red-400">실전투자 모드에서는 <strong>실제 주문이 체결</strong>됩니다.</p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose} className="text-xs">취소</Button>
+            <Button type="submit" disabled={mutation.isPending} className="text-xs gap-1">
+              {mutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Shield className="w-3 h-3" />}
+              {isEdit ? "수정" : "등록 및 검증"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ========== AI API Section ==========
+function AiApiSection() {
+  const { toast } = useToast();
+  const [showAdd, setShowAdd] = useState(false);
+  const [editTarget, setEditTarget] = useState<AiConfigItem | null>(null);
+
+  const { data: configs = [], isLoading } = useQuery<AiConfigItem[]>({
+    queryKey: ["/api/user/ai-configs"],
+  });
+
+  const activateMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiRequest("POST", `/api/user/ai-configs/${id}/activate`);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "✅ 전환 완료", description: "활성 AI API가 변경되었습니다" });
+      queryClient.invalidateQueries({ queryKey: ["/api/user/ai-configs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/user/ai-config"] });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiRequest("DELETE", `/api/user/ai-configs/${id}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "🗑️ 삭제 완료" });
+      queryClient.invalidateQueries({ queryKey: ["/api/user/ai-configs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/user/ai-config"] });
+    },
+  });
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Bot className="w-4 h-4 text-purple-500" />
+              AI API
+            </CardTitle>
+            <CardDescription className="text-xs mt-1">
+              Gemini/OpenAI API를 최대 3개까지 등록하고 전환할 수 있습니다
+            </CardDescription>
+          </div>
+          <Button size="sm" onClick={() => setShowAdd(true)} className="gap-1 text-xs" disabled={configs.length >= 3}>
+            <Plus className="w-3 h-3" /> 추가
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : configs.length === 0 ? (
+          <div className="text-center py-8 text-sm text-muted-foreground">
+            <Bot className="w-8 h-8 mx-auto mb-2 opacity-30" />
+            등록된 AI API가 없습니다
+            <br />
+            <Button variant="outline" size="sm" className="mt-3 text-xs" onClick={() => setShowAdd(true)}>
+              <Plus className="w-3 h-3 mr-1" /> 첫 번째 AI API 등록하기
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {configs.map((c) => (
+              <div
+                key={c.id}
+                className={`flex items-center justify-between p-3 rounded-lg border transition-colors ${
+                  c.isActive ? "border-purple-300 bg-purple-50/50 dark:border-purple-700 dark:bg-purple-950/20" : "border-border"
+                }`}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  {c.isActive ? (
+                    <CheckCircle2 className="w-4 h-4 text-purple-500 shrink-0" />
+                  ) : (
+                    <Circle className="w-4 h-4 text-muted-foreground shrink-0" />
+                  )}
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium truncate">{c.label}</span>
+                      {c.isActive && <Badge variant="outline" className="text-[9px] px-1 py-0 border-purple-400 text-purple-600">활성</Badge>}
+                      <Badge variant="secondary" className="text-[9px] px-1 py-0">
+                        {c.aiProvider === "openai" ? "OpenAI" : "Gemini"}
+                      </Badge>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      {c.hasGeminiKey && <span className="mr-2">Gemini ✓</span>}
+                      {c.hasOpenaiKey && <span>OpenAI ✓</span>}
+                      {!c.hasGeminiKey && !c.hasOpenaiKey && "키 미등록"}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  {!c.isActive && (
+                    <Button variant="ghost" size="sm" className="h-7 text-[10px] text-purple-600" onClick={() => activateMutation.mutate(c.id)} disabled={activateMutation.isPending}>
+                      <RefreshCw className="w-3 h-3 mr-0.5" />활성화
+                    </Button>
+                  )}
+                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setEditTarget(c)}>
+                    <Pencil className="w-3 h-3" />
+                  </Button>
+                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-red-500" onClick={() => { if (confirm("이 AI API 설정을 삭제하시겠습니까?")) deleteMutation.mutate(c.id); }}>
+                    <Trash2 className="w-3 h-3" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+
+      <AiConfigDialog open={showAdd} onClose={() => setShowAdd(false)} />
+      {editTarget && <AiConfigDialog open={!!editTarget} onClose={() => setEditTarget(null)} editConfig={editTarget} />}
+    </Card>
+  );
+}
+
+// ========== AI Config Dialog ==========
+function AiConfigDialog({ open, onClose, editConfig }: { open: boolean; onClose: () => void; editConfig?: AiConfigItem }) {
+  const { toast } = useToast();
+  const [label, setLabel] = useState(editConfig?.label || "");
+  const [aiProvider, setAiProvider] = useState(editConfig?.aiProvider || "gemini");
+  const [geminiApiKey, setGeminiApiKey] = useState("");
+  const [openaiApiKey, setOpenaiApiKey] = useState("");
+
+  const isEdit = !!editConfig;
+
+  const mutation = useMutation({
+    mutationFn: async (data: any) => {
+      if (isEdit) {
+        const res = await apiRequest("PUT", `/api/user/ai-configs/${editConfig.id}`, data);
+        return res.json();
+      }
+      const res = await apiRequest("POST", "/api/user/ai-configs", data);
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast({ title: isEdit ? "수정 완료" : "등록 완료", description: data.message });
+      queryClient.invalidateQueries({ queryKey: ["/api/user/ai-configs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/user/ai-config"] });
+      onClose();
+    },
+    onError: (error: Error) => {
+      toast({ title: "실패", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isEdit && !geminiApiKey && !openaiApiKey) {
+      toast({ title: "입력 오류", description: "Gemini 또는 OpenAI API 키를 하나 이상 입력하세요", variant: "destructive" });
+      return;
+    }
+    const data: any = { label: label || "기본", aiProvider };
+    if (geminiApiKey) data.geminiApiKey = geminiApiKey;
+    if (openaiApiKey) data.openaiApiKey = openaiApiKey;
+    mutation.mutate(data);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="sm:max-w-[420px]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <Bot className="w-4 h-4 text-purple-500" />
+            {isEdit ? "AI API 수정" : "AI API 등록"}
+          </DialogTitle>
+          <DialogDescription className="text-xs">
+            {isEdit ? "변경할 항목만 입력하세요." : "Gemini 또는 OpenAI API 키를 등록하세요."}
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-1.5">
+            <Label className="text-xs">별칭</Label>
+            <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="예: Gemini용, OpenAI용" className="text-sm h-9" />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">기본 AI 제공자</Label>
+            <div className="flex gap-2">
+              <Button type="button" variant={aiProvider === "gemini" ? "default" : "outline"} size="sm" className="flex-1 text-xs h-8" onClick={() => setAiProvider("gemini")}>
+                Gemini
+              </Button>
+              <Button type="button" variant={aiProvider === "openai" ? "default" : "outline"} size="sm" className="flex-1 text-xs h-8" onClick={() => setAiProvider("openai")}>
+                OpenAI
+              </Button>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Gemini API 키</Label>
+            <Input value={geminiApiKey} onChange={(e) => setGeminiApiKey(e.target.value)} placeholder={isEdit && editConfig?.hasGeminiKey ? "등록됨 (변경 시 입력)" : "AIzaSy..."} className="font-mono text-sm h-9" />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">OpenAI API 키</Label>
+            <Input value={openaiApiKey} onChange={(e) => setOpenaiApiKey(e.target.value)} placeholder={isEdit && editConfig?.hasOpenaiKey ? "등록됨 (변경 시 입력)" : "sk-proj-..."} className="font-mono text-sm h-9" />
+          </div>
+          <div className="text-center text-[11px] text-muted-foreground">
+            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-0.5">
+              Gemini API 키 발급 <ExternalLink className="w-2.5 h-2.5" />
+            </a>
+            {" · "}
+            <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-0.5">
+              OpenAI API 키 발급 <ExternalLink className="w-2.5 h-2.5" />
+            </a>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose} className="text-xs">취소</Button>
+            <Button type="submit" disabled={mutation.isPending} className="text-xs gap-1">
+              {mutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Key className="w-3 h-3" />}
+              {isEdit ? "수정" : "등록"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ========== Google Account Section ==========
+function GoogleAccountSection() {
+  const { toast } = useToast();
+  const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+
+  const { data, isLoading } = useQuery<{ currentAccount: CurrentAccount | null; linkedAccounts: LinkedAccount[] }>({
+    queryKey: ["/api/user/linked-accounts"],
+  });
+
+  const unlinkMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiRequest("DELETE", `/api/user/linked-accounts/${id}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "연결 해제", description: "계정 연결이 해제되었습니다" });
+      queryClient.invalidateQueries({ queryKey: ["/api/user/linked-accounts"] });
+    },
+  });
+
+  const linkMutation = useMutation({
+    mutationFn: async (data: any) => {
+      const res = await apiRequest("POST", "/api/user/link-account", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "✅ 연결 완료", description: "계정이 연결되었습니다" });
+      queryClient.invalidateQueries({ queryKey: ["/api/user/linked-accounts"] });
+    },
+    onError: (error: Error) => {
+      toast({ title: "연결 실패", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const handleLinkGoogle = () => {
+    if (!GOOGLE_CLIENT_ID) {
+      toast({ title: "오류", description: "Google OAuth가 설정되지 않았습니다", variant: "destructive" });
+      return;
+    }
+    const redirectUri = `${window.location.origin}/oauth-callback.html`;
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=email%20profile&prompt=select_account`;
+
+    const popup = window.open(authUrl, "google-link", "width=500,height=600");
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === "google_oauth_result" && e.newValue) {
+        window.removeEventListener("storage", handleStorage);
+        try {
+          const result = JSON.parse(e.newValue);
+          localStorage.removeItem("google_oauth_result");
+          if (result.accessToken) {
+            // 서버에서 userinfo 가져와서 연결
+            fetch(`https://www.googleapis.com/oauth2/v3/userinfo`, {
+              headers: { Authorization: `Bearer ${result.accessToken}` },
+            })
+              .then((r) => r.json())
+              .then((info) => {
+                linkMutation.mutate({
+                  googleId: info.sub,
+                  email: info.email,
+                  name: info.name,
+                  picture: info.picture,
+                });
+              })
+              .catch(() => {
+                toast({ title: "연결 실패", description: "Google 계정 정보를 가져올 수 없습니다", variant: "destructive" });
+              });
+          }
+        } catch {}
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <User className="w-4 h-4 text-blue-500" />
+          Google 계정 관리
+        </CardTitle>
+        <CardDescription className="text-xs mt-1">
+          여러 Google 계정을 연결하면 API 설정과 데이터를 공유할 수 있습니다
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {/* 현재 계정 */}
+            {data?.currentAccount && (
+              <div className="flex items-center gap-3 p-3 rounded-lg border border-blue-300 bg-blue-50/50 dark:border-blue-700 dark:bg-blue-950/20">
+                {data.currentAccount.picture ? (
+                  <img src={data.currentAccount.picture} className="w-8 h-8 rounded-full" alt="" />
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-blue-200 flex items-center justify-center text-blue-600 text-sm font-bold">
+                    {(data.currentAccount.name || data.currentAccount.email)[0].toUpperCase()}
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium truncate">{data.currentAccount.name}</span>
+                    <Badge variant="outline" className="text-[9px] px-1 py-0 border-blue-400 text-blue-600">현재 로그인</Badge>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground truncate">{data.currentAccount.email}</p>
+                </div>
+              </div>
+            )}
+
+            {/* 연결된 계정 */}
+            {data?.linkedAccounts?.map((la) => (
+              <div key={la.id} className="flex items-center gap-3 p-3 rounded-lg border">
+                {la.user.picture ? (
+                  <img src={la.user.picture} className="w-8 h-8 rounded-full" alt="" />
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-600 text-sm font-bold">
+                    {(la.user.name || la.user.email)[0].toUpperCase()}
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <span className="text-sm font-medium truncate block">{la.user.name}</span>
+                  <p className="text-[11px] text-muted-foreground truncate">{la.user.email}</p>
+                </div>
+                <Button variant="ghost" size="sm" className="h-7 text-[10px] text-red-500" onClick={() => { if (confirm("이 계정 연결을 해제하시겠습니까?")) unlinkMutation.mutate(la.id); }}>
+                  연결 해제
+                </Button>
+              </div>
+            ))}
+
+            {/* 계정 추가 버튼 */}
+            <Button variant="outline" className="w-full gap-2 text-xs" onClick={handleLinkGoogle} disabled={linkMutation.isPending || (data?.linkedAccounts?.length ?? 0) >= 3}>
+              {linkMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+              다른 Google 계정 연결
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ========== Admin API Overview ==========
+function AdminApiOverview() {
+  const { data: overview = [], isLoading } = useQuery<any[]>({
+    queryKey: ["/api/admin/api-overview"],
+  });
+
+  if (isLoading || overview.length === 0) return null;
+
+  return (
+    <Card className="mt-4">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Shield className="w-4 h-4 text-emerald-500" />
+          전체 사용자 API 현황 <span className="text-xs text-muted-foreground font-normal">(Admin)</span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b">
+                <th className="text-left py-2 px-2">사용자</th>
+                <th className="text-center py-2 px-2">KIS API</th>
+                <th className="text-center py-2 px-2">활성 KIS</th>
+                <th className="text-center py-2 px-2">AI API</th>
+                <th className="text-center py-2 px-2">활성 AI</th>
+              </tr>
+            </thead>
+            <tbody>
+              {overview.map((o: any) => (
+                <tr key={o.userId} className="border-b last:border-0">
+                  <td className="py-2 px-2">
+                    <div className="font-medium">{o.name || "—"}</div>
+                    <div className="text-[10px] text-muted-foreground">{o.email}</div>
+                  </td>
+                  <td className="text-center py-2 px-2">{o.tradingApis}개</td>
+                  <td className="text-center py-2 px-2">
+                    {o.activeTradingApi ? (
+                      <span className="text-amber-600">{o.activeTradingApi} ({o.tradingMock ? "모의" : "실전"})</span>
+                    ) : "—"}
+                  </td>
+                  <td className="text-center py-2 px-2">{o.aiApis}개</td>
+                  <td className="text-center py-2 px-2">
+                    {o.activeAiApi ? (
+                      <span className="text-purple-600">{o.activeAiApi} ({o.activeAiProvider})</span>
+                    ) : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+

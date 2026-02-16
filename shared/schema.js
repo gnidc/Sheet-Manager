@@ -60,10 +60,22 @@ const users = pgTable("users", {
   picture: text("picture"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull()
 });
+const userLinkedAccounts = pgTable("user_linked_accounts", {
+  id: serial("id").primaryKey(),
+  primaryUserId: integer("primary_user_id").notNull(),
+  // 주 계정 ID
+  linkedUserId: integer("linked_user_id").notNull(),
+  // 연결된 계정 ID
+  isActive: boolean("is_active").default(false),
+  // 현재 활성 여부
+  linkedAt: timestamp("linked_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+});
 const userTradingConfigs = pgTable("user_trading_configs", {
   id: serial("id").primaryKey(),
-  userId: integer("user_id").notNull().unique(),
-  // 유저당 1개
+  userId: integer("user_id").notNull(),
+  // 유저당 복수 등록 가능
+  label: text("label").default("\uAE30\uBCF8"),
+  // API 별칭
   appKey: text("app_key").notNull(),
   appSecret: text("app_secret").notNull(),
   accountNo: text("account_no").notNull(),
@@ -71,6 +83,8 @@ const userTradingConfigs = pgTable("user_trading_configs", {
   accountProductCd: text("account_product_cd").default("01"),
   // 뒤 2자리
   mockTrading: boolean("mock_trading").default(true),
+  isActive: boolean("is_active").default(false),
+  // 현재 활성 API 여부
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull()
 });
@@ -429,12 +443,17 @@ const stockAiAnalyses = pgTable("stock_ai_analyses", {
 });
 const userAiConfigs = pgTable("user_ai_configs", {
   id: serial("id").primaryKey(),
-  userId: integer("user_id").notNull().unique(),
+  userId: integer("user_id").notNull(),
+  // 유저당 복수 등록 가능
+  label: text("label").default("\uAE30\uBCF8"),
+  // API 별칭
   aiProvider: text("ai_provider").default("gemini"),
   // "gemini" | "openai"
   geminiApiKey: text("gemini_api_key"),
   openaiApiKey: text("openai_api_key"),
   useOwnKey: boolean("use_own_key").default(true),
+  isActive: boolean("is_active").default(false),
+  // 현재 활성 API 여부
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull()
 });
@@ -574,6 +593,7 @@ export {
   tenbaggerStocks,
   tradingOrders,
   userAiConfigs,
+  userLinkedAccounts,
   userTradingConfigs,
   users,
   visitLogs,

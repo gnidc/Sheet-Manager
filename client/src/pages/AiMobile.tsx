@@ -2,13 +2,14 @@ import { useState, useEffect, lazy, Suspense } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import AiAgent from "@/components/AiAgent";
 import { LoginDialog } from "@/components/LoginDialog";
-import { Bot, ArrowLeft, Smartphone, Download, BarChart3, Loader2, Zap } from "lucide-react";
+import { Bot, ArrowLeft, Smartphone, Download, BarChart3, Loader2, Zap, Key } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const EtfComponents = lazy(() => import("@/components/EtfComponents"));
 const Trading = lazy(() => import("@/pages/Trading"));
+const ApiManager = lazy(() => import("@/components/ApiManager"));
 
-type MobileMode = "select" | "ai-agent" | "etf" | "trading";
+type MobileMode = "select" | "ai-agent" | "etf" | "trading" | "api-manager";
 
 export function AiMobileContent() {
   const { isAdmin, isLoggedIn, userName, userEmail, logout, isLoggingOut } = useAuth();
@@ -143,7 +144,7 @@ export function AiMobileContent() {
 
         {/* 선택 카드 영역 */}
         <div className="flex-1 flex items-center justify-center p-6">
-          <div className="grid grid-cols-3 gap-3 w-full max-w-md">
+          <div className="grid grid-cols-2 gap-3 w-full max-w-md">
             {/* AI Agent 버튼 */}
             <button
               onClick={() => setMode("ai-agent")}
@@ -183,6 +184,20 @@ export function AiMobileContent() {
               <div className="text-center">
                 <p className="text-xs font-bold text-foreground">자동매매</p>
                 <p className="text-[9px] text-muted-foreground mt-0.5">주문 · 잔고 관리</p>
+              </div>
+            </button>
+
+            {/* API 관리 버튼 */}
+            <button
+              onClick={() => setMode("api-manager")}
+              className="flex flex-col items-center justify-center gap-2.5 p-4 rounded-2xl border-2 border-orange-200 dark:border-orange-800 bg-gradient-to-br from-orange-50 to-red-50 dark:from-orange-950/30 dark:to-red-950/30 hover:border-orange-400 dark:hover:border-orange-600 hover:shadow-lg transition-all duration-200 active:scale-95"
+            >
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center shadow-md">
+                <Key className="w-7 h-7 text-white" />
+              </div>
+              <div className="text-center">
+                <p className="text-xs font-bold text-foreground">API 관리</p>
+                <p className="text-[9px] text-muted-foreground mt-0.5">API 키 등록 · 전환</p>
               </div>
             </button>
           </div>
@@ -272,6 +287,54 @@ export function AiMobileContent() {
           }>
             <div className="p-2">
               <EtfComponents />
+            </div>
+          </Suspense>
+        </div>
+      </div>
+    );
+  }
+
+  // API 관리 모드
+  if (mode === "api-manager") {
+    return (
+      <div
+        className="flex flex-col bg-background"
+        style={{ height: "calc(var(--vh, 1vh) * 100)" }}
+      >
+        <header className="flex items-center justify-between px-3 py-2 border-b bg-background/95 backdrop-blur-sm shrink-0">
+          <div className="flex items-center gap-2">
+            <button onClick={() => setMode("select")} className="text-muted-foreground hover:text-foreground">
+              <ArrowLeft className="w-4 h-4" />
+            </button>
+            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center">
+              <Key className="w-4 h-4 text-white" />
+            </div>
+            <div>
+              <h1 className="text-sm font-bold leading-tight">API 관리</h1>
+              <p className="text-[10px] text-muted-foreground leading-tight">{userName || userEmail || "User"}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-[10px] px-2 text-muted-foreground"
+              onClick={() => logout()}
+              disabled={isLoggingOut}
+            >
+              로그아웃
+            </Button>
+          </div>
+        </header>
+
+        <div className="flex-1 overflow-y-auto">
+          <Suspense fallback={
+            <div className="flex items-center justify-center h-full">
+              <Loader2 className="w-8 h-8 animate-spin text-orange-500" />
+            </div>
+          }>
+            <div className="p-2">
+              <ApiManager />
             </div>
           </Suspense>
         </div>

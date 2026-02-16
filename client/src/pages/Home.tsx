@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Plus, ExternalLink, TrendingUp, Globe, Loader2, Star, Newspaper, FileText, Trash2, Pencil, Scale, Zap, ChevronDown, Calendar, Home as HomeIcon, Search, X, Eye, ChevronLeft, ChevronRight, PenSquare, Send, LogIn, LogOut, Bell, BellRing, MessageCircle, Heart, UserPlus, FileEdit, BarChart3, Bot, Moon, Sun, PanelLeftClose, PanelLeft, Smartphone, Download, Users } from "lucide-react";
+import { Plus, ExternalLink, TrendingUp, Globe, Loader2, Star, Newspaper, FileText, Trash2, Pencil, Scale, Zap, ChevronDown, Calendar, Home as HomeIcon, Search, X, Eye, ChevronLeft, ChevronRight, PenSquare, Send, LogIn, LogOut, Bell, BellRing, MessageCircle, Heart, UserPlus, FileEdit, BarChart3, Bot, Moon, Sun, PanelLeftClose, PanelLeft, Smartphone, Download, Users, Key } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -41,6 +41,7 @@ const SecurityAudit = lazy(() => import("@/components/SecurityAudit"));
 const MobilePreview = lazy(() => import("@/components/MobilePreview"));
 const MarketsEtc = lazy(() => import("@/components/MarketsEtc"));
 const MarketCalendar = lazy(() => import("@/components/MarketCalendar"));
+const ApiManager = lazy(() => import("@/components/ApiManager"));
 
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -355,6 +356,11 @@ export default function Home() {
               {/* AI Agent */}
               <SidebarButton icon={<Bot className="h-4 w-4 shrink-0 text-purple-500" />} label="AI Agent" active={activeTab === "ai-agent"} collapsed={sidebarCollapsed} onClick={() => setActiveTab("ai-agent")} />
 
+              {/* API 관리 */}
+              {isLoggedIn && (
+                <SidebarButton icon={<Key className="h-4 w-4 shrink-0 text-orange-500" />} label="API 관리" active={activeTab === "api-manager"} collapsed={sidebarCollapsed} onClick={() => setActiveTab("api-manager")} />
+              )}
+
               {/* 즐겨찾기 */}
               <SidebarButton icon={<Star className="h-4 w-4 shrink-0 text-yellow-500" />} label="즐겨찾기" active={activeTab === "bookmarks"} collapsed={sidebarCollapsed} onClick={() => setActiveTab("bookmarks")} />
 
@@ -478,6 +484,11 @@ export default function Home() {
               <TabsTrigger value="ai-agent" className="gap-1 text-xs shrink-0">
                 <Bot className="h-3.5 w-3.5 text-purple-500" /> AI Agent
             </TabsTrigger>
+              {isLoggedIn && (
+              <TabsTrigger value="api-manager" className="gap-1 text-xs shrink-0">
+                <Key className="h-3.5 w-3.5 text-orange-500" /> API
+              </TabsTrigger>
+              )}
               <TabsTrigger value="bookmarks" className="gap-1 text-xs shrink-0">
                 <Star className="h-3.5 w-3.5 text-yellow-500" /> 즐겨찾기
             </TabsTrigger>
@@ -656,6 +667,15 @@ export default function Home() {
               <BookmarksComp />
             </Suspense>
           </TabsContent>
+
+          {/* API 관리 */}
+          {isLoggedIn && (
+          <TabsContent value="api-manager">
+            <Suspense fallback={<ContentSkeleton />}>
+              <ApiManager />
+            </Suspense>
+          </TabsContent>
+          )}
 
           {/* Admin Dashboard - 방문,사용자 관리 */}
           {isAdmin && (
