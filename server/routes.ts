@@ -9525,8 +9525,9 @@ ${etfListStr}
           let encrypted = 0;
           const details: string[] = [];
           for (const config of allConfigs) {
+            if (!config.userId) continue; // userId 없는 레코드 건너뛰기
             let updated = false;
-            const updates: any = {};
+            const updates: any = { userId: config.userId };
             if (config.geminiApiKey && !config.geminiApiKey.startsWith("enc:v1:")) {
               updates.geminiApiKey = encrypt(config.geminiApiKey);
               updated = true;
@@ -9538,7 +9539,7 @@ ${etfListStr}
               encrypted++;
             }
             if (updated) {
-              await storage.upsertUserAiConfig(config.userId, updates);
+              await storage.upsertUserAiConfig(updates);
               details.push(`User ${config.userId}: AI 키 암호화 완료`);
             }
           }
@@ -9557,8 +9558,9 @@ ${etfListStr}
           let encrypted = 0;
           const details: string[] = [];
           for (const config of allTradingConfigs) {
+            if (!config.userId) continue; // userId 없는 레코드 건너뛰기
             let updated = false;
-            const updates: any = {};
+            const updates: any = { userId: config.userId };
             if (config.appKey && !config.appKey.startsWith("enc:v1:")) {
               updates.appKey = encrypt(config.appKey);
               updated = true;
@@ -9570,7 +9572,7 @@ ${etfListStr}
               encrypted++;
             }
             if (updated) {
-              await storage.upsertUserTradingConfig(config.userId, updates);
+              await storage.upsertUserTradingConfig(updates);
               details.push(`User ${config.userId}: KIS 키 암호화 완료`);
             }
           }
