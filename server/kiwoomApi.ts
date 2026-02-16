@@ -1,9 +1,16 @@
 import axios from "axios";
 
 // ========== 키움증권 REST API ==========
-// 키움 오픈API: https://openapi.kiwoom.com
-const KIWOOM_REAL_URL = "https://openapi.koreainvestment.com:9443"; // 키움 REST API base URL
-const KIWOOM_API_URL = "https://openapi.kiwoom.com";
+// 공식 문서: https://openapi.kiwoom.com/guide/apiguide
+// 운영 도메인: https://api.kiwoom.com
+// 모의투자 도메인: https://mockapi.kiwoom.com (KRX만 지원)
+const KIWOOM_REAL_URL = "https://api.kiwoom.com";
+const KIWOOM_MOCK_URL = "https://mockapi.kiwoom.com";
+
+/** 모의/실전에 따른 base URL 반환 */
+function getBaseUrl(mockTrading: boolean): string {
+  return mockTrading ? KIWOOM_MOCK_URL : KIWOOM_REAL_URL;
+}
 
 // 사용자별 인증 정보 인터페이스 (KIS와 동일한 구조)
 export interface UserKiwoomCredentials {
@@ -23,30 +30,52 @@ async function getKiwoomToken(userId: number, creds: UserKiwoomCredentials): Pro
     return cached.token;
   }
 
+  const baseUrl = getBaseUrl(creds.mockTrading);
+
   try {
     const response = await axios.post(
-      `${KIWOOM_API_URL}/oauth2/token`,
+      `${baseUrl}/oauth2/token`,
       {
         grant_type: "client_credentials",
         appkey: creds.appKey,
         secretkey: creds.appSecret,
       },
-      { timeout: 15000 }
+      {
+        headers: { "Content-Type": "application/json;charset=UTF-8" },
+        timeout: 15000,
+      }
     );
 
-    const token = response.data.access_token;
-    const expiresIn = response.data.expires_in || 86400; // 기본 24시간
+    // 키움 응답: { token, token_type, expires_dt, return_code, return_msg }
+    const data = response.data;
 
-    userTokenCache.set(userId, {
-      token,
-      expiresAt: Date.now() + expiresIn * 1000,
-    });
+    if (data.return_code !== 0 && data.return_code !== "0") {
+      throw new Error(data.return_msg || "토큰 발급 실패");
+    }
 
-    console.log(`[Kiwoom] Token issued for user ${userId}`);
+    const token = data.token;
+    if (!token) {
+      throw new Error(data.return_msg || "토큰이 응답에 없습니다");
+    }
+
+    // expires_dt: "20260217213215" 형식 → 밀리초로 변환
+    let expiresAt = Date.now() + 86400 * 1000; // 기본 24시간
+    if (data.expires_dt) {
+      const dt = data.expires_dt;
+      const parsed = new Date(
+        `${dt.slice(0, 4)}-${dt.slice(4, 6)}-${dt.slice(6, 8)}T${dt.slice(8, 10)}:${dt.slice(10, 12)}:${dt.slice(12, 14)}`
+      );
+      if (!isNaN(parsed.getTime())) {
+        expiresAt = parsed.getTime();
+      }
+    }
+
+    userTokenCache.set(userId, { token, expiresAt });
+    console.log(`[Kiwoom] Token issued for user ${userId} (${creds.mockTrading ? "모의" : "실전"})`);
     return token;
   } catch (error: any) {
     console.error(`[Kiwoom] Token error:`, error.response?.data || error.message);
-    throw new Error(error.response?.data?.message || "키움 인증 토큰 발급 실패");
+    throw new Error(error.response?.data?.return_msg || error.message || "키움 인증 토큰 발급 실패");
   }
 }
 
@@ -139,13 +168,14 @@ export async function getUserAccountBalance(
   }
 
   const token = await getKiwoomToken(userId, creds);
+  const baseUrl = getBaseUrl(creds.mockTrading);
 
   try {
     const response = await axios.get(
-      `${KIWOOM_API_URL}/api/dostk/acntbal`,
+      `${baseUrl}/api/dostk/acntbal`,
       {
         headers: {
-          "Content-Type": "application/json; charset=utf-8",
+          "Content-Type": "application/json;charset=UTF-8",
           authorization: `Bearer ${token}`,
           appkey: creds.appKey,
           appsecretkey: creds.appSecret,
@@ -159,14 +189,14 @@ export async function getUserAccountBalance(
     );
 
     const data = response.data;
-    if (data.return_code !== "0" && data.rt_cd !== "0") {
+    if (data.return_code !== 0 && data.return_code !== "0" && data.rt_cd !== "0") {
       throw new Error(data.return_msg || data.msg1 || "잔고 조회 실패");
     }
 
     const outputList = data.output || data.output1 || [];
     const summaryData = data.output2?.[0] || data.summary || {};
 
-    const holdings: HoldingItem[] = outputList
+    const holdings: HoldingItem[] = (Array.isArray(outputList) ? outputList : [])
       .filter((item: any) => parseInt(item.holdqty || item.hldg_qty || "0") > 0)
       .map((item: any) => ({
         stockCode: item.stk_cd || item.pdno || "",
@@ -214,10 +244,7 @@ export async function userPlaceOrder(
   }
 
   const token = await getKiwoomToken(userId, creds);
-
-  const orderPath = params.orderType === "buy"
-    ? "/api/dostk/order"
-    : "/api/dostk/order";
+  const baseUrl = getBaseUrl(creds.mockTrading);
 
   const body: Record<string, any> = {
     acnt_no: creds.accountNo,
@@ -230,11 +257,11 @@ export async function userPlaceOrder(
 
   try {
     const response = await axios.post(
-      `${KIWOOM_API_URL}${orderPath}`,
+      `${baseUrl}/api/dostk/order`,
       body,
       {
         headers: {
-          "Content-Type": "application/json; charset=utf-8",
+          "Content-Type": "application/json;charset=UTF-8",
           authorization: `Bearer ${token}`,
           appkey: creds.appKey,
           appsecretkey: creds.appSecret,
@@ -244,7 +271,7 @@ export async function userPlaceOrder(
     );
 
     const data = response.data;
-    if (data.return_code !== "0" && data.rt_cd !== "0") {
+    if (data.return_code !== 0 && data.return_code !== "0" && data.rt_cd !== "0") {
       return { success: false, message: data.return_msg || data.msg1 || "주문 실패" };
     }
 
@@ -275,6 +302,7 @@ export async function getUserOrderHistory(
   }
 
   const token = await getKiwoomToken(userId, creds);
+  const baseUrl = getBaseUrl(creds.mockTrading);
 
   const today = new Date();
   const formatDate = (d: Date) =>
@@ -291,10 +319,10 @@ export async function getUserOrderHistory(
 
   try {
     const response = await axios.get(
-      `${KIWOOM_API_URL}/api/dostk/orderlist`,
+      `${baseUrl}/api/dostk/orderlist`,
       {
         headers: {
-          "Content-Type": "application/json; charset=utf-8",
+          "Content-Type": "application/json;charset=UTF-8",
           authorization: `Bearer ${token}`,
           appkey: creds.appKey,
           appsecretkey: creds.appSecret,
@@ -309,13 +337,13 @@ export async function getUserOrderHistory(
     );
 
     const data = response.data;
-    if (data.return_code !== "0" && data.rt_cd !== "0") {
+    if (data.return_code !== 0 && data.return_code !== "0" && data.rt_cd !== "0") {
       throw new Error(data.return_msg || data.msg1 || "주문내역 조회 실패");
     }
 
     const outputList = data.output || data.output1 || [];
 
-    return outputList.map((item: any) => ({
+    return (Array.isArray(outputList) ? outputList : []).map((item: any) => ({
       orderDate: item.ord_dt || item.order_date || "",
       orderTime: item.ord_tm || item.order_time || "",
       stockCode: item.stk_cd || item.pdno || "",
@@ -340,4 +368,3 @@ export async function getUserOrderHistory(
 export function clearUserTokenCache(userId: number) {
   userTokenCache.delete(userId);
 }
-
