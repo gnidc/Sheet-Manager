@@ -4,12 +4,14 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Shield, ShieldCheck, ShieldAlert, ShieldX,
   Play, Loader2, RefreshCw, Clock,
   CheckCircle2, AlertTriangle, XCircle, Zap,
   FileSearch, Bug, Lock, Server,
+  Wrench, Ban, Trash2, Plus, ShieldOff, History,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -17,6 +19,9 @@ interface AuditCheck {
   name: string;
   status: "pass" | "warning" | "critical";
   detail: string;
+  remediable?: boolean;
+  remediationAction?: string;
+  remediationLabel?: string;
 }
 
 interface AuditLog {
@@ -53,6 +58,28 @@ interface DrillResult {
   executedAt: string;
 }
 
+interface BlockedIp {
+  id: number;
+  ipAddress: string;
+  reason: string;
+  blockedBy: string | null;
+  accessCount: number | null;
+  isActive: boolean;
+  blockedAt: string;
+  expiresAt: string | null;
+}
+
+interface Remediation {
+  id: number;
+  actionType: string;
+  status: string;
+  summary: string;
+  details: string;
+  affectedCount: number;
+  executedBy: string | null;
+  executedAt: string;
+}
+
 const STATUS_ICON = {
   pass: <CheckCircle2 className="h-4 w-4 text-green-500" />,
   warning: <AlertTriangle className="h-4 w-4 text-amber-500" />,
@@ -65,6 +92,9 @@ const STATUS_BADGE = {
   warning: <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400 text-xs">경고</Badge>,
   critical: <Badge className="bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400 text-xs">위험</Badge>,
   fail: <Badge className="bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400 text-xs">실패</Badge>,
+  success: <Badge className="bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-400 text-xs">성공</Badge>,
+  partial: <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400 text-xs">부분</Badge>,
+  failed: <Badge className="bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400 text-xs">실패</Badge>,
 };
 
 const DRILL_TYPE_LABELS: Record<string, string> = {
@@ -80,11 +110,69 @@ const DRILL_CATEGORY_ICON: Record<string, React.ReactNode> = {
   "API": <Server className="h-3.5 w-3.5 text-emerald-500" />,
 };
 
+const REMEDIATION_LABELS: Record<string, string> = {
+  "encrypt-ai-keys": "AI 키 암호화",
+  "encrypt-trading-keys": "KIS 키 암호화",
+  "block-suspicious-ips": "의심 IP 차단",
+  "cleanup-old-logs": "로그 정리",
+  "block-ip": "IP 수동 차단",
+  "unblock-ip": "IP 차단 해제",
+};
+
+// 가이드 메시지
+const GUIDE_MESSAGES: Record<string, { title: string; steps: string[] }> = {
+  "guide-encryption-key": {
+    title: "ENCRYPTION_KEY 설정 가이드",
+    steps: [
+      "1. 터미널에서 실행: node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"",
+      "2. 생성된 64자 hex 문자열을 복사",
+      "3. Vercel Dashboard → Settings → Environment Variables",
+      "4. ENCRYPTION_KEY 키로 값 추가 후 재배포",
+    ],
+  },
+  "guide-session-secret": {
+    title: "SESSION_SECRET 설정 가이드",
+    steps: [
+      "1. 터미널에서 실행: node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"",
+      "2. Vercel Dashboard → Settings → Environment Variables",
+      "3. SESSION_SECRET 키로 값 추가 후 재배포",
+    ],
+  },
+  "guide-admin-password": {
+    title: "ADMIN_PASSWORD_HASH 설정 가이드",
+    steps: [
+      "1. bcrypt 해시 생성 (https://bcrypt-generator.com/)",
+      "2. Vercel Dashboard → Settings → Environment Variables",
+      "3. ADMIN_PASSWORD_HASH 키로 해시값 추가 후 재배포",
+    ],
+  },
+  "guide-production": {
+    title: "프로덕션 모드 설정 가이드",
+    steps: [
+      "1. Vercel Dashboard → Settings → Environment Variables",
+      "2. NODE_ENV=production 추가 후 재배포",
+    ],
+  },
+  "guide-google-oauth": {
+    title: "Google OAuth 설정 가이드",
+    steps: [
+      "1. Google Cloud Console → APIs → Credentials",
+      "2. OAuth 2.0 Client ID 생성",
+      "3. Vercel Dashboard → Settings → Environment Variables",
+      "4. GOOGLE_CLIENT_ID와 VITE_GOOGLE_CLIENT_ID에 Client ID 추가 후 재배포",
+    ],
+  },
+};
+
 export default function SecurityAudit() {
-  const [activeTab, setActiveTab] = useState<"audit" | "drill">("audit");
+  const [activeTab, setActiveTab] = useState<"audit" | "drill" | "blocked-ips" | "remediations">("audit");
   const [selectedAuditId, setSelectedAuditId] = useState<number | null>(null);
   const [selectedDrillId, setSelectedDrillId] = useState<number | null>(null);
   const [drillType, setDrillType] = useState<string>("full");
+  const [showGuide, setShowGuide] = useState<string | null>(null);
+  const [newBlockIp, setNewBlockIp] = useState("");
+  const [newBlockReason, setNewBlockReason] = useState("");
+  const [remediatingAction, setRemediatingAction] = useState<string | null>(null);
   const { toast } = useToast();
 
   // 보안점검 로그 조회
@@ -107,6 +195,26 @@ export default function SecurityAudit() {
     refetchInterval: 60000,
   });
 
+  // 차단 IP 목록 조회
+  const { data: blockedIps = [], isLoading: blockedIpsLoading, refetch: refetchBlockedIps } = useQuery<BlockedIp[]>({
+    queryKey: ["/api/admin/security/blocked-ips"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/admin/security/blocked-ips");
+      return res.json();
+    },
+    refetchInterval: 60000,
+  });
+
+  // 보안조치 이력 조회
+  const { data: remediations = [], isLoading: remediationsLoading, refetch: refetchRemediations } = useQuery<Remediation[]>({
+    queryKey: ["/api/admin/security/remediations"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/admin/security/remediations");
+      return res.json();
+    },
+    refetchInterval: 60000,
+  });
+
   // 보안점검 실행
   const runAuditMutation = useMutation({
     mutationFn: async () => {
@@ -116,10 +224,7 @@ export default function SecurityAudit() {
     onSuccess: (data) => {
       refetchAudits();
       setSelectedAuditId(data.id);
-      toast({
-        title: "보안점검 완료",
-        description: data.summary,
-      });
+      toast({ title: "보안점검 완료", description: data.summary });
     },
     onError: (error: any) => {
       toast({ title: "보안점검 실패", description: error.message, variant: "destructive" });
@@ -135,13 +240,64 @@ export default function SecurityAudit() {
     onSuccess: (data) => {
       refetchDrills();
       setSelectedDrillId(data.id);
-      toast({
-        title: "모의훈련 완료",
-        description: data.summary,
-      });
+      toast({ title: "모의훈련 완료", description: data.summary });
     },
     onError: (error: any) => {
       toast({ title: "모의훈련 실패", description: error.message, variant: "destructive" });
+    },
+  });
+
+  // 보안조치 실행
+  const remediateMutation = useMutation({
+    mutationFn: async (params: { action: string; ip?: string; reason?: string; blockedIpId?: number }) => {
+      const res = await apiRequest("POST", "/api/admin/security/remediate", params);
+      return res.json();
+    },
+    onSuccess: (data) => {
+      setRemediatingAction(null);
+      refetchAudits();
+      refetchBlockedIps();
+      refetchRemediations();
+      toast({
+        title: "보안조치 완료",
+        description: data.result.summary,
+      });
+    },
+    onError: (error: any) => {
+      setRemediatingAction(null);
+      toast({ title: "보안조치 실패", description: error.message, variant: "destructive" });
+    },
+  });
+
+  // IP 차단 해제
+  const unblockIpMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiRequest("DELETE", `/api/admin/security/blocked-ips/${id}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      refetchBlockedIps();
+      toast({ title: "IP 차단 해제 완료" });
+    },
+    onError: (error: any) => {
+      toast({ title: "IP 차단 해제 실패", description: error.message, variant: "destructive" });
+    },
+  });
+
+  // 수동 IP 차단
+  const blockIpMutation = useMutation({
+    mutationFn: async (data: { ipAddress: string; reason: string }) => {
+      const res = await apiRequest("POST", "/api/admin/security/blocked-ips", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      setNewBlockIp("");
+      setNewBlockReason("");
+      refetchBlockedIps();
+      toast({ title: "IP 차단 완료" });
+    },
+    onError: (error: any) => {
+      toast({ title: "IP 차단 실패", description: error.message, variant: "destructive" });
     },
   });
 
@@ -155,6 +311,15 @@ export default function SecurityAudit() {
     try { return JSON.parse(details); } catch { return []; }
   };
 
+  const handleRemediation = (action: string) => {
+    if (action.startsWith("guide-")) {
+      setShowGuide(action);
+      return;
+    }
+    setRemediatingAction(action);
+    remediateMutation.mutate({ action });
+  };
+
   return (
     <div className="space-y-4">
       {/* 헤더 */}
@@ -164,35 +329,57 @@ export default function SecurityAudit() {
             <Shield className="h-5 w-5 text-red-500" />
             보안점검
           </h2>
-          <p className="text-sm text-muted-foreground mt-1">시스템 보안 점검 및 모의훈련</p>
+          <p className="text-sm text-muted-foreground mt-1">시스템 보안 점검, 모의훈련, 보안조치</p>
         </div>
       </div>
 
       {/* 탭 */}
-      <div className="flex gap-1 border-b">
-        <button
-          className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
-            activeTab === "audit"
-              ? "border-primary text-primary"
-              : "border-transparent text-muted-foreground hover:text-foreground"
-          }`}
-          onClick={() => setActiveTab("audit")}
-        >
-          🔍 보안점검
-        </button>
-        <button
-          className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
-            activeTab === "drill"
-              ? "border-primary text-primary"
-              : "border-transparent text-muted-foreground hover:text-foreground"
-          }`}
-          onClick={() => setActiveTab("drill")}
-        >
-          🛡️ 모의훈련
-        </button>
+      <div className="flex gap-1 border-b overflow-x-auto">
+        {([
+          { key: "audit" as const, label: "🔍 보안점검" },
+          { key: "drill" as const, label: "🛡️ 모의훈련" },
+          { key: "blocked-ips" as const, label: "🚫 IP 차단관리" },
+          { key: "remediations" as const, label: "🔧 조치이력" },
+        ]).map(tab => (
+          <button
+            key={tab.key}
+            className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+              activeTab === tab.key
+                ? "border-primary text-primary"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+            onClick={() => setActiveTab(tab.key)}
+          >
+            {tab.label}
+            {tab.key === "blocked-ips" && blockedIps.filter(ip => ip.isActive).length > 0 && (
+              <Badge variant="destructive" className="ml-1 text-[10px] px-1 py-0">
+                {blockedIps.filter(ip => ip.isActive).length}
+              </Badge>
+            )}
+          </button>
+        ))}
       </div>
 
-      {/* 보안점검 탭 */}
+      {/* 가이드 모달 */}
+      {showGuide && GUIDE_MESSAGES[showGuide] && (
+        <Card className="border-blue-300 dark:border-blue-700 bg-blue-50/50 dark:bg-blue-950/20">
+          <CardHeader className="py-3">
+            <CardTitle className="text-sm flex items-center gap-2 text-blue-700 dark:text-blue-300">
+              📋 {GUIDE_MESSAGES[showGuide].title}
+              <Button variant="ghost" size="sm" className="ml-auto h-6 px-2 text-xs" onClick={() => setShowGuide(null)}>닫기</Button>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="py-2 px-4">
+            <div className="space-y-1">
+              {GUIDE_MESSAGES[showGuide].steps.map((step, i) => (
+                <p key={i} className="text-xs text-blue-700 dark:text-blue-300">{step}</p>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ===== 보안점검 탭 ===== */}
       {activeTab === "audit" && (
         <div className="space-y-4">
           {/* 실행 버튼 + 요약 */}
@@ -269,7 +456,7 @@ export default function SecurityAudit() {
                   </div>
                 </div>
 
-                {/* 상세 항목 */}
+                {/* 상세 항목 + 조치 버튼 */}
                 <div className="border-t">
                   {parseChecks(selectedAudit.details).map((check, i) => (
                     <div key={i} className={`flex items-start gap-3 px-4 py-2.5 border-b last:border-b-0 ${
@@ -278,12 +465,31 @@ export default function SecurityAudit() {
                     }`}>
                       <div className="mt-0.5">{STATUS_ICON[check.status]}</div>
                       <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium flex items-center gap-2">
+                        <div className="text-sm font-medium flex items-center gap-2 flex-wrap">
                           {check.name}
                           {STATUS_BADGE[check.status]}
                         </div>
                         <div className="text-xs text-muted-foreground mt-0.5">{check.detail}</div>
                       </div>
+                      {/* 조치 버튼 */}
+                      {check.remediable && check.remediationAction && (
+                        <Button
+                          variant={check.remediationAction.startsWith("guide-") ? "outline" : "default"}
+                          size="sm"
+                          className="h-7 text-xs gap-1 shrink-0"
+                          disabled={remediatingAction === check.remediationAction}
+                          onClick={() => handleRemediation(check.remediationAction!)}
+                        >
+                          {remediatingAction === check.remediationAction ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : check.remediationAction.startsWith("guide-") ? (
+                            <FileSearch className="h-3 w-3" />
+                          ) : (
+                            <Wrench className="h-3 w-3" />
+                          )}
+                          {check.remediationLabel || "조치"}
+                        </Button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -349,10 +555,9 @@ export default function SecurityAudit() {
         </div>
       )}
 
-      {/* 모의훈련 탭 */}
+      {/* ===== 모의훈련 탭 ===== */}
       {activeTab === "drill" && (
         <div className="space-y-4">
-          {/* 실행 버튼 + 옵션 */}
           <div className="flex items-center gap-3 flex-wrap">
             <Select value={drillType} onValueChange={setDrillType}>
               <SelectTrigger className="w-[150px] h-9 text-xs">
@@ -383,7 +588,6 @@ export default function SecurityAudit() {
             </Button>
           </div>
 
-          {/* 최근 훈련 결과 상세 */}
           {selectedDrill && (
             <Card>
               <CardHeader className="py-3">
@@ -397,7 +601,6 @@ export default function SecurityAudit() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-0">
-                {/* 요약 카드 */}
                 <div className="grid grid-cols-3 gap-2 px-4 pb-3">
                   <div className="text-center p-2 rounded-lg bg-muted/50">
                     <div className="text-lg font-bold">{selectedDrill.totalTests}</div>
@@ -412,12 +615,9 @@ export default function SecurityAudit() {
                     <div className="text-xs text-red-600">실패</div>
                   </div>
                 </div>
-
-                {/* 상세 테스트 */}
                 <div className="border-t">
                   {(() => {
                     const tests = parseTests(selectedDrill.details);
-                    // 카테고리별 그룹핑
                     const categories = [...new Set(tests.map(t => t.category))];
                     return categories.map(cat => (
                       <div key={cat}>
@@ -521,7 +721,192 @@ export default function SecurityAudit() {
           </Card>
         </div>
       )}
+
+      {/* ===== IP 차단관리 탭 ===== */}
+      {activeTab === "blocked-ips" && (
+        <div className="space-y-4">
+          {/* 수동 IP 차단 */}
+          <Card>
+            <CardHeader className="py-3">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <Plus className="h-4 w-4" /> IP 수동 차단
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="py-2 px-4">
+              <div className="flex items-center gap-2">
+                <Input
+                  placeholder="IP 주소 (예: 192.168.1.1)"
+                  value={newBlockIp}
+                  onChange={(e) => setNewBlockIp(e.target.value)}
+                  className="h-8 text-xs flex-1"
+                />
+                <Input
+                  placeholder="차단 사유"
+                  value={newBlockReason}
+                  onChange={(e) => setNewBlockReason(e.target.value)}
+                  className="h-8 text-xs flex-1"
+                />
+                <Button
+                  size="sm"
+                  className="h-8 gap-1 text-xs"
+                  disabled={!newBlockIp || blockIpMutation.isPending}
+                  onClick={() => blockIpMutation.mutate({ ipAddress: newBlockIp, reason: newBlockReason || "관리자 수동 차단" })}
+                >
+                  {blockIpMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Ban className="h-3 w-3" />}
+                  차단
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* 차단 IP 목록 */}
+          <Card>
+            <CardHeader className="py-3">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <Ban className="h-4 w-4 text-red-500" /> 차단 IP 목록
+                <Badge variant="secondary" className="ml-auto">
+                  {blockedIps.filter(ip => ip.isActive).length}개 활성
+                </Badge>
+                <Button variant="outline" size="sm" className="h-6 px-2 text-xs gap-1" onClick={() => refetchBlockedIps()}>
+                  <RefreshCw className="h-3 w-3" />
+                </Button>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              {blockedIpsLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                </div>
+              ) : blockedIps.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground text-sm">차단된 IP가 없습니다.</div>
+              ) : (
+                <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
+                  <table className="w-full text-sm">
+                    <thead className="sticky top-0 bg-background">
+                      <tr className="border-b bg-muted/50">
+                        <th className="text-left px-3 py-2 font-medium">IP 주소</th>
+                        <th className="text-left px-3 py-2 font-medium">사유</th>
+                        <th className="text-center px-3 py-2 font-medium">접속수</th>
+                        <th className="text-center px-3 py-2 font-medium">상태</th>
+                        <th className="text-left px-3 py-2 font-medium">차단일</th>
+                        <th className="text-left px-3 py-2 font-medium">차단자</th>
+                        <th className="text-center px-3 py-2 font-medium">조치</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {blockedIps.map((ip) => (
+                        <tr key={ip.id} className={`border-b hover:bg-muted/30 ${!ip.isActive ? 'opacity-50' : ''}`}>
+                          <td className="px-3 py-2 text-xs font-mono font-medium">{ip.ipAddress}</td>
+                          <td className="px-3 py-2 text-xs text-muted-foreground max-w-[200px] truncate">{ip.reason}</td>
+                          <td className="text-center px-3 py-2 text-xs">{ip.accessCount || "-"}</td>
+                          <td className="text-center px-3 py-2">
+                            {ip.isActive ? (
+                              <Badge variant="destructive" className="text-xs">차단중</Badge>
+                            ) : (
+                              <Badge variant="secondary" className="text-xs">해제됨</Badge>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap">
+                            {new Date(ip.blockedAt).toLocaleString("ko-KR", {
+                              month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+                            })}
+                          </td>
+                          <td className="px-3 py-2 text-xs text-muted-foreground">{ip.blockedBy || "-"}</td>
+                          <td className="text-center px-3 py-2">
+                            {ip.isActive && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 px-2 text-xs text-red-500 hover:text-red-600 gap-1"
+                                onClick={() => unblockIpMutation.mutate(ip.id)}
+                                disabled={unblockIpMutation.isPending}
+                              >
+                                <ShieldOff className="h-3 w-3" /> 해제
+                              </Button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* ===== 조치이력 탭 ===== */}
+      {activeTab === "remediations" && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-3">
+            <Button variant="outline" size="sm" onClick={() => refetchRemediations()} className="gap-1">
+              <RefreshCw className="h-3.5 w-3.5" /> 새로고침
+            </Button>
+          </div>
+
+          <Card>
+            <CardHeader className="py-3">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <History className="h-4 w-4" /> 보안조치 이력
+                <Badge variant="secondary" className="ml-auto">{remediations.length}건</Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              {remediationsLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                </div>
+              ) : remediations.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground text-sm">보안조치 이력이 없습니다.</div>
+              ) : (
+                <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
+                  <table className="w-full text-sm">
+                    <thead className="sticky top-0 bg-background">
+                      <tr className="border-b bg-muted/50">
+                        <th className="text-left px-3 py-2 font-medium">시간</th>
+                        <th className="text-center px-3 py-2 font-medium">유형</th>
+                        <th className="text-center px-3 py-2 font-medium">상태</th>
+                        <th className="text-left px-3 py-2 font-medium">요약</th>
+                        <th className="text-center px-3 py-2 font-medium">영향</th>
+                        <th className="text-left px-3 py-2 font-medium">실행자</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {remediations.map((rem) => (
+                        <tr key={rem.id} className="border-b hover:bg-muted/30">
+                          <td className="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap">
+                            {new Date(rem.executedAt).toLocaleString("ko-KR", {
+                              month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+                            })}
+                          </td>
+                          <td className="text-center px-3 py-2">
+                            <Badge variant="outline" className="text-xs">
+                              {REMEDIATION_LABELS[rem.actionType] || rem.actionType}
+                            </Badge>
+                          </td>
+                          <td className="text-center px-3 py-2">
+                            {STATUS_BADGE[rem.status as keyof typeof STATUS_BADGE]}
+                          </td>
+                          <td className="px-3 py-2 text-xs max-w-[250px] truncate">{rem.summary}</td>
+                          <td className="text-center px-3 py-2 text-xs font-medium">
+                            {rem.affectedCount > 0 ? (
+                              <span className="text-blue-600">{rem.affectedCount}건</span>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-xs text-muted-foreground">{rem.executedBy || "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }
-

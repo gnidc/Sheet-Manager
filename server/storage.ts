@@ -87,6 +87,12 @@ import {
   securityDrillResults,
   type SecurityDrillResult,
   type InsertSecurityDrillResult,
+  blockedIps,
+  type BlockedIp,
+  type InsertBlockedIp,
+  securityRemediations,
+  type SecurityRemediation,
+  type InsertSecurityRemediation,
 } from "../shared/schema.js";
 import { eq, and, or, desc, isNull, inArray, sql } from "drizzle-orm";
 
@@ -260,6 +266,24 @@ export interface IStorage {
   // Security Drill Results
   createSecurityDrillResult(data: InsertSecurityDrillResult): Promise<SecurityDrillResult>;
   getSecurityDrillResults(limit?: number): Promise<SecurityDrillResult[]>;
+
+  // Blocked IPs
+  createBlockedIp(data: InsertBlockedIp): Promise<BlockedIp>;
+  getBlockedIps(): Promise<BlockedIp[]>;
+  getActiveBlockedIps(): Promise<BlockedIp[]>;
+  deleteBlockedIp(id: number): Promise<void>;
+  isIpBlocked(ip: string): Promise<boolean>;
+
+  // Security Remediations
+  createSecurityRemediation(data: InsertSecurityRemediation): Promise<SecurityRemediation>;
+  getSecurityRemediations(limit?: number): Promise<SecurityRemediation[]>;
+
+  // Visit Logs cleanup
+  deleteOldVisitLogs(days: number): Promise<number>;
+
+  // User AI configs for bulk operations
+  getAllUserAiConfigs(): Promise<any[]>;
+  getAllUserTradingConfigs(): Promise<any[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1903,6 +1927,119 @@ export class DatabaseStorage implements IStorage {
       });
     }
     return await db.select().from(securityDrillResults).orderBy(desc(securityDrillResults.executedAt)).limit(limit);
+  }
+
+  // ========== Blocked IPs ==========
+
+  async createBlockedIp(data: InsertBlockedIp): Promise<BlockedIp> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [ip] = await db.insert(blockedIps).values(data).returning();
+        return ip;
+      });
+    }
+    const [ip] = await db.insert(blockedIps).values(data).returning();
+    return ip;
+  }
+
+  async getBlockedIps(): Promise<BlockedIp[]> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(blockedIps).orderBy(desc(blockedIps.blockedAt));
+      });
+    }
+    return await db.select().from(blockedIps).orderBy(desc(blockedIps.blockedAt));
+  }
+
+  async getActiveBlockedIps(): Promise<BlockedIp[]> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(blockedIps).where(eq(blockedIps.isActive, true));
+      });
+    }
+    return await db.select().from(blockedIps).where(eq(blockedIps.isActive, true));
+  }
+
+  async deleteBlockedIp(id: number): Promise<void> {
+    if (process.env.VERCEL) {
+      await executeWithClient(async (db) => {
+        await db.update(blockedIps).set({ isActive: false }).where(eq(blockedIps.id, id));
+      });
+      return;
+    }
+    await db.update(blockedIps).set({ isActive: false }).where(eq(blockedIps.id, id));
+  }
+
+  async isIpBlocked(ip: string): Promise<boolean> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [row] = await db.select().from(blockedIps)
+          .where(and(eq(blockedIps.ipAddress, ip), eq(blockedIps.isActive, true)));
+        return !!row;
+      });
+    }
+    const [row] = await db.select().from(blockedIps)
+      .where(and(eq(blockedIps.ipAddress, ip), eq(blockedIps.isActive, true)));
+    return !!row;
+  }
+
+  // ========== Security Remediations ==========
+
+  async createSecurityRemediation(data: InsertSecurityRemediation): Promise<SecurityRemediation> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [rem] = await db.insert(securityRemediations).values(data).returning();
+        return rem;
+      });
+    }
+    const [rem] = await db.insert(securityRemediations).values(data).returning();
+    return rem;
+  }
+
+  async getSecurityRemediations(limit: number = 50): Promise<SecurityRemediation[]> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(securityRemediations).orderBy(desc(securityRemediations.executedAt)).limit(limit);
+      });
+    }
+    return await db.select().from(securityRemediations).orderBy(desc(securityRemediations.executedAt)).limit(limit);
+  }
+
+  // ========== Visit Logs Cleanup ==========
+
+  async deleteOldVisitLogs(days: number): Promise<number> {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    const query = async (dbConn: any) => {
+      const result = await dbConn.delete(visitLogs)
+        .where(sql`${visitLogs.visitedAt} < ${cutoff}`)
+        .returning();
+      return result.length;
+    };
+    if (process.env.VERCEL) {
+      return await executeWithClient(query);
+    }
+    return await query(db);
+  }
+
+  // ========== Bulk AI/Trading Config Access ==========
+
+  async getAllUserAiConfigs(): Promise<any[]> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(userAiConfigs);
+      });
+    }
+    return await db.select().from(userAiConfigs);
+  }
+
+  async getAllUserTradingConfigs(): Promise<any[]> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(userTradingConfigs);
+      });
+    }
+    return await db.select().from(userTradingConfigs);
   }
 }
 

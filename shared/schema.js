@@ -502,10 +502,37 @@ const securityDrillResults = pgTable("security_drill_results", {
   // 실행한 admin 이름
   executedAt: timestamp("executed_at").default(sql`CURRENT_TIMESTAMP`).notNull()
 });
+const blockedIps = pgTable("blocked_ips", {
+  id: serial("id").primaryKey(),
+  ipAddress: text("ip_address").notNull(),
+  reason: text("reason").notNull(),
+  blockedBy: text("blocked_by"),
+  // 차단한 admin 이름
+  accessCount: integer("access_count").default(0),
+  // 차단 전 접속 횟수
+  isActive: boolean("is_active").default(true),
+  blockedAt: timestamp("blocked_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  expiresAt: timestamp("expires_at")
+  // null이면 영구 차단
+});
+const securityRemediations = pgTable("security_remediations", {
+  id: serial("id").primaryKey(),
+  actionType: text("action_type").notNull(),
+  // 'encrypt-keys' | 'block-ip' | 'cleanup-logs' | 'force-reencrypt'
+  status: text("status").notNull(),
+  // 'success' | 'partial' | 'failed'
+  summary: text("summary").notNull(),
+  details: text("details").notNull(),
+  // 상세 JSON
+  affectedCount: integer("affected_count").default(0),
+  executedBy: text("executed_by"),
+  executedAt: timestamp("executed_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+});
 export {
   aiPrompts,
   aiReports,
   autoTradeRules,
+  blockedIps,
   bookmarks,
   etfTrends,
   gapStrategy,
@@ -537,6 +564,7 @@ export {
   savedEtfs,
   securityAuditLogs,
   securityDrillResults,
+  securityRemediations,
   steemPosts,
   stockAiAnalyses,
   stockComments,

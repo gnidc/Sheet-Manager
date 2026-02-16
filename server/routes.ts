@@ -8909,7 +8909,14 @@ ${etfListStr}
 
   // 보안점검 수행 함수
   async function performSecurityAudit(auditType: "scheduled" | "manual") {
-    const checks: { name: string; status: "pass" | "warning" | "critical"; detail: string }[] = [];
+    const checks: {
+      name: string;
+      status: "pass" | "warning" | "critical";
+      detail: string;
+      remediable?: boolean;
+      remediationAction?: string;
+      remediationLabel?: string;
+    }[] = [];
 
     // 1. 환경변수 보안 점검
     const hasEncryptionKey = !!process.env.ENCRYPTION_KEY;
@@ -8919,16 +8926,25 @@ ${etfListStr}
       name: "ENCRYPTION_KEY 설정",
       status: hasEncryptionKey ? "pass" : "warning",
       detail: hasEncryptionKey ? "전용 암호화 키가 설정되어 있습니다" : "ENCRYPTION_KEY 미설정 - SESSION_SECRET에서 파생됩니다",
+      remediable: !hasEncryptionKey,
+      remediationAction: "guide-encryption-key",
+      remediationLabel: "설정 가이드",
     });
     checks.push({
       name: "SESSION_SECRET 설정",
       status: hasSessionSecret ? "pass" : "critical",
       detail: hasSessionSecret ? "세션 시크릿이 설정되어 있습니다" : "SESSION_SECRET 미설정 - 기본값 사용 중 (보안 위험)",
+      remediable: !hasSessionSecret,
+      remediationAction: "guide-session-secret",
+      remediationLabel: "설정 가이드",
     });
     checks.push({
       name: "ADMIN_PASSWORD_HASH 설정",
       status: hasAdminPwHash ? "pass" : "critical",
       detail: hasAdminPwHash ? "Admin 비밀번호 해시가 설정되어 있습니다" : "ADMIN_PASSWORD_HASH 미설정",
+      remediable: !hasAdminPwHash,
+      remediationAction: "guide-admin-password",
+      remediationLabel: "설정 가이드",
     });
 
     // 2. Rate Limiter 동작 확인
@@ -8939,6 +8955,7 @@ ${etfListStr}
     });
 
     // 3. 최근 방문 로그에서 비정상 패턴 탐지
+    let suspiciousIpList: { ip: string; count: number }[] = [];
     try {
       const recentLogs = await storage.getVisitLogs(500);
       const ipCounts = new Map<string, number>();
@@ -8947,17 +8964,18 @@ ${etfListStr}
           ipCounts.set(log.ipAddress, (ipCounts.get(log.ipAddress) || 0) + 1);
         }
       });
-      // 동일 IP에서 100건 이상 접속 시 경고
-      let suspiciousIps = 0;
       Array.from(ipCounts.entries()).forEach(([ip, count]) => {
-        if (count > 100) suspiciousIps++;
+        if (count > 100) suspiciousIpList.push({ ip, count });
       });
       checks.push({
         name: "비정상 접속 패턴 탐지",
-        status: suspiciousIps > 0 ? "warning" : "pass",
-        detail: suspiciousIps > 0
-          ? `${suspiciousIps}개 IP에서 100건 이상 비정상 접속 패턴 감지됨`
+        status: suspiciousIpList.length > 0 ? "warning" : "pass",
+        detail: suspiciousIpList.length > 0
+          ? `${suspiciousIpList.length}개 IP에서 100건 이상 비정상 접속 패턴 감지됨 (${suspiciousIpList.map(s => `${s.ip}:${s.count}건`).join(", ")})`
           : `최근 방문 로그 ${recentLogs.length}건 분석 - 비정상 패턴 없음`,
+        remediable: suspiciousIpList.length > 0,
+        remediationAction: "block-suspicious-ips",
+        remediationLabel: "의심 IP 차단",
       });
 
       // 비로그인 접속 비율 확인
@@ -8968,6 +8986,19 @@ ${etfListStr}
         status: unauthRatio > 0.8 ? "warning" : "pass",
         detail: `비로그인 접속 ${unauthLogs.length}건 / 전체 ${recentLogs.length}건 (${(unauthRatio * 100).toFixed(1)}%)`,
       });
+
+      // 방문 로그 크기 점검
+      const totalLogs = recentLogs.length;
+      checks.push({
+        name: "방문 로그 관리",
+        status: totalLogs > 400 ? "warning" : "pass",
+        detail: totalLogs > 400
+          ? `방문 로그 ${totalLogs}건 - 오래된 로그 정리 권장 (90일 이상)`
+          : `방문 로그 ${totalLogs}건 - 정상 범위`,
+        remediable: totalLogs > 400,
+        remediationAction: "cleanup-old-logs",
+        remediationLabel: "오래된 로그 정리",
+      });
     } catch {
       checks.push({
         name: "방문 로그 분석",
@@ -8977,29 +9008,53 @@ ${etfListStr}
     }
 
     // 4. API 키 암호화 상태 확인
+    let plaintextAiKeyCount = 0;
+    let plaintextTradingKeyCount = 0;
     try {
-      const allUsers = await storage.getUsers();
-      let encryptedCount = 0;
-      let plaintextCount = 0;
-      for (const user of allUsers.slice(0, 20)) {
-        const aiConfig = await storage.getUserAiConfig(user.id);
-        if (aiConfig) {
-          if (aiConfig.geminiApiKey) {
-            if (aiConfig.geminiApiKey.startsWith("enc:v1:")) encryptedCount++;
-            else plaintextCount++;
-          }
-          if (aiConfig.openaiApiKey) {
-            if (aiConfig.openaiApiKey.startsWith("enc:v1:")) encryptedCount++;
-            else plaintextCount++;
-          }
+      const allAiConfigs = await storage.getAllUserAiConfigs();
+      let encryptedAiCount = 0;
+      for (const config of allAiConfigs) {
+        if (config.geminiApiKey) {
+          if (config.geminiApiKey.startsWith("enc:v1:")) encryptedAiCount++;
+          else plaintextAiKeyCount++;
+        }
+        if (config.openaiApiKey) {
+          if (config.openaiApiKey.startsWith("enc:v1:")) encryptedAiCount++;
+          else plaintextAiKeyCount++;
         }
       }
       checks.push({
-        name: "API 키 암호화 상태",
-        status: plaintextCount > 0 ? "warning" : "pass",
-        detail: plaintextCount > 0
-          ? `평문 API 키 ${plaintextCount}개 발견 - 재저장하여 암호화 필요`
-          : `검사 대상 API 키 모두 암호화 완료 (${encryptedCount}개)`,
+        name: "AI API 키 암호화",
+        status: plaintextAiKeyCount > 0 ? "warning" : "pass",
+        detail: plaintextAiKeyCount > 0
+          ? `평문 AI API 키 ${plaintextAiKeyCount}개 발견 - 자동 암호화 필요`
+          : `AI API 키 모두 암호화 완료 (${encryptedAiCount}개)`,
+        remediable: plaintextAiKeyCount > 0,
+        remediationAction: "encrypt-ai-keys",
+        remediationLabel: "자동 암호화 실행",
+      });
+
+      const allTradingConfigs = await storage.getAllUserTradingConfigs();
+      let encryptedTradingCount = 0;
+      for (const config of allTradingConfigs) {
+        if (config.appKey) {
+          if (config.appKey.startsWith("enc:v1:")) encryptedTradingCount++;
+          else plaintextTradingKeyCount++;
+        }
+        if (config.appSecret) {
+          if (config.appSecret.startsWith("enc:v1:")) encryptedTradingCount++;
+          else plaintextTradingKeyCount++;
+        }
+      }
+      checks.push({
+        name: "KIS 거래 키 암호화",
+        status: plaintextTradingKeyCount > 0 ? "warning" : "pass",
+        detail: plaintextTradingKeyCount > 0
+          ? `평문 KIS 키 ${plaintextTradingKeyCount}개 발견 - 자동 암호화 필요`
+          : `KIS 거래 키 모두 암호화 완료 (${encryptedTradingCount}개)`,
+        remediable: plaintextTradingKeyCount > 0,
+        remediationAction: "encrypt-trading-keys",
+        remediationLabel: "자동 암호화 실행",
       });
     } catch {
       checks.push({
@@ -9009,48 +9064,70 @@ ${etfListStr}
       });
     }
 
-    // 5. 세션 보안 설정 확인
+    // 5. 차단 IP 목록 확인
+    try {
+      const blockedIpsList = await storage.getActiveBlockedIps();
+      checks.push({
+        name: "IP 차단 목록",
+        status: "pass",
+        detail: `현재 ${blockedIpsList.length}개 IP 차단 중`,
+      });
+    } catch {
+      checks.push({
+        name: "IP 차단 목록",
+        status: "warning",
+        detail: "IP 차단 목록 조회 실패",
+      });
+    }
+
+    // 6. 세션 보안 설정 확인
     const isProduction = process.env.NODE_ENV === "production";
     checks.push({
       name: "프로덕션 환경 설정",
       status: isProduction ? "pass" : "warning",
       detail: isProduction ? "프로덕션 모드로 실행 중 (secure cookie 활성)" : "개발 모드 실행 중 - 프로덕션 배포 시 NODE_ENV=production 필요",
+      remediable: !isProduction,
+      remediationAction: "guide-production",
+      remediationLabel: "설정 가이드",
     });
 
-    // 6. CORS/보안 헤더 확인
+    // 7. CORS/보안 헤더 확인
     checks.push({
       name: "HttpOnly Cookie 설정",
       status: "pass",
       detail: "세션 쿠키에 httpOnly, sameSite=lax 설정 확인됨",
     });
 
-    // 7. AI Agent 보안 규칙 확인
+    // 8. AI Agent 보안 규칙 확인
     checks.push({
       name: "AI Agent 프롬프트 인젝션 방어",
       status: "pass",
       detail: "ACTIONS 블록 필터링, 액션 화이트리스트(27개), 주문수량 제한(10,000주) 활성화",
     });
 
-    // 8. SSRF 보호 확인
+    // 9. SSRF 보호 확인
     checks.push({
       name: "SSRF 보호",
       status: "pass",
       detail: "내부 네트워크 URL 차단 (localhost, 10.x, 192.168.x, 172.16-31.x) 활성화",
     });
 
-    // 9. 인증 미들웨어 점검
+    // 10. 인증 미들웨어 점검
     checks.push({
       name: "인증 미들웨어 적용",
       status: "pass",
       detail: "AI 분석, 댓글 작성/삭제, API 키 테스트 등 주요 엔드포인트에 requireUser 적용됨",
     });
 
-    // 10. Google OAuth 설정 확인
+    // 11. Google OAuth 설정 확인
     const hasGoogleClientId = !!process.env.GOOGLE_CLIENT_ID || !!process.env.VITE_GOOGLE_CLIENT_ID;
     checks.push({
       name: "Google OAuth 설정",
       status: hasGoogleClientId ? "pass" : "warning",
       detail: hasGoogleClientId ? "Google OAuth Client ID가 설정되어 있습니다" : "Google OAuth 미설정",
+      remediable: !hasGoogleClientId,
+      remediationAction: "guide-google-oauth",
+      remediationLabel: "설정 가이드",
     });
 
     const totalChecks = checks.length;
@@ -9336,6 +9413,255 @@ ${etfListStr}
     } catch (error: any) {
       console.error("[Security Drill Error]:", error.message);
       res.status(500).json({ message: error.message || "모의훈련 실행 실패" });
+    }
+  });
+
+  // ========== 보안조치 시스템 ==========
+
+  // 보안조치 실행 (admin only)
+  app.post("/api/admin/security/remediate", requireAdmin, async (req, res) => {
+    try {
+      const { action } = req.body;
+      const userName = (req as any).session?.userName || (req as any).session?.userEmail || "Admin";
+      
+      if (!action) {
+        return res.status(400).json({ message: "조치 유형을 지정해주세요" });
+      }
+
+      let result: { status: string; summary: string; details: string; affectedCount: number };
+
+      switch (action) {
+        case "encrypt-ai-keys": {
+          // 평문 AI API 키를 자동 암호화
+          const allConfigs = await storage.getAllUserAiConfigs();
+          let encrypted = 0;
+          const details: string[] = [];
+          for (const config of allConfigs) {
+            let updated = false;
+            const updates: any = {};
+            if (config.geminiApiKey && !config.geminiApiKey.startsWith("enc:v1:")) {
+              updates.geminiApiKey = encrypt(config.geminiApiKey);
+              updated = true;
+              encrypted++;
+            }
+            if (config.openaiApiKey && !config.openaiApiKey.startsWith("enc:v1:")) {
+              updates.openaiApiKey = encrypt(config.openaiApiKey);
+              updated = true;
+              encrypted++;
+            }
+            if (updated) {
+              await storage.upsertUserAiConfig(config.userId, updates);
+              details.push(`User ${config.userId}: AI 키 암호화 완료`);
+            }
+          }
+          result = {
+            status: encrypted > 0 ? "success" : "pass",
+            summary: encrypted > 0 ? `${encrypted}개 AI API 키 암호화 완료` : "암호화할 평문 키가 없습니다",
+            details: JSON.stringify(details),
+            affectedCount: encrypted,
+          };
+          break;
+        }
+
+        case "encrypt-trading-keys": {
+          // 평문 KIS 거래 키를 자동 암호화
+          const allTradingConfigs = await storage.getAllUserTradingConfigs();
+          let encrypted = 0;
+          const details: string[] = [];
+          for (const config of allTradingConfigs) {
+            let updated = false;
+            const updates: any = {};
+            if (config.appKey && !config.appKey.startsWith("enc:v1:")) {
+              updates.appKey = encrypt(config.appKey);
+              updated = true;
+              encrypted++;
+            }
+            if (config.appSecret && !config.appSecret.startsWith("enc:v1:")) {
+              updates.appSecret = encrypt(config.appSecret);
+              updated = true;
+              encrypted++;
+            }
+            if (updated) {
+              await storage.upsertUserTradingConfig(config.userId, updates);
+              details.push(`User ${config.userId}: KIS 키 암호화 완료`);
+            }
+          }
+          result = {
+            status: encrypted > 0 ? "success" : "pass",
+            summary: encrypted > 0 ? `${encrypted}개 KIS 거래 키 암호화 완료` : "암호화할 평문 키가 없습니다",
+            details: JSON.stringify(details),
+            affectedCount: encrypted,
+          };
+          break;
+        }
+
+        case "block-suspicious-ips": {
+          // 비정상 접속 IP 차단
+          const recentLogs = await storage.getVisitLogs(500);
+          const ipCounts = new Map<string, number>();
+          recentLogs.forEach((log: any) => {
+            if (log.ipAddress) {
+              ipCounts.set(log.ipAddress, (ipCounts.get(log.ipAddress) || 0) + 1);
+            }
+          });
+          let blocked = 0;
+          const details: string[] = [];
+          for (const [ip, count] of Array.from(ipCounts.entries())) {
+            if (count > 100) {
+              const alreadyBlocked = await storage.isIpBlocked(ip);
+              if (!alreadyBlocked) {
+                await storage.createBlockedIp({
+                  ipAddress: ip,
+                  reason: `비정상 접속 패턴 감지: 최근 ${count}건 접속`,
+                  blockedBy: userName,
+                  accessCount: count,
+                });
+                details.push(`${ip} (${count}건) 차단 완료`);
+                blocked++;
+              } else {
+                details.push(`${ip} (${count}건) 이미 차단됨`);
+              }
+            }
+          }
+          result = {
+            status: blocked > 0 ? "success" : "pass",
+            summary: blocked > 0 ? `${blocked}개 의심 IP 차단 완료` : "새로 차단할 IP가 없습니다",
+            details: JSON.stringify(details),
+            affectedCount: blocked,
+          };
+          break;
+        }
+
+        case "cleanup-old-logs": {
+          // 90일 이상 된 방문 로그 삭제
+          const deletedCount = await storage.deleteOldVisitLogs(90);
+          result = {
+            status: deletedCount > 0 ? "success" : "pass",
+            summary: deletedCount > 0 ? `${deletedCount}건의 오래된 방문 로그 삭제 완료` : "삭제할 오래된 로그가 없습니다",
+            details: JSON.stringify([`90일 이전 로그 ${deletedCount}건 삭제`]),
+            affectedCount: deletedCount,
+          };
+          break;
+        }
+
+        case "block-ip": {
+          // 특정 IP 수동 차단
+          const { ip, reason = "관리자 수동 차단" } = req.body;
+          if (!ip) {
+            return res.status(400).json({ message: "차단할 IP 주소를 지정해주세요" });
+          }
+          const alreadyBlocked = await storage.isIpBlocked(ip);
+          if (alreadyBlocked) {
+            return res.json({
+              status: "pass",
+              summary: `${ip}는 이미 차단 중입니다`,
+              details: "[]",
+              affectedCount: 0,
+            });
+          }
+          await storage.createBlockedIp({
+            ipAddress: ip,
+            reason,
+            blockedBy: userName,
+          });
+          result = {
+            status: "success",
+            summary: `IP ${ip} 차단 완료`,
+            details: JSON.stringify([`${ip}: ${reason}`]),
+            affectedCount: 1,
+          };
+          break;
+        }
+
+        case "unblock-ip": {
+          // IP 차단 해제
+          const { blockedIpId } = req.body;
+          if (!blockedIpId) {
+            return res.status(400).json({ message: "차단 해제할 IP ID를 지정해주세요" });
+          }
+          await storage.deleteBlockedIp(blockedIpId);
+          result = {
+            status: "success",
+            summary: `IP 차단 해제 완료 (ID: ${blockedIpId})`,
+            details: JSON.stringify([`ID ${blockedIpId} 차단 해제`]),
+            affectedCount: 1,
+          };
+          break;
+        }
+
+        default:
+          return res.status(400).json({ message: `지원하지 않는 조치 유형: ${action}` });
+      }
+
+      // 조치 이력 저장
+      const remediation = await storage.createSecurityRemediation({
+        actionType: action,
+        status: result.status,
+        summary: result.summary,
+        details: result.details,
+        affectedCount: result.affectedCount,
+        executedBy: userName,
+      });
+
+      res.json({ success: true, result, remediation });
+    } catch (error: any) {
+      console.error("[Security Remediation Error]:", error.message);
+      res.status(500).json({ message: error.message || "보안조치 실행 실패" });
+    }
+  });
+
+  // 보안조치 이력 조회 (admin only)
+  app.get("/api/admin/security/remediations", requireAdmin, async (_req, res) => {
+    try {
+      const remediations = await storage.getSecurityRemediations(50);
+      res.json(remediations);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "조치 이력 조회 실패" });
+    }
+  });
+
+  // 차단 IP 목록 조회 (admin only)
+  app.get("/api/admin/security/blocked-ips", requireAdmin, async (_req, res) => {
+    try {
+      const ips = await storage.getBlockedIps();
+      res.json(ips);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "차단 IP 조회 실패" });
+    }
+  });
+
+  // 차단 IP 해제 (admin only)
+  app.delete("/api/admin/security/blocked-ips/:id", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.deleteBlockedIp(id);
+      res.json({ success: true, message: "IP 차단 해제 완료" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "IP 차단 해제 실패" });
+    }
+  });
+
+  // 수동 IP 차단 (admin only)
+  app.post("/api/admin/security/blocked-ips", requireAdmin, async (req, res) => {
+    try {
+      const { ipAddress, reason = "관리자 수동 차단", expiresAt } = req.body;
+      if (!ipAddress) {
+        return res.status(400).json({ message: "IP 주소를 입력해주세요" });
+      }
+      const userName = (req as any).session?.userName || (req as any).session?.userEmail || "Admin";
+      const alreadyBlocked = await storage.isIpBlocked(ipAddress);
+      if (alreadyBlocked) {
+        return res.status(400).json({ message: "이미 차단된 IP입니다" });
+      }
+      const blocked = await storage.createBlockedIp({
+        ipAddress,
+        reason,
+        blockedBy: userName,
+        expiresAt: expiresAt ? new Date(expiresAt) : undefined,
+      });
+      res.json({ success: true, blocked });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "IP 차단 실패" });
     }
   });
 
