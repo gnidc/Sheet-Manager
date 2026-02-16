@@ -38,6 +38,7 @@ const AiAgent = lazy(() => import("@/components/AiAgent"));
 const EtfSearch = lazy(() => import("@/components/EtfSearch"));
 const AdminDashboard = lazy(() => import("@/components/AdminDashboard"));
 const SecurityAudit = lazy(() => import("@/components/SecurityAudit"));
+const MobilePreview = lazy(() => import("@/components/MobilePreview"));
 const MarketsEtc = lazy(() => import("@/components/MarketsEtc"));
 const MarketCalendar = lazy(() => import("@/components/MarketCalendar"));
 
@@ -357,6 +358,11 @@ export default function Home() {
                   />
                 )
               )}
+
+              {/* Mobile Preview (Admin only) */}
+              {isAdmin && (
+                <SidebarButton icon={<Smartphone className="h-4 w-4 shrink-0 text-red-500" />} label="Mobile" active={activeTab === "mobile-preview"} collapsed={sidebarCollapsed} onClick={() => setActiveTab("mobile-preview")} />
+              )}
             </nav>
           </div>
 
@@ -639,6 +645,15 @@ export default function Home() {
           <TabsContent value="admin-security">
             <Suspense fallback={<ContentSkeleton />}>
               <SecurityAudit />
+            </Suspense>
+          </TabsContent>
+          )}
+
+          {/* Mobile Preview (Admin only) */}
+          {isAdmin && (
+          <TabsContent value="mobile-preview">
+            <Suspense fallback={<ContentSkeleton />}>
+              <MobilePreview isAdmin={isAdmin} />
             </Suspense>
           </TabsContent>
           )}
