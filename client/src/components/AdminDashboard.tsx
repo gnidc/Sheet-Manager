@@ -64,7 +64,8 @@ const PAGE_NAMES: Record<string, string> = {
   "steem-report": "스팀보고서",
   "steem-reader": "스팀글읽기",
   "bookmarks": "즐겨찾기",
-  "admin-dashboard": "대시보드",
+  "admin-dashboard": "방문,사용자 관리",
+  "admin-security": "보안점검",
 };
 
 export default function AdminDashboard() {

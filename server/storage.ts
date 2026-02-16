@@ -81,6 +81,12 @@ import {
   type InsertStrategyReport,
   type StrategyAnalysis,
   type InsertStrategyAnalysis,
+  securityAuditLogs,
+  type SecurityAuditLog,
+  type InsertSecurityAuditLog,
+  securityDrillResults,
+  type SecurityDrillResult,
+  type InsertSecurityDrillResult,
 } from "../shared/schema.js";
 import { eq, and, or, desc, isNull, inArray, sql } from "drizzle-orm";
 
@@ -246,6 +252,14 @@ export interface IStorage {
   createVisitLog(data: InsertVisitLog): Promise<VisitLog>;
   getVisitLogs(limit?: number): Promise<VisitLog[]>;
   getVisitStats(days?: number): Promise<any>;
+
+  // Security Audit Logs
+  createSecurityAuditLog(data: InsertSecurityAuditLog): Promise<SecurityAuditLog>;
+  getSecurityAuditLogs(limit?: number): Promise<SecurityAuditLog[]>;
+
+  // Security Drill Results
+  createSecurityDrillResult(data: InsertSecurityDrillResult): Promise<SecurityDrillResult>;
+  getSecurityDrillResults(limit?: number): Promise<SecurityDrillResult[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1845,6 +1859,50 @@ export class DatabaseStorage implements IStorage {
       return await executeWithClient(query);
     }
     return await query(db);
+  }
+
+  // ========== Security Audit Logs ==========
+
+  async createSecurityAuditLog(data: InsertSecurityAuditLog): Promise<SecurityAuditLog> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [log] = await db.insert(securityAuditLogs).values(data).returning();
+        return log;
+      });
+    }
+    const [log] = await db.insert(securityAuditLogs).values(data).returning();
+    return log;
+  }
+
+  async getSecurityAuditLogs(limit: number = 50): Promise<SecurityAuditLog[]> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(securityAuditLogs).orderBy(desc(securityAuditLogs.executedAt)).limit(limit);
+      });
+    }
+    return await db.select().from(securityAuditLogs).orderBy(desc(securityAuditLogs.executedAt)).limit(limit);
+  }
+
+  // ========== Security Drill Results ==========
+
+  async createSecurityDrillResult(data: InsertSecurityDrillResult): Promise<SecurityDrillResult> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [result] = await db.insert(securityDrillResults).values(data).returning();
+        return result;
+      });
+    }
+    const [result] = await db.insert(securityDrillResults).values(data).returning();
+    return result;
+  }
+
+  async getSecurityDrillResults(limit: number = 50): Promise<SecurityDrillResult[]> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(securityDrillResults).orderBy(desc(securityDrillResults.executedAt)).limit(limit);
+      });
+    }
+    return await db.select().from(securityDrillResults).orderBy(desc(securityDrillResults.executedAt)).limit(limit);
   }
 }
 

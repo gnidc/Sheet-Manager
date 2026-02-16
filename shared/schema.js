@@ -468,6 +468,40 @@ const visitLogs = pgTable("visit_logs", {
   // 세션 식별자
   visitedAt: timestamp("visited_at").default(sql`CURRENT_TIMESTAMP`).notNull()
 });
+const securityAuditLogs = pgTable("security_audit_logs", {
+  id: serial("id").primaryKey(),
+  auditType: text("audit_type").notNull(),
+  // 'scheduled' | 'manual'
+  status: text("status").notNull(),
+  // 'pass' | 'warning' | 'critical'
+  summary: text("summary").notNull(),
+  // 점검 요약
+  details: text("details").notNull(),
+  // 상세 결과 JSON
+  totalChecks: integer("total_checks").default(0),
+  passedChecks: integer("passed_checks").default(0),
+  warningChecks: integer("warning_checks").default(0),
+  criticalChecks: integer("critical_checks").default(0),
+  executedAt: timestamp("executed_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+});
+const securityDrillResults = pgTable("security_drill_results", {
+  id: serial("id").primaryKey(),
+  drillType: text("drill_type").notNull(),
+  // 'full' | 'auth' | 'injection' | 'api'
+  status: text("status").notNull(),
+  // 'pass' | 'warning' | 'fail'
+  summary: text("summary").notNull(),
+  details: text("details").notNull(),
+  // 상세 결과 JSON
+  totalTests: integer("total_tests").default(0),
+  passedTests: integer("passed_tests").default(0),
+  failedTests: integer("failed_tests").default(0),
+  duration: integer("duration").default(0),
+  // 실행시간(ms)
+  executedBy: text("executed_by"),
+  // 실행한 admin 이름
+  executedAt: timestamp("executed_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+});
 export {
   aiPrompts,
   aiReports,
@@ -501,6 +535,8 @@ export {
   qnaReplies,
   satelliteEtfs,
   savedEtfs,
+  securityAuditLogs,
+  securityDrillResults,
   steemPosts,
   stockAiAnalyses,
   stockComments,
