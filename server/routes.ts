@@ -9684,59 +9684,128 @@ ${etfListStr}
     }
   });
 
-  // IP WHOIS 조회 (admin only)
-  app.get("/api/admin/security/whois/:ip", requireAdmin, async (req, res) => {
+  // IP WHOIS 조회 (admin only) - query parameter 방식
+  app.get("/api/admin/security/whois", requireAdmin, async (req, res) => {
     try {
-      const ip = req.params.ip;
+      const ip = req.query.ip as string;
+      if (!ip) {
+        return res.status(400).json({ message: "IP 주소를 지정해주세요 (?ip=x.x.x.x)" });
+      }
       // IP 형식 검증
       const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
       if (!ipRegex.test(ip)) {
         return res.status(400).json({ message: "올바른 IP 주소 형식이 아닙니다" });
       }
 
-      // 무료 WHOIS API 사용 (ip-api.com)
-      const response = await axios.get(`http://ip-api.com/json/${ip}?fields=status,message,country,countryCode,region,regionName,city,zip,lat,lon,timezone,isp,org,as,asname,reverse,mobile,proxy,hosting,query`, {
-        timeout: 10000,
-      });
-
-      if (response.data.status === "fail") {
-        return res.status(400).json({ message: response.data.message || "WHOIS 조회 실패" });
-      }
-
-      // RDAP/WHOIS 보조 정보 시도 (ipwhois.io)
-      let extraInfo: any = null;
+      // 1차: ipwhois.app (HTTPS, 무료, 월 10,000건)
+      let whoisData: any = null;
       try {
-        const rdapRes = await axios.get(`https://ipwhois.app/json/${ip}`, { timeout: 8000 });
-        if (rdapRes.data && !rdapRes.data.success === false) {
-          extraInfo = {
-            type: rdapRes.data.type || null,
-            connectionType: rdapRes.data.connection_type || null,
-            continent: rdapRes.data.continent || null,
-            currencyCode: rdapRes.data.currency_code || null,
+        const resp = await axios.get(`https://ipwhois.app/json/${ip}`, {
+          timeout: 10000,
+          headers: { "Accept": "application/json" },
+        });
+        if (resp.data && resp.data.success !== false) {
+          whoisData = {
+            ip: resp.data.ip,
+            country: resp.data.country,
+            countryCode: resp.data.country_code,
+            region: resp.data.region,
+            city: resp.data.city,
+            zip: resp.data.postal,
+            lat: resp.data.latitude,
+            lon: resp.data.longitude,
+            timezone: resp.data.timezone,
+            isp: resp.data.isp,
+            org: resp.data.org,
+            as: resp.data.asn,
+            asName: resp.data.as || resp.data.isp,
+            reverse: "",
+            mobile: resp.data.type === "mobile",
+            proxy: resp.data.security?.proxy || false,
+            hosting: resp.data.security?.hosting || false,
+            extra: {
+              type: resp.data.type || null,
+              connectionType: resp.data.connection_type || null,
+              continent: resp.data.continent || null,
+              currencyCode: resp.data.currency_code || null,
+            },
           };
         }
-      } catch { /* 보조 API 실패 시 무시 */ }
+      } catch (e: any) {
+        console.error("[WHOIS] ipwhois.app 실패:", e.message);
+      }
 
-      res.json({
-        ip: response.data.query,
-        country: response.data.country,
-        countryCode: response.data.countryCode,
-        region: response.data.regionName,
-        city: response.data.city,
-        zip: response.data.zip,
-        lat: response.data.lat,
-        lon: response.data.lon,
-        timezone: response.data.timezone,
-        isp: response.data.isp,
-        org: response.data.org,
-        as: response.data.as,
-        asName: response.data.asname,
-        reverse: response.data.reverse,
-        mobile: response.data.mobile,
-        proxy: response.data.proxy,
-        hosting: response.data.hosting,
-        ...extraInfo && { extra: extraInfo },
-      });
+      // 2차 폴백: ip-api.com (HTTP만 지원 - 무료)
+      if (!whoisData) {
+        try {
+          const resp2 = await axios.get(`http://ip-api.com/json/${ip}?fields=status,message,country,countryCode,region,regionName,city,zip,lat,lon,timezone,isp,org,as,asname,reverse,mobile,proxy,hosting,query`, {
+            timeout: 10000,
+          });
+          if (resp2.data && resp2.data.status !== "fail") {
+            whoisData = {
+              ip: resp2.data.query,
+              country: resp2.data.country,
+              countryCode: resp2.data.countryCode,
+              region: resp2.data.regionName,
+              city: resp2.data.city,
+              zip: resp2.data.zip,
+              lat: resp2.data.lat,
+              lon: resp2.data.lon,
+              timezone: resp2.data.timezone,
+              isp: resp2.data.isp,
+              org: resp2.data.org,
+              as: resp2.data.as,
+              asName: resp2.data.asname,
+              reverse: resp2.data.reverse,
+              mobile: resp2.data.mobile,
+              proxy: resp2.data.proxy,
+              hosting: resp2.data.hosting,
+            };
+          }
+        } catch (e: any) {
+          console.error("[WHOIS] ip-api.com 실패:", e.message);
+        }
+      }
+
+      // 3차 폴백: ipinfo.io (HTTPS, 월 50,000건 무료)
+      if (!whoisData) {
+        try {
+          const resp3 = await axios.get(`https://ipinfo.io/${ip}/json`, {
+            timeout: 10000,
+            headers: { "Accept": "application/json" },
+          });
+          if (resp3.data && resp3.data.ip) {
+            const [lat, lon] = (resp3.data.loc || "0,0").split(",").map(Number);
+            whoisData = {
+              ip: resp3.data.ip,
+              country: resp3.data.country || "",
+              countryCode: resp3.data.country || "",
+              region: resp3.data.region || "",
+              city: resp3.data.city || "",
+              zip: resp3.data.postal || "",
+              lat,
+              lon,
+              timezone: resp3.data.timezone || "",
+              isp: resp3.data.org || "",
+              org: resp3.data.org || "",
+              as: resp3.data.org || "",
+              asName: resp3.data.org || "",
+              reverse: resp3.data.hostname || "",
+              mobile: false,
+              proxy: false,
+              hosting: false,
+            };
+          }
+        } catch (e: any) {
+          console.error("[WHOIS] ipinfo.io 실패:", e.message);
+        }
+      }
+
+      if (!whoisData) {
+        return res.status(500).json({ message: "모든 WHOIS API 조회에 실패했습니다. 잠시 후 다시 시도해주세요." });
+      }
+
+      res.json(whoisData);
     } catch (error: any) {
       console.error("[WHOIS Error]:", error.message);
       res.status(500).json({ message: error.message || "WHOIS 조회 실패" });

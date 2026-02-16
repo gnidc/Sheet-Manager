@@ -373,7 +373,7 @@ export default function SecurityAudit() {
     setWhoisError(null);
     setWhoisData(null);
     try {
-      const res = await apiRequest("GET", `/api/admin/security/whois/${ip}`);
+      const res = await apiRequest("GET", `/api/admin/security/whois?ip=${encodeURIComponent(ip)}`);
       const data = await res.json();
       setWhoisData(data);
     } catch (error: any) {
