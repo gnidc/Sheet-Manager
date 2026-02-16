@@ -7,6 +7,16 @@ import axios from "axios";
 const KIWOOM_REAL_URL = "https://api.kiwoom.com";
 const KIWOOM_MOCK_URL = "https://mockapi.kiwoom.com";
 
+// ========== 키움 API ID (tr_id에 해당) ==========
+// 각 API 요청마다 해당 api-id 헤더가 필수
+const API_ID = {
+  BALANCE: "kt00003",      // 추정자산 (잔고조회)
+  ACCOUNT_EVAL: "kt00004", // 계좌평가
+  EXEC_BALANCE: "kt00005", // 체결잔고
+  ORDER: "kt00001",        // 주문
+  ORDER_LIST: "kt00006",   // 주문내역
+} as const;
+
 /** 모의/실전에 따른 base URL 반환 */
 function getBaseUrl(mockTrading: boolean): string {
   return mockTrading ? KIWOOM_MOCK_URL : KIWOOM_REAL_URL;
@@ -24,7 +34,7 @@ export interface UserKiwoomCredentials {
 const userTokenCache = new Map<number, { token: string; expiresAt: number }>();
 
 /** 키움 액세스 토큰 발급 */
-async function getKiwoomToken(userId: number, creds: UserKiwoomCredentials): Promise<string> {
+export async function getKiwoomToken(userId: number, creds: UserKiwoomCredentials): Promise<string> {
   const cached = userTokenCache.get(userId);
   if (cached && Date.now() < cached.expiresAt - 60000) {
     return cached.token;
@@ -79,6 +89,13 @@ async function getKiwoomToken(userId: number, creds: UserKiwoomCredentials): Pro
   }
 }
 
+/** 토큰 만료 시간 조회 */
+export function getTokenExpiresAt(userId: number): string | null {
+  const cached = userTokenCache.get(userId);
+  if (!cached) return null;
+  return new Date(cached.expiresAt).toISOString();
+}
+
 /** 키움 사용자 인증정보 검증 */
 export async function validateUserCredentials(
   userId: number,
@@ -101,6 +118,17 @@ export function getUserTradingStatus(creds: UserKiwoomCredentials) {
     mockTrading: creds.mockTrading,
     accountNo: creds.accountNo ? creds.accountNo.slice(0, 4) + "****" : "",
     accountProductCd: "",
+  };
+}
+
+/** 공통 키움 API 헤더 생성 */
+function makeKiwoomHeaders(token: string, creds: UserKiwoomCredentials, apiId: string) {
+  return {
+    "Content-Type": "application/json;charset=UTF-8",
+    authorization: `Bearer ${token}`,
+    appkey: creds.appKey,
+    appsecretkey: creds.appSecret,
+    "api-id": apiId,
   };
 }
 
@@ -158,7 +186,7 @@ export interface OrderHistoryItem {
   orderStatus: string;
 }
 
-/** 키움 계좌 잔고 조회 */
+/** 키움 계좌 잔고 조회 (POST + api-id 헤더 필수) */
 export async function getUserAccountBalance(
   userId: number,
   creds: UserKiwoomCredentials
@@ -170,62 +198,59 @@ export async function getUserAccountBalance(
   const token = await getKiwoomToken(userId, creds);
   const baseUrl = getBaseUrl(creds.mockTrading);
 
-  // 키움 REST API 잔고조회 엔드포인트
-  // 공식 문서: https://openapi.kiwoom.com → 국내주식 → 잔고조회
+  // 키움 REST API 잔고조회: POST /api/dostk/acntbal
+  // 필수 헤더: api-id: kt00003 (추정자산)
   const balanceUrl = `${baseUrl}/api/dostk/acntbal`;
-  console.log(`[Kiwoom] Balance request: ${balanceUrl}, accountNo: ${creds.accountNo?.slice(0,4)}****, mock: ${creds.mockTrading}`);
+  console.log(`[Kiwoom] Balance request: POST ${balanceUrl}, api-id: ${API_ID.BALANCE}, accountNo: ${creds.accountNo?.slice(0,4)}****, mock: ${creds.mockTrading}`);
 
   try {
-    const response = await axios.get(
+    const response = await axios.post(
       balanceUrl,
       {
-        headers: {
-          "Content-Type": "application/json;charset=UTF-8",
-          authorization: `Bearer ${token}`,
-          appkey: creds.appKey,
-          appsecretkey: creds.appSecret,
-        },
-        params: {
-          acnt_no: creds.accountNo,
-          cost_icld_yn: "Y",
-        },
+        acnt_no: creds.accountNo,
+      },
+      {
+        headers: makeKiwoomHeaders(token, creds, API_ID.BALANCE),
         timeout: 15000,
       }
     );
 
     const data = response.data;
-    console.log(`[Kiwoom] Balance response keys:`, Object.keys(data), `return_code:`, data.return_code, `rt_cd:`, data.rt_cd);
+    console.log(`[Kiwoom] Balance response keys:`, Object.keys(data), `return_code:`, data.return_code, `return_msg:`, data.return_msg);
 
     if (data.return_code !== 0 && data.return_code !== "0" && data.rt_cd !== "0") {
       console.error(`[Kiwoom] Balance API error:`, JSON.stringify(data));
       throw new Error(data.return_msg || data.msg1 || "잔고 조회 실패");
     }
 
-    const outputList = data.output || data.output1 || [];
-    const summaryData = data.output2?.[0] || data.summary || {};
+    // 응답 구조 전체 로깅 (디버깅용)
+    console.log(`[Kiwoom] Balance full response:`, JSON.stringify(data).slice(0, 1000));
+
+    const outputList = data.output || data.output1 || data.acnt_list || [];
+    const summaryData = data.output2?.[0] || data.summary || data;
 
     const holdings: HoldingItem[] = (Array.isArray(outputList) ? outputList : [])
-      .filter((item: any) => parseInt(item.holdqty || item.hldg_qty || "0") > 0)
+      .filter((item: any) => parseInt(item.holdqty || item.hldg_qty || item.hold_qty || "0") > 0)
       .map((item: any) => ({
-        stockCode: item.stk_cd || item.pdno || "",
-        stockName: item.stk_nm || item.prdt_name || "",
-        holdingQty: parseInt(item.holdqty || item.hldg_qty || "0"),
-        avgBuyPrice: parseFloat(item.avg_buy_prc || item.pchs_avg_pric || "0"),
-        currentPrice: parseInt(item.cur_prc || item.prpr || "0"),
+        stockCode: item.stk_cd || item.pdno || item.stock_cd || "",
+        stockName: item.stk_nm || item.prdt_name || item.stock_nm || "",
+        holdingQty: parseInt(item.holdqty || item.hldg_qty || item.hold_qty || "0"),
+        avgBuyPrice: parseFloat(item.avg_buy_prc || item.pchs_avg_pric || item.avg_prc || "0"),
+        currentPrice: parseInt(item.cur_prc || item.prpr || item.now_prc || "0"),
         evalAmount: parseInt(item.eval_amt || item.evlu_amt || "0"),
-        evalProfitLoss: parseInt(item.eval_pfls || item.evlu_pfls_amt || "0"),
-        evalProfitRate: parseFloat(item.eval_pfls_rt || item.evlu_pfls_rt || "0"),
+        evalProfitLoss: parseInt(item.eval_pfls || item.evlu_pfls_amt || item.pfls_amt || "0"),
+        evalProfitRate: parseFloat(item.eval_pfls_rt || item.evlu_pfls_rt || item.pfls_rt || "0"),
         buyAmount: parseInt(item.buy_amt || item.pchs_amt || "0"),
       }));
 
-    const totalBuyAmount = parseInt(summaryData.tot_buy_amt || summaryData.pchs_amt_smtl_amt || "0");
-    const totalEvalAmount = parseInt(summaryData.tot_eval_amt || summaryData.evlu_amt_smtl_amt || "0");
+    const totalBuyAmount = parseInt(summaryData.tot_buy_amt || summaryData.pchs_amt_smtl_amt || summaryData.buy_amt || "0");
+    const totalEvalAmount = parseInt(summaryData.tot_eval_amt || summaryData.evlu_amt_smtl_amt || summaryData.eval_amt || "0");
 
     const summary: BalanceSummary = {
-      depositAmount: parseInt(summaryData.deposit_amt || summaryData.dnca_tot_amt || "0"),
-      totalEvalAmount: parseInt(summaryData.tot_asset_amt || summaryData.tot_evlu_amt || "0"),
+      depositAmount: parseInt(summaryData.deposit_amt || summaryData.dnca_tot_amt || summaryData.dps_amt || "0"),
+      totalEvalAmount: parseInt(summaryData.tot_asset_amt || summaryData.tot_evlu_amt || summaryData.est_amt || "0"),
       totalBuyAmount,
-      totalEvalProfitLoss: parseInt(summaryData.tot_eval_pfls || summaryData.evlu_pfls_smtl_amt || "0"),
+      totalEvalProfitLoss: parseInt(summaryData.tot_eval_pfls || summaryData.evlu_pfls_smtl_amt || summaryData.pfls_amt || "0"),
       totalEvalProfitRate: totalBuyAmount > 0
         ? ((totalEvalAmount - totalBuyAmount) / totalBuyAmount) * 100
         : 0,
@@ -246,7 +271,7 @@ export async function getUserAccountBalance(
   }
 }
 
-/** 키움 주문 */
+/** 키움 주문 (POST + api-id 헤더 필수) */
 export async function userPlaceOrder(
   userId: number,
   creds: UserKiwoomCredentials,
@@ -273,12 +298,7 @@ export async function userPlaceOrder(
       `${baseUrl}/api/dostk/order`,
       body,
       {
-        headers: {
-          "Content-Type": "application/json;charset=UTF-8",
-          authorization: `Bearer ${token}`,
-          appkey: creds.appKey,
-          appsecretkey: creds.appSecret,
-        },
+        headers: makeKiwoomHeaders(token, creds, API_ID.ORDER),
         timeout: 15000,
       }
     );
@@ -303,7 +323,7 @@ export async function userPlaceOrder(
   }
 }
 
-/** 키움 주문 내역 조회 */
+/** 키움 주문 내역 조회 (POST + api-id 헤더 필수) */
 export async function getUserOrderHistory(
   userId: number,
   creds: UserKiwoomCredentials,
@@ -331,20 +351,15 @@ export async function getUserOrderHistory(
   })();
 
   try {
-    const response = await axios.get(
+    const response = await axios.post(
       `${baseUrl}/api/dostk/orderlist`,
       {
-        headers: {
-          "Content-Type": "application/json;charset=UTF-8",
-          authorization: `Bearer ${token}`,
-          appkey: creds.appKey,
-          appsecretkey: creds.appSecret,
-        },
-        params: {
-          acnt_no: creds.accountNo,
-          start_dt: start,
-          end_dt: end,
-        },
+        acnt_no: creds.accountNo,
+        start_dt: start,
+        end_dt: end,
+      },
+      {
+        headers: makeKiwoomHeaders(token, creds, API_ID.ORDER_LIST),
         timeout: 15000,
       }
     );
