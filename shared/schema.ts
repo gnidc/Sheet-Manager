@@ -504,9 +504,10 @@ export const userAiConfigs = pgTable("user_ai_configs", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull(),             // 유저당 복수 등록 가능
   label: text("label").default("기본"),              // API 별칭
-  aiProvider: text("ai_provider").default("gemini"),    // "gemini" | "openai"
+  aiProvider: text("ai_provider").default("gemini"),    // "gemini" | "openai" | "groq"
   geminiApiKey: text("gemini_api_key"),
   openaiApiKey: text("openai_api_key"),
+  groqApiKey: text("groq_api_key"),
   useOwnKey: boolean("use_own_key").default(true),
   isActive: boolean("is_active").default(false),     // 현재 활성 API 여부
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),

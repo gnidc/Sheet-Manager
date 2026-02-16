@@ -36,8 +36,10 @@ interface AiConfigItem {
   aiProvider: string;
   hasGeminiKey: boolean;
   hasOpenaiKey: boolean;
+  hasGroqKey: boolean;
   geminiApiKey: string | null;
   openaiApiKey: string | null;
+  groqApiKey: string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -438,13 +440,14 @@ function AiApiSection() {
                       <span className="text-sm font-medium truncate">{c.label}</span>
                       {c.isActive && <Badge variant="outline" className="text-[9px] px-1 py-0 border-purple-400 text-purple-600">활성</Badge>}
                       <Badge variant="secondary" className="text-[9px] px-1 py-0">
-                        {c.aiProvider === "openai" ? "OpenAI" : "Gemini"}
+                        {c.aiProvider === "openai" ? "OpenAI" : c.aiProvider === "groq" ? "Groq" : "Gemini"}
                       </Badge>
                     </div>
                     <p className="text-[11px] text-muted-foreground mt-0.5">
                       {c.hasGeminiKey && <span className="mr-2">Gemini ✓</span>}
-                      {c.hasOpenaiKey && <span>OpenAI ✓</span>}
-                      {!c.hasGeminiKey && !c.hasOpenaiKey && "키 미등록"}
+                      {c.hasOpenaiKey && <span className="mr-2">OpenAI ✓</span>}
+                      {c.hasGroqKey && <span className="mr-2">Groq ✓</span>}
+                      {!c.hasGeminiKey && !c.hasOpenaiKey && !c.hasGroqKey && "키 미등록"}
                     </p>
                   </div>
                 </div>
@@ -480,6 +483,7 @@ function AiConfigDialog({ open, onClose, editConfig }: { open: boolean; onClose:
   const [aiProvider, setAiProvider] = useState(editConfig?.aiProvider || "gemini");
   const [geminiApiKey, setGeminiApiKey] = useState("");
   const [openaiApiKey, setOpenaiApiKey] = useState("");
+  const [groqApiKey, setGroqApiKey] = useState("");
 
   const isEdit = !!editConfig;
 
@@ -505,13 +509,14 @@ function AiConfigDialog({ open, onClose, editConfig }: { open: boolean; onClose:
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isEdit && !geminiApiKey && !openaiApiKey) {
-      toast({ title: "입력 오류", description: "Gemini 또는 OpenAI API 키를 하나 이상 입력하세요", variant: "destructive" });
+    if (!isEdit && !geminiApiKey && !openaiApiKey && !groqApiKey) {
+      toast({ title: "입력 오류", description: "Gemini, OpenAI 또는 Groq API 키를 하나 이상 입력하세요", variant: "destructive" });
       return;
     }
     const data: any = { label: label || "기본", aiProvider };
     if (geminiApiKey) data.geminiApiKey = geminiApiKey;
     if (openaiApiKey) data.openaiApiKey = openaiApiKey;
+    if (groqApiKey) data.groqApiKey = groqApiKey;
     mutation.mutate(data);
   };
 
@@ -541,6 +546,9 @@ function AiConfigDialog({ open, onClose, editConfig }: { open: boolean; onClose:
               <Button type="button" variant={aiProvider === "openai" ? "default" : "outline"} size="sm" className="flex-1 text-xs h-8" onClick={() => setAiProvider("openai")}>
                 OpenAI
               </Button>
+              <Button type="button" variant={aiProvider === "groq" ? "default" : "outline"} size="sm" className="flex-1 text-xs h-8" onClick={() => setAiProvider("groq")}>
+                Groq
+              </Button>
             </div>
           </div>
           <div className="space-y-1.5">
@@ -551,13 +559,21 @@ function AiConfigDialog({ open, onClose, editConfig }: { open: boolean; onClose:
             <Label className="text-xs">OpenAI API 키</Label>
             <Input value={openaiApiKey} onChange={(e) => setOpenaiApiKey(e.target.value)} placeholder={isEdit && editConfig?.hasOpenaiKey ? "등록됨 (변경 시 입력)" : "sk-proj-..."} className="font-mono text-sm h-9" />
           </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Groq API 키</Label>
+            <Input value={groqApiKey} onChange={(e) => setGroqApiKey(e.target.value)} placeholder={isEdit && editConfig?.hasGroqKey ? "등록됨 (변경 시 입력)" : "gsk_..."} className="font-mono text-sm h-9" />
+          </div>
           <div className="text-center text-[11px] text-muted-foreground">
             <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-0.5">
-              Gemini API 키 발급 <ExternalLink className="w-2.5 h-2.5" />
+              Gemini <ExternalLink className="w-2.5 h-2.5" />
             </a>
             {" · "}
             <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-0.5">
-              OpenAI API 키 발급 <ExternalLink className="w-2.5 h-2.5" />
+              OpenAI <ExternalLink className="w-2.5 h-2.5" />
+            </a>
+            {" · "}
+            <a href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-0.5">
+              Groq <ExternalLink className="w-2.5 h-2.5" />
             </a>
           </div>
           <DialogFooter>

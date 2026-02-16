@@ -19,30 +19,37 @@ const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "kwonjs77@gmail.com").split(",
 
 // AI API: Gemini 네이티브 REST API 또는 OpenAI
 interface UserAiKeyOption {
-  provider?: string;     // "gemini" | "openai"
+  provider?: string;     // "gemini" | "openai" | "groq"
   geminiApiKey?: string;
   openaiApiKey?: string;
+  groqApiKey?: string;
 }
 
 async function callAI(prompt: string, userKey?: UserAiKeyOption): Promise<string> {
   // 사용자 키가 있으면 우선 사용, 없으면 서버 기본 키 사용
   let geminiKey: string | undefined;
   let openaiKey: string | undefined;
+  let groqKey: string | undefined;
 
   if (userKey) {
-    if (userKey.provider === "openai" && userKey.openaiApiKey) {
+    if (userKey.provider === "groq" && userKey.groqApiKey) {
+      groqKey = userKey.groqApiKey;
+    } else if (userKey.provider === "openai" && userKey.openaiApiKey) {
       openaiKey = userKey.openaiApiKey;
     } else if (userKey.geminiApiKey) {
       geminiKey = userKey.geminiApiKey;
     } else if (userKey.openaiApiKey) {
       openaiKey = userKey.openaiApiKey;
+    } else if (userKey.groqApiKey) {
+      groqKey = userKey.groqApiKey;
     }
   }
 
   // 사용자 키가 없으면 서버 기본 키 사용
-  if (!geminiKey && !openaiKey) {
+  if (!geminiKey && !openaiKey && !groqKey) {
     geminiKey = process.env.GEMINI_API_KEY;
     openaiKey = process.env.OPENAI_API_KEY;
+    groqKey = process.env.GROQ_API_KEY;
   }
 
   if (geminiKey) {
@@ -97,7 +104,46 @@ async function callAI(prompt: string, userKey?: UserAiKeyOption): Promise<string
     return completion.choices[0]?.message?.content || "분석 생성에 실패했습니다.";
   }
 
-  throw new Error("AI API 키가 설정되지 않았습니다. 설정에서 Gemini 또는 OpenAI API 키를 등록해주세요.");
+  if (groqKey) {
+    // Groq API (OpenAI 호환 인터페이스)
+    const maxRetries = 3;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const res = await axios.post("https://api.groq.com/openai/v1/chat/completions", {
+          model: "llama-3.3-70b-versatile",
+          messages: [{ role: "user", content: prompt }],
+          max_tokens: 4096,
+          temperature: 0.7,
+        }, {
+          headers: {
+            "Authorization": `Bearer ${groqKey}`,
+            "Content-Type": "application/json",
+          },
+          timeout: 60000,
+        });
+        const content = res.data?.choices?.[0]?.message?.content;
+        if (!content) throw new Error("Groq AI 응답이 비어있습니다.");
+        return content;
+      } catch (err: any) {
+        if (err.response?.status === 429 && attempt < maxRetries) {
+          const retryAfter = parseInt(err.response?.headers?.["retry-after"]) || 5;
+          console.log(`[AI/Groq] Rate limited, retrying in ${retryAfter}s (attempt ${attempt}/${maxRetries})...`);
+          await new Promise(r => setTimeout(r, retryAfter * 1000));
+          continue;
+        }
+        if (err.response?.status === 429) {
+          throw new Error("Groq API 할당량 초과. 잠시 후 다시 시도하세요.");
+        }
+        if (err.response?.status === 401) {
+          throw new Error("Groq API 키가 유효하지 않습니다. 키를 확인해주세요.");
+        }
+        throw err;
+      }
+    }
+    throw new Error("Groq API 최대 재시도 횟수 초과");
+  }
+
+  throw new Error("AI API 키가 설정되지 않았습니다. 설정에서 Gemini, OpenAI 또는 Groq API 키를 등록해주세요.");
 }
 
 // 환경 변수 확인 (최소 로깅 - 민감 정보 제외)
@@ -221,6 +267,7 @@ async function ensureSecurityTables() {
       await db.execute(sql`ALTER TABLE user_trading_configs ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT false`);
       await db.execute(sql`ALTER TABLE user_ai_configs ADD COLUMN IF NOT EXISTS label TEXT DEFAULT '기본'`);
       await db.execute(sql`ALTER TABLE user_ai_configs ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT false`);
+      await db.execute(sql`ALTER TABLE user_ai_configs ADD COLUMN IF NOT EXISTS groq_api_key TEXT`);
       // unique 제약 조건 제거 (멀티 API 지원)
       await db.execute(sql`ALTER TABLE user_trading_configs DROP CONSTRAINT IF EXISTS user_trading_configs_user_id_unique`);
       await db.execute(sql`ALTER TABLE user_ai_configs DROP CONSTRAINT IF EXISTS user_ai_configs_user_id_unique`);
@@ -578,11 +625,13 @@ export async function registerRoutes(
     if (!config?.useOwnKey) return undefined;
     const gKey = config.geminiApiKey ? decrypt(config.geminiApiKey) : undefined;
     const oKey = config.openaiApiKey ? decrypt(config.openaiApiKey) : undefined;
-    if (!gKey && !oKey) return undefined;
+    const qKey = config.groqApiKey ? decrypt(config.groqApiKey) : undefined;
+    if (!gKey && !oKey && !qKey) return undefined;
     return {
       provider: config.aiProvider || "gemini",
       geminiApiKey: gKey,
       openaiApiKey: oKey,
+      groqApiKey: qKey,
     };
   }
 
@@ -858,8 +907,10 @@ export async function registerRoutes(
         aiProvider: c.aiProvider,
         hasGeminiKey: !!c.geminiApiKey,
         hasOpenaiKey: !!c.openaiApiKey,
+        hasGroqKey: !!c.groqApiKey,
         geminiApiKey: maskApiKey(c.geminiApiKey),
         openaiApiKey: maskApiKey(c.openaiApiKey),
+        groqApiKey: maskApiKey(c.groqApiKey),
         isActive: c.isActive,
         createdAt: c.createdAt,
         updatedAt: c.updatedAt,
@@ -877,17 +928,18 @@ export async function registerRoutes(
       if (!userId) return res.status(400).json({ message: "로그인 필요" });
 
       const existing = await storage.getUserAiConfigs(userId);
-      if (existing.length >= 3) {
-        return res.status(400).json({ message: "최대 3개까지 등록할 수 있습니다" });
+      if (existing.length >= 5) {
+        return res.status(400).json({ message: "최대 5개까지 등록할 수 있습니다" });
       }
 
-      const { label, aiProvider, geminiApiKey, openaiApiKey } = req.body;
+      const { label, aiProvider, geminiApiKey, openaiApiKey, groqApiKey } = req.body;
       const config = await storage.createAiConfig({
         userId,
         label: label || "기본",
         aiProvider: aiProvider || "gemini",
         geminiApiKey: geminiApiKey ? encrypt(geminiApiKey) : null,
         openaiApiKey: openaiApiKey ? encrypt(openaiApiKey) : null,
+        groqApiKey: groqApiKey ? encrypt(groqApiKey) : null,
         useOwnKey: true,
       });
 
@@ -904,12 +956,13 @@ export async function registerRoutes(
       if (!userId) return res.status(400).json({ message: "로그인 필요" });
       const configId = parseInt(req.params.id);
 
-      const { label, aiProvider, geminiApiKey, openaiApiKey } = req.body;
+      const { label, aiProvider, geminiApiKey, openaiApiKey, groqApiKey } = req.body;
       const updates: any = { updatedAt: new Date() };
       if (label !== undefined) updates.label = label;
       if (aiProvider !== undefined) updates.aiProvider = aiProvider;
       if (geminiApiKey !== undefined) updates.geminiApiKey = geminiApiKey ? encrypt(geminiApiKey) : null;
       if (openaiApiKey !== undefined) updates.openaiApiKey = openaiApiKey ? encrypt(openaiApiKey) : null;
+      if (groqApiKey !== undefined) updates.groqApiKey = groqApiKey ? encrypt(groqApiKey) : null;
 
       const updated = await storage.updateAiConfig(configId, userId, updates);
       if (!updated) return res.status(404).json({ message: "설정을 찾을 수 없습니다" });
@@ -5302,8 +5355,10 @@ ${newsInfo || "(조회 불가)"}
           ...config,
           geminiApiKey: maskApiKey(config.geminiApiKey),
           openaiApiKey: maskApiKey(config.openaiApiKey),
+          groqApiKey: maskApiKey(config.groqApiKey),
           hasGeminiKey: !!config.geminiApiKey,
           hasOpenaiKey: !!config.openaiApiKey,
+          hasGroqKey: !!config.groqApiKey,
         }
       });
     } catch (error: any) {
@@ -5316,12 +5371,13 @@ ${newsInfo || "(조회 불가)"}
     try {
       const userId = (req as any).session?.userId;
       if (!userId) return res.status(401).json({ message: "로그인이 필요합니다" });
-      const { aiProvider, geminiApiKey, openaiApiKey } = req.body;
+      const { aiProvider, geminiApiKey, openaiApiKey, groqApiKey } = req.body;
       const config = await storage.upsertUserAiConfig({
         userId,
         aiProvider: aiProvider || "gemini",
         geminiApiKey: geminiApiKey ? encrypt(geminiApiKey) : null,
         openaiApiKey: openaiApiKey ? encrypt(openaiApiKey) : null,
+        groqApiKey: groqApiKey ? encrypt(groqApiKey) : null,
         useOwnKey: true,
       });
       res.json({
@@ -5330,8 +5386,10 @@ ${newsInfo || "(조회 불가)"}
           ...config,
           geminiApiKey: maskApiKey(config.geminiApiKey),
           openaiApiKey: maskApiKey(config.openaiApiKey),
+          groqApiKey: maskApiKey(config.groqApiKey),
           hasGeminiKey: !!config.geminiApiKey,
           hasOpenaiKey: !!config.openaiApiKey,
+          hasGroqKey: !!config.groqApiKey,
         }
       });
     } catch (error: any) {
@@ -5342,12 +5400,13 @@ ${newsInfo || "(조회 불가)"}
   // AI API 키 테스트 (로그인 필수)
   app.post("/api/user/ai-config/test", requireUser, async (req, res) => {
     try {
-      const { aiProvider, geminiApiKey, openaiApiKey } = req.body;
+      const { aiProvider, geminiApiKey, openaiApiKey, groqApiKey } = req.body;
       const testPrompt = "안녕하세요. 이것은 API 키 테스트입니다. '키 테스트 성공'이라고 한 줄만 응답해주세요.";
       const userKey: UserAiKeyOption = {
         provider: aiProvider,
         geminiApiKey,
         openaiApiKey,
+        groqApiKey,
       };
       const result = await callAI(testPrompt, userKey);
       res.json({ success: true, message: "API 키가 정상적으로 작동합니다.", response: result.slice(0, 100) });

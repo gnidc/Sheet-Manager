@@ -1263,7 +1263,7 @@ export default function AiAgent({ isAdmin, onNavigate, compact = false }: { isAd
             )}
             {hasApiKey && (
               <div className="text-xs text-green-600 bg-green-50 dark:bg-green-950/20 dark:text-green-400 rounded p-2">
-                ✅ 현재 {aiConfig?.aiProvider === "openai" ? "OpenAI" : "Gemini"} API 키가 등록되어 있습니다.
+                ✅ 현재 {aiConfig?.aiProvider === "openai" ? "OpenAI" : aiConfig?.aiProvider === "groq" ? "Groq" : "Gemini"} API 키가 등록되어 있습니다.
               </div>
             )}
             <div className="flex gap-2 justify-end">
