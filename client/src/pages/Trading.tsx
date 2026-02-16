@@ -97,6 +97,7 @@ interface TradingStatus {
   accountNo: string;
   accountProductCd: string;
   needsSetup?: boolean; // 일반 유저가 인증정보 미등록 시
+  broker?: string; // "kis" | "kiwoom"
 }
 
 interface TradingConfig {
@@ -240,8 +241,12 @@ export default function Trading() {
                 <Zap className="w-6 h-6 text-amber-500" />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-foreground tracking-tight">KIS 자동매매</h1>
-                <p className="text-xs text-muted-foreground">한국투자증권 API 자동매매 시스템</p>
+                <h1 className="text-xl font-bold text-foreground tracking-tight">
+                  {status?.broker === "kiwoom" ? "키움 자동매매" : "KIS 자동매매"}
+                </h1>
+                <p className="text-xs text-muted-foreground">
+                  {status?.broker === "kiwoom" ? "키움증권 REST API 자동매매 시스템" : "한국투자증권 API 자동매매 시스템"}
+                </p>
               </div>
             </div>
             

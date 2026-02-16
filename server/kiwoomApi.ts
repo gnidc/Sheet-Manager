@@ -170,9 +170,14 @@ export async function getUserAccountBalance(
   const token = await getKiwoomToken(userId, creds);
   const baseUrl = getBaseUrl(creds.mockTrading);
 
+  // 키움 REST API 잔고조회 엔드포인트
+  // 공식 문서: https://openapi.kiwoom.com → 국내주식 → 잔고조회
+  const balanceUrl = `${baseUrl}/api/dostk/acntbal`;
+  console.log(`[Kiwoom] Balance request: ${balanceUrl}, accountNo: ${creds.accountNo?.slice(0,4)}****, mock: ${creds.mockTrading}`);
+
   try {
     const response = await axios.get(
-      `${baseUrl}/api/dostk/acntbal`,
+      balanceUrl,
       {
         headers: {
           "Content-Type": "application/json;charset=UTF-8",
@@ -189,7 +194,10 @@ export async function getUserAccountBalance(
     );
 
     const data = response.data;
+    console.log(`[Kiwoom] Balance response keys:`, Object.keys(data), `return_code:`, data.return_code, `rt_cd:`, data.rt_cd);
+
     if (data.return_code !== 0 && data.return_code !== "0" && data.rt_cd !== "0") {
+      console.error(`[Kiwoom] Balance API error:`, JSON.stringify(data));
       throw new Error(data.return_msg || data.msg1 || "잔고 조회 실패");
     }
 
@@ -226,9 +234,14 @@ export async function getUserAccountBalance(
     return { holdings, summary };
   } catch (error: any) {
     if (error.response) {
-      console.error("[Kiwoom] Balance error:", error.response.data);
-      throw new Error(error.response.data?.return_msg || error.response.data?.msg1 || "키움 잔고 조회 실패");
+      console.error(`[Kiwoom] Balance HTTP ${error.response.status}:`, JSON.stringify(error.response.data)?.slice(0, 500));
+      // HTML 응답 (404 등)인 경우 명확한 메시지
+      if (typeof error.response.data === 'string' && error.response.data.includes('<!') || error.response.status === 404) {
+        throw new Error(`키움 잔고조회 API 호출 실패 (HTTP ${error.response.status}). 엔드포인트를 확인하세요.`);
+      }
+      throw new Error(error.response.data?.return_msg || error.response.data?.msg1 || `키움 잔고 조회 실패 (${error.response.status})`);
     }
+    console.error(`[Kiwoom] Balance network error:`, error.message);
     throw error;
   }
 }

@@ -1197,6 +1197,30 @@ export async function registerRoutes(
     });
   });
 
+  // 키움 API 진단 (admin 전용)
+  app.get("/api/trading/kiwoom-diagnose", requireAdmin, async (req, res) => {
+    try {
+      const tradingUserId = getTradingUserId(req)!;
+      const config = await storage.getUserTradingConfig(tradingUserId);
+      if (!config || (config as any).broker !== "kiwoom") {
+        return res.json({ message: "활성 키움 API 설정이 없습니다", hasKiwoomConfig: false });
+      }
+      const creds = decryptKiwoomCreds(config);
+      // 토큰 발급 테스트
+      const tokenResult = await kiwoomApi.validateUserCredentials(tradingUserId, creds);
+      res.json({
+        hasKiwoomConfig: true,
+        accountNo: creds.accountNo?.slice(0,4) + "****",
+        mockTrading: creds.mockTrading,
+        baseUrl: creds.mockTrading ? "mockapi.kiwoom.com" : "api.kiwoom.com",
+        tokenValid: tokenResult.success,
+        tokenMessage: tokenResult.message,
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // 자동매매 API 연결 상태
   app.get("/api/trading/status", requireUser, async (req, res) => {
     try {
