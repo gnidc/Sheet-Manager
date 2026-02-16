@@ -9684,10 +9684,10 @@ ${etfListStr}
     }
   });
 
-  // IP WHOIS 조회 (admin only) - query parameter 방식
-  app.get("/api/admin/security/whois", requireAdmin, async (req, res) => {
+  // IP WHOIS 조회 (admin only) - query/path 양쪽 지원
+  const whoisHandler = async (req: any, res: any) => {
     try {
-      const ip = req.query.ip as string;
+      const ip = (req.query.ip as string) || (req.params.ip as string);
       if (!ip) {
         return res.status(400).json({ message: "IP 주소를 지정해주세요 (?ip=x.x.x.x)" });
       }
@@ -9810,7 +9810,9 @@ ${etfListStr}
       console.error("[WHOIS Error]:", error.message);
       res.status(500).json({ message: error.message || "WHOIS 조회 실패" });
     }
-  });
+  };
+  app.get("/api/admin/security/whois", requireAdmin, whoisHandler);
+  app.get("/api/admin/security/whois/:ip", requireAdmin, whoisHandler);
 
   // ========== AI Agent 시스템 ==========
 
