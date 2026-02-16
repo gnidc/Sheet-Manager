@@ -10,7 +10,7 @@ const Trading = lazy(() => import("@/pages/Trading"));
 
 type MobileMode = "select" | "ai-agent" | "etf" | "trading";
 
-function AiMobileContent() {
+export function AiMobileContent() {
   const { isAdmin, isLoggedIn, userName, userEmail, logout, isLoggingOut } = useAuth();
   const [installPrompt, setInstallPrompt] = useState<any>(null);
   const [mode, setMode] = useState<MobileMode>("select");

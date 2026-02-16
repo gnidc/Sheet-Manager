@@ -679,7 +679,7 @@ export default function Home() {
           {isAdmin && (
           <TabsContent value="mobile-preview">
             <Suspense fallback={<ContentSkeleton />}>
-              <MobilePreview isAdmin={isAdmin} />
+              <MobilePreview />
             </Suspense>
           </TabsContent>
           )}
