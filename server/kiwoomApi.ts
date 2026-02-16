@@ -209,6 +209,7 @@ export async function getUserAccountBalance(
       balanceUrl,
       {
         acnt_no: creds.accountNo,
+        qry_tp: "0", // 필수: 조회구분 (0: 전체)
       },
       {
         headers: makeKiwoomHeaders(token, creds, API_ID.BALANCE),
@@ -227,6 +228,9 @@ export async function getUserAccountBalance(
     // 응답 구조 전체 로깅 (디버깅용)
     console.log(`[Kiwoom] Balance full response:`, JSON.stringify(data).slice(0, 1000));
 
+    // kt00003 추정자산 응답 필드:
+    // prsm_dpst_aset_amt: 추정예탁자산금액 (예: "000010000000" = 1천만원)
+    // 보유종목 목록이 있을 경우 output/output1/acnt_list 등에서 추출
     const outputList = data.output || data.output1 || data.acnt_list || [];
     const summaryData = data.output2?.[0] || data.summary || data;
 
@@ -244,12 +248,15 @@ export async function getUserAccountBalance(
         buyAmount: parseInt(item.buy_amt || item.pchs_amt || "0"),
       }));
 
+    // 추정자산 금액 파싱 (kt00003 응답의 핵심 필드)
+    const estimatedAsset = parseInt(data.prsm_dpst_aset_amt || "0");
+
     const totalBuyAmount = parseInt(summaryData.tot_buy_amt || summaryData.pchs_amt_smtl_amt || summaryData.buy_amt || "0");
     const totalEvalAmount = parseInt(summaryData.tot_eval_amt || summaryData.evlu_amt_smtl_amt || summaryData.eval_amt || "0");
 
     const summary: BalanceSummary = {
-      depositAmount: parseInt(summaryData.deposit_amt || summaryData.dnca_tot_amt || summaryData.dps_amt || "0"),
-      totalEvalAmount: parseInt(summaryData.tot_asset_amt || summaryData.tot_evlu_amt || summaryData.est_amt || "0"),
+      depositAmount: parseInt(summaryData.deposit_amt || summaryData.dnca_tot_amt || summaryData.dps_amt || data.prsm_dpst_aset_amt || "0"),
+      totalEvalAmount: estimatedAsset || parseInt(summaryData.tot_asset_amt || summaryData.tot_evlu_amt || summaryData.est_amt || "0"),
       totalBuyAmount,
       totalEvalProfitLoss: parseInt(summaryData.tot_eval_pfls || summaryData.evlu_pfls_smtl_amt || summaryData.pfls_amt || "0"),
       totalEvalProfitRate: totalBuyAmount > 0
