@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Plus, ExternalLink, TrendingUp, Globe, Loader2, Star, Newspaper, FileText, Trash2, Pencil, Scale, Zap, ChevronDown, Calendar, Home as HomeIcon, Search, X, Eye, ChevronLeft, ChevronRight, PenSquare, Send, LogIn, LogOut, Bell, BellRing, MessageCircle, Heart, UserPlus, FileEdit, BarChart3, Bot, Moon, Sun, PanelLeftClose, PanelLeft, Smartphone, Download } from "lucide-react";
+import { Plus, ExternalLink, TrendingUp, Globe, Loader2, Star, Newspaper, FileText, Trash2, Pencil, Scale, Zap, ChevronDown, Calendar, Home as HomeIcon, Search, X, Eye, ChevronLeft, ChevronRight, PenSquare, Send, LogIn, LogOut, Bell, BellRing, MessageCircle, Heart, UserPlus, FileEdit, BarChart3, Bot, Moon, Sun, PanelLeftClose, PanelLeft, Smartphone, Download, Users } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -71,6 +71,25 @@ export default function Home() {
   const { toast } = useToast();
   const { isAdmin, isLoggedIn } = useAuth();
 
+  // Admin: 가입사용자 수 / 활성사용자 수 조회
+  const { data: adminUsers } = useQuery<any[]>({
+    queryKey: ["/api/admin/users"],
+    enabled: isAdmin,
+    staleTime: 60 * 1000,
+  });
+  const { data: adminStats } = useQuery<any>({
+    queryKey: ["/api/admin/dashboard/stats", { days: 1 }],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/dashboard/stats?days=1", { credentials: "include" });
+      if (!res.ok) throw new Error("stats fetch failed");
+      return res.json();
+    },
+    enabled: isAdmin,
+    staleTime: 60 * 1000,
+  });
+  const totalUsers = adminUsers?.length ?? 0;
+  const activeUsers = adminStats?.uniqueVisitors ?? 0;
+
   // Dark mode toggle
   useEffect(() => {
     if (darkMode) {
@@ -129,6 +148,15 @@ export default function Home() {
               >
                 {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
               </button>
+              {/* Admin: 가입/활성 사용자 수 */}
+              {isAdmin && totalUsers > 0 && (
+                <div className="hidden sm:flex items-center gap-1 text-[10px] text-muted-foreground bg-muted/60 rounded-md px-1.5 py-1" title={`가입 ${totalUsers}명 / 오늘 활성 ${activeUsers}명`}>
+                  <Users className="w-3 h-3" />
+                  <span className="font-semibold text-foreground">{totalUsers}</span>
+                  <span>/</span>
+                  <span className="font-semibold text-green-600 dark:text-green-400">{activeUsers}</span>
+                </div>
+              )}
               {/* AI Agent 모바일웹 버튼 */}
               <a
                 href="/ai-mobile"
