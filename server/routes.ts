@@ -10169,25 +10169,51 @@ ${etfListStr}
 
         case "fetch_global_indices": {
           try {
-            const indices = ["SPI@SPX", "NAS@IXIC", "DJI@DJI"];
-            const results = await Promise.all(
-              indices.map(idx => 
-                axios.get(`https://m.stock.naver.com/api/index/${idx}/basic`, {
-                  timeout: 5000, headers: { "User-Agent": "Mozilla/5.0" }
-                }).catch(() => null)
-              )
-            );
+            const indices = [
+              { symbol: "DJI@DJI", name: "다우존스" },
+              { symbol: "NAS@IXIC", name: "나스닥" },
+              { symbol: "SPI@SPX", name: "S&P 500" },
+            ];
             const data: any = {};
-            const names = ["S&P 500", "NASDAQ", "Dow Jones"];
-            results.forEach((r, i) => {
-              if (r?.data) {
-                data[names[i]] = {
-                  value: r.data.closePrice,
-                  change: r.data.compareToPreviousClosePrice,
-                  changeRate: r.data.fluctuationsRatio,
-                };
-              }
-            });
+            await Promise.all(indices.map(async (idx) => {
+              try {
+                const apiRes = await axios.get(`https://polling.finance.naver.com/api/realtime/worldstock/index/${idx.symbol}`, {
+                  timeout: 5000, headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+                });
+                const d = apiRes.data?.datas?.[0];
+                if (d) {
+                  data[idx.name] = {
+                    value: parseFloat(d.nv) || 0,
+                    change: parseFloat(d.cv) || 0,
+                    changeRate: parseFloat(d.cr) || 0,
+                  };
+                }
+              } catch {}
+            }));
+            // 폴링 API 결과가 없으면 네이버 금융 시세 페이지 스크래핑 시도
+            if (Object.keys(data).length === 0) {
+              try {
+                const pageRes = await axios.get("https://finance.naver.com/world/", {
+                  timeout: 8000, headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+                });
+                const $g = cheerio.load(pageRes.data);
+                $g(".data_lst li").each((_: number, el: any) => {
+                  const name = $g(el).find(".blind").first().text().trim();
+                  const value = $g(el).find(".value").first().text().trim().replace(/,/g, "");
+                  const change = $g(el).find(".change").first().text().trim().replace(/,/g, "");
+                  const isUp = $g(el).find(".head_info").hasClass("point_up");
+                  if (name && value) {
+                    const valueNum = parseFloat(value) || 0;
+                    const changeNum = parseFloat(change) || 0;
+                    const changeRate = valueNum > 0 ? ((changeNum / valueNum) * 100).toFixed(2) : "0";
+                    data[name] = { value: valueNum, change: isUp ? changeNum : -changeNum, changeRate: isUp ? `+${changeRate}` : `-${changeRate}` };
+                  }
+                });
+              } catch {}
+            }
+            if (Object.keys(data).length === 0) {
+              return { type: "error", message: "해외 지수 데이터를 가져올 수 없습니다. (장 마감/주말일 수 있습니다)" };
+            }
             return { type: "data", dataType: "global_indices", data, success: true };
           } catch (e: any) {
             return { type: "error", message: `해외 지수 조회 실패: ${e.message}` };
@@ -10196,16 +10222,21 @@ ${etfListStr}
 
         case "fetch_etf_top_gainers": {
           try {
-            const url = "https://m.stock.naver.com/api/stocks/etf/rising?page=1&pageSize=15";
-            const response = await axios.get(url, { timeout: 5000, headers: { "User-Agent": "Mozilla/5.0" } });
-            const stocks = (response.data?.stocks || []).slice(0, 15).map((s: any) => ({
-              code: s.itemCode,
-              name: s.stockName,
-              price: s.closePrice,
-              changeRate: s.fluctuationsRatio,
-              change: s.compareToPreviousClosePrice,
-            }));
-            return { type: "data", dataType: "etf_top_gainers", data: stocks, success: true };
+            const allEtfs = await getEtfFullList();
+            const EXCLUDE_KEYWORDS = ["레버리지", "인버스", "2X", "bear", "BEAR", "곱버스", "숏", "SHORT", "울트라"];
+            const rising = allEtfs
+              .filter(etf => !EXCLUDE_KEYWORDS.some(kw => etf.name.includes(kw)))
+              .filter(etf => etf.changeRate > 0)
+              .sort((a, b) => b.changeRate - a.changeRate)
+              .slice(0, 15)
+              .map(etf => ({
+                code: etf.code,
+                name: etf.name,
+                price: etf.nowVal,
+                changeRate: etf.changeRate,
+                change: etf.changeVal,
+              }));
+            return { type: "data", dataType: "etf_top_gainers", data: rising, success: true };
           } catch (e: any) {
             return { type: "error", message: `ETF 상승 종목 조회 실패: ${e.message}` };
           }
@@ -10243,18 +10274,32 @@ ${etfListStr}
 
         case "fetch_exchange_rates": {
           try {
-            const url = "https://m.stock.naver.com/api/exchange/FX_USDKRW/basic";
-            const url2 = "https://m.stock.naver.com/api/exchange/FX_JPYKRW/basic";
-            const url3 = "https://m.stock.naver.com/api/exchange/FX_EURKRW/basic";
-            const [usd, jpy, eur] = await Promise.all([
-              axios.get(url, { timeout: 5000, headers: { "User-Agent": "Mozilla/5.0" } }).catch(() => null),
-              axios.get(url2, { timeout: 5000, headers: { "User-Agent": "Mozilla/5.0" } }).catch(() => null),
-              axios.get(url3, { timeout: 5000, headers: { "User-Agent": "Mozilla/5.0" } }).catch(() => null),
-            ]);
+            const exRes = await axios.get("https://finance.naver.com/marketindex/", {
+              timeout: 8000,
+              headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+            });
+            const $ex = cheerio.load(exRes.data);
             const data: any = {};
-            if (usd?.data) data["USD/KRW"] = { value: usd.data.closePrice, change: usd.data.compareToPreviousClosePrice, changeRate: usd.data.fluctuationsRatio };
-            if (jpy?.data) data["JPY/KRW"] = { value: jpy.data.closePrice, change: jpy.data.compareToPreviousClosePrice, changeRate: jpy.data.fluctuationsRatio };
-            if (eur?.data) data["EUR/KRW"] = { value: eur.data.closePrice, change: eur.data.compareToPreviousClosePrice, changeRate: eur.data.fluctuationsRatio };
+            const currencyMap: Record<string, string> = { usd: "USD/KRW", jpy: "JPY/KRW(100엔)", eur: "EUR/KRW", cny: "CNY/KRW" };
+            $ex("#exchangeList li").each((_: number, el: any) => {
+              const headClass = $ex(el).find("a.head").attr("class") || "";
+              const currency = Object.keys(currencyMap).find(c => headClass.includes(c));
+              if (!currency) return;
+              const value = $ex(el).find(".value").first().text().trim().replace(/,/g, "");
+              const change = $ex(el).find(".change").first().text().trim().replace(/,/g, "");
+              const isUp = $ex(el).find(".head_info").hasClass("point_up");
+              const changeVal = parseFloat(change) || 0;
+              const valueNum = parseFloat(value) || 0;
+              const changeRate = valueNum > 0 ? ((changeVal / valueNum) * 100).toFixed(2) : "0";
+              data[currencyMap[currency]] = {
+                value: valueNum,
+                change: isUp ? `+${changeVal}` : `-${changeVal}`,
+                changeRate: isUp ? `+${changeRate}` : `-${changeRate}`,
+              };
+            });
+            if (Object.keys(data).length === 0) {
+              return { type: "error", message: "환율 데이터를 가져올 수 없습니다." };
+            }
             return { type: "data", dataType: "exchange_rates", data, success: true };
           } catch (e: any) {
             return { type: "error", message: `환율 조회 실패: ${e.message}` };
