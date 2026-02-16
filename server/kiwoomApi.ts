@@ -198,10 +198,11 @@ export async function getUserAccountBalance(
   const token = await getKiwoomToken(userId, creds);
   const baseUrl = getBaseUrl(creds.mockTrading);
 
-  // 키움 REST API 잔고조회: POST /api/dostk/acntbal
+  // 키움 REST API 잔고조회: POST /api/dostk/acnt
   // 필수 헤더: api-id: kt00003 (추정자산)
-  const balanceUrl = `${baseUrl}/api/dostk/acntbal`;
-  console.log(`[Kiwoom] Balance request: POST ${balanceUrl}, api-id: ${API_ID.BALANCE}, accountNo: ${creds.accountNo?.slice(0,4)}****, mock: ${creds.mockTrading}`);
+  // 주의: /api/dostk/acntbal이 아닌 /api/dostk/acnt 엔드포인트 사용
+  const balanceUrl = `${baseUrl}/api/dostk/acnt`;
+  console.log(`[Kiwoom] Balance request: POST ${balanceUrl}, api-id: ${API_ID.BALANCE}, accountNo: ${creds.accountNo?.slice(0,4)}****, mock: ${creds.mockTrading}, body: {acnt_no: "${creds.accountNo?.slice(0,4)}****"}`);
 
   try {
     const response = await axios.post(
