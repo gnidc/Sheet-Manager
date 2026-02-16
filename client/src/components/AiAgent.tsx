@@ -62,6 +62,74 @@ interface UserAiConfig {
   useOwnKey: boolean | null;
 }
 
+// JSON 데이터를 사람이 읽기 쉬운 텍스트로 변환
+function formatDataToText(data: any): string {
+  if (!data || typeof data !== "object") return String(data);
+  
+  // 잔고 데이터
+  if (data.holdings && Array.isArray(data.holdings)) {
+    const lines: string[] = [];
+    if (data.summary) {
+      const s = data.summary;
+      lines.push(`📊 계좌 요약`);
+      lines.push(`  예수금: ${Number(s.depositAmount || 0).toLocaleString()}원`);
+      lines.push(`  총 평가금액: ${Number(s.totalEvalAmount || 0).toLocaleString()}원`);
+      lines.push(`  총 매입금액: ${Number(s.totalBuyAmount || 0).toLocaleString()}원`);
+      const pl = s.totalEvalProfitLoss || 0;
+      lines.push(`  총 평가손익: ${pl >= 0 ? "+" : ""}${Number(pl).toLocaleString()}원 (${(s.totalEvalProfitRate || 0).toFixed(2)}%)`);
+      lines.push("");
+    }
+    lines.push(`💼 보유종목 (${data.holdings.length}종목)`);
+    data.holdings.forEach((h: any, i: number) => {
+      const name = h.stockName || h.name || "";
+      const code = h.stockCode || h.code || "";
+      const qty = h.holdingQty || h.quantity || 0;
+      const price = h.currentPrice || h.price || 0;
+      const pl = h.evalProfitLoss || h.profitLoss || 0;
+      const rate = h.evalProfitRate || h.profitRate || 0;
+      lines.push(`  ${i + 1}. ${name}(${code}) ${Number(qty).toLocaleString()}주 × ${Number(price).toLocaleString()}원  ${pl >= 0 ? "+" : ""}${Number(pl).toLocaleString()}원 (${Number(rate).toFixed(2)}%)`);
+    });
+    return lines.join("\n");
+  }
+
+  // 배열 데이터 (검색 결과, 뉴스 등)
+  if (Array.isArray(data)) {
+    return data.map((item, i) => {
+      if (item.name && item.price) {
+        return `${i + 1}. ${item.name}(${item.code || ""}) ${Number(item.price).toLocaleString()}원`;
+      }
+      if (item.title) {
+        return `${i + 1}. ${item.title}${item.source ? ` (${item.source})` : ""}`;
+      }
+      return `${i + 1}. ${JSON.stringify(item)}`;
+    }).join("\n");
+  }
+
+  // 지수/환율 등 key-value 객체
+  const entries = Object.entries(data);
+  if (entries.length > 0 && entries.every(([, v]) => typeof v === "object" && v !== null)) {
+    return entries.map(([key, val]: [string, any]) => {
+      if (val.value !== undefined) {
+        const sign = parseFloat(val.changeRate) >= 0 ? "▲" : "▼";
+        return `${key}: ${Number(val.value).toLocaleString()} ${sign} ${val.changeRate || 0}%`;
+      }
+      return `${key}: ${JSON.stringify(val)}`;
+    }).join("\n");
+  }
+
+  // 단일 종목
+  if (data.name && data.currentPrice) {
+    const sign = parseFloat(data.changeRate) >= 0 ? "▲" : "▼";
+    return `${data.name}(${data.stockCode || ""}) 현재가: ${Number(data.currentPrice).toLocaleString()}원 ${sign} ${data.changeRate || 0}%`;
+  }
+
+  // 기타: 각 필드를 줄바꿈으로 표시
+  return Object.entries(data).map(([k, v]) => {
+    if (typeof v === "object" && v !== null) return `${k}: ${JSON.stringify(v)}`;
+    return `${k}: ${v}`;
+  }).join("\n");
+}
+
 const DEFAULT_SYSTEM_PROMPT = `너는 경제 전문가이자 투자의 마이스터야~
 이 대화는 주식 및 ETF거래를 통해 투자 수익률을 극대화함과 동시에 장기적으로 안정적인 복리 수익률을 추구하고자 하는 안정적,적극적 투자성향을 모두 가지고 있는 투자스타일의 투자자를 위한 대화창이야.
 최근의 매크로 동향, 최신뉴스 및 테마동향, ETF 정보, 지수동향 등을 종합 참고하여 투자자의 질문에 대답을 해주길 바래~
@@ -532,6 +600,25 @@ export default function AiAgent({ isAdmin, onNavigate, compact = false }: { isAd
   });
 
   // 메시지 복사
+  // JSON 데이터를 자연어로 변환
+  const formatJsonContent = useCallback((content: string): string => {
+    // 전체가 JSON인 경우
+    const trimmed = content.trim();
+    if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+      try {
+        const data = JSON.parse(trimmed);
+        return formatDataToText(data);
+      } catch { /* not JSON */ }
+    }
+    // 부분 JSON 블록이 포함된 경우 (```json ... ``` 또는 인라인 JSON 객체)
+    return content.replace(/```json\s*([\s\S]*?)```/g, (_, jsonStr) => {
+      try {
+        const data = JSON.parse(jsonStr.trim());
+        return formatDataToText(data);
+      } catch { return jsonStr; }
+    });
+  }, []);
+
   const adjustFontSize = useCallback((delta: number) => {
     setChatFontSize(prev => {
       const next = Math.min(24, Math.max(10, prev + delta));
@@ -838,7 +925,7 @@ export default function AiAgent({ isAdmin, onNavigate, compact = false }: { isAd
                           : "bg-muted rounded-bl-md"
                       }`}
                     >
-                      <div className="whitespace-pre-wrap leading-relaxed" style={{ fontSize: `${chatFontSize}px` }}>{msg.content}</div>
+                      <div className="whitespace-pre-wrap leading-relaxed" style={{ fontSize: `${chatFontSize}px` }}>{msg.role === "assistant" ? formatJsonContent(msg.content) : msg.content}</div>
                       <div className={`flex items-center gap-1.5 mt-1 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
                         <span className={`text-[10px] ${msg.role === "user" ? "text-purple-200" : "text-muted-foreground"}`}>
                           {msg.timestamp.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}
@@ -1472,25 +1559,65 @@ function AgentDataPanel({ result, onNavigate }: { result: AgentActionResult; onN
 
       case "balance": {
         const d = result.data;
-        if (d?.stocks && Array.isArray(d.stocks)) {
+        const holdings = d?.holdings || d?.stocks || (Array.isArray(d) ? d : null);
+        const summary = d?.summary;
+        if (holdings && Array.isArray(holdings) && holdings.length > 0) {
           return (
-            <div className="space-y-1">
-              {d.stocks.map((s: any, i: number) => (
-                <div key={i} className="flex items-center justify-between p-1.5 bg-white dark:bg-slate-900 rounded border text-xs">
-                  <div>
-                    <span className="font-medium">{s.stockName || s.name}</span>
-                    <span className="text-muted-foreground ml-1">({s.stockCode || s.code})</span>
+            <div className="space-y-2">
+              {/* 요약 정보 */}
+              {summary && (
+                <div className="grid grid-cols-2 gap-2 p-2 bg-blue-50/50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                  <div className="text-xs">
+                    <p className="text-muted-foreground">예수금</p>
+                    <p className="font-bold">{Number(summary.depositAmount || 0).toLocaleString()}원</p>
                   </div>
-                  <div className="text-right">
-                    <span className="font-medium">{Number(s.quantity || s.holdingQuantity).toLocaleString()}주</span>
-                    <span className="ml-2 text-muted-foreground">{Number(s.currentPrice || s.price).toLocaleString()}원</span>
+                  <div className="text-xs">
+                    <p className="text-muted-foreground">총 평가금액</p>
+                    <p className="font-bold">{Number(summary.totalEvalAmount || 0).toLocaleString()}원</p>
+                  </div>
+                  <div className="text-xs">
+                    <p className="text-muted-foreground">총 매입금액</p>
+                    <p className="font-medium">{Number(summary.totalBuyAmount || 0).toLocaleString()}원</p>
+                  </div>
+                  <div className="text-xs">
+                    <p className="text-muted-foreground">총 평가손익</p>
+                    <p className={`font-bold ${(summary.totalEvalProfitLoss || 0) >= 0 ? "text-red-500" : "text-blue-500"}`}>
+                      {(summary.totalEvalProfitLoss || 0) >= 0 ? "+" : ""}{Number(summary.totalEvalProfitLoss || 0).toLocaleString()}원
+                      <span className="ml-1 text-[10px]">({(summary.totalEvalProfitRate || 0).toFixed(2)}%)</span>
+                    </p>
                   </div>
                 </div>
-              ))}
+              )}
+              {/* 보유종목 */}
+              <div className="space-y-1">
+                {holdings.map((s: any, i: number) => {
+                  const profitLoss = s.evalProfitLoss ?? s.profitLoss ?? 0;
+                  const profitRate = s.evalProfitRate ?? s.profitRate ?? 0;
+                  const isUp = profitLoss >= 0;
+                  return (
+                    <div key={i} className="flex items-center justify-between p-2 bg-white dark:bg-slate-900 rounded border text-xs">
+                      <div>
+                        <span className="font-medium">{s.stockName || s.name}</span>
+                        <span className="text-muted-foreground ml-1 text-[10px]">({s.stockCode || s.code})</span>
+                      </div>
+                      <div className="text-right space-y-0.5">
+                        <div>
+                          <span className="font-medium">{Number(s.holdingQty || s.quantity || s.holdingQuantity || 0).toLocaleString()}주</span>
+                          <span className="ml-1.5 text-muted-foreground">{Number(s.currentPrice || s.price || 0).toLocaleString()}원</span>
+                        </div>
+                        <div className={`text-[10px] font-medium ${isUp ? "text-red-500" : "text-blue-500"}`}>
+                          {isUp ? "+" : ""}{Number(profitLoss).toLocaleString()}원 ({Number(profitRate).toFixed(2)}%)
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           );
         }
-        return <pre className="text-[10px] overflow-auto max-h-40">{JSON.stringify(d, null, 2)}</pre>;
+        // fallback: 데이터가 있지만 알려진 구조가 아닌 경우
+        return <pre className="text-[10px] overflow-auto max-h-40 bg-muted/50 p-2 rounded">{JSON.stringify(d, null, 2)}</pre>;
       }
 
       case "stock_news":
