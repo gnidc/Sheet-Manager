@@ -2,12 +2,13 @@ import { useState, useEffect, lazy, Suspense } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import AiAgent from "@/components/AiAgent";
 import { LoginDialog } from "@/components/LoginDialog";
-import { Bot, ArrowLeft, Smartphone, Download, BarChart3, Loader2 } from "lucide-react";
+import { Bot, ArrowLeft, Smartphone, Download, BarChart3, Loader2, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const EtfComponents = lazy(() => import("@/components/EtfComponents"));
+const Trading = lazy(() => import("@/pages/Trading"));
 
-type MobileMode = "select" | "ai-agent" | "etf";
+type MobileMode = "select" | "ai-agent" | "etf" | "trading";
 
 function AiMobileContent() {
   const { isAdmin, isLoggedIn, userName, userEmail, logout, isLoggingOut } = useAuth();
@@ -142,32 +143,46 @@ function AiMobileContent() {
 
         {/* 선택 카드 영역 */}
         <div className="flex-1 flex items-center justify-center p-6">
-          <div className="grid grid-cols-2 gap-4 w-full max-w-md">
+          <div className="grid grid-cols-3 gap-3 w-full max-w-md">
             {/* AI Agent 버튼 */}
             <button
               onClick={() => setMode("ai-agent")}
-              className="flex flex-col items-center justify-center gap-3 p-6 rounded-2xl border-2 border-purple-200 dark:border-purple-800 bg-gradient-to-br from-purple-50 to-blue-50 dark:from-purple-950/30 dark:to-blue-950/30 hover:border-purple-400 dark:hover:border-purple-600 hover:shadow-lg transition-all duration-200 active:scale-95"
+              className="flex flex-col items-center justify-center gap-2.5 p-4 rounded-2xl border-2 border-purple-200 dark:border-purple-800 bg-gradient-to-br from-purple-50 to-blue-50 dark:from-purple-950/30 dark:to-blue-950/30 hover:border-purple-400 dark:hover:border-purple-600 hover:shadow-lg transition-all duration-200 active:scale-95"
             >
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-purple-500 to-blue-600 flex items-center justify-center shadow-md">
-                <Bot className="w-8 h-8 text-white" />
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-500 to-blue-600 flex items-center justify-center shadow-md">
+                <Bot className="w-7 h-7 text-white" />
               </div>
               <div className="text-center">
-                <p className="text-sm font-bold text-foreground">AI Agent</p>
-                <p className="text-[10px] text-muted-foreground mt-0.5">AI 투자 에이전트</p>
+                <p className="text-xs font-bold text-foreground">AI Agent</p>
+                <p className="text-[9px] text-muted-foreground mt-0.5">AI 투자 에이전트</p>
               </div>
             </button>
 
             {/* 실시간ETF 버튼 */}
             <button
               onClick={() => setMode("etf")}
-              className="flex flex-col items-center justify-center gap-3 p-6 rounded-2xl border-2 border-green-200 dark:border-green-800 bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-950/30 dark:to-emerald-950/30 hover:border-green-400 dark:hover:border-green-600 hover:shadow-lg transition-all duration-200 active:scale-95"
+              className="flex flex-col items-center justify-center gap-2.5 p-4 rounded-2xl border-2 border-green-200 dark:border-green-800 bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-950/30 dark:to-emerald-950/30 hover:border-green-400 dark:hover:border-green-600 hover:shadow-lg transition-all duration-200 active:scale-95"
             >
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center shadow-md">
-                <BarChart3 className="w-8 h-8 text-white" />
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center shadow-md">
+                <BarChart3 className="w-7 h-7 text-white" />
               </div>
               <div className="text-center">
-                <p className="text-sm font-bold text-foreground">실시간 ETF</p>
-                <p className="text-[10px] text-muted-foreground mt-0.5">ETF 시세 · AI 분석</p>
+                <p className="text-xs font-bold text-foreground">실시간 ETF</p>
+                <p className="text-[9px] text-muted-foreground mt-0.5">ETF 시세 · AI 분석</p>
+              </div>
+            </button>
+
+            {/* 자동매매 버튼 */}
+            <button
+              onClick={() => setMode("trading")}
+              className="flex flex-col items-center justify-center gap-2.5 p-4 rounded-2xl border-2 border-amber-200 dark:border-amber-800 bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-950/30 dark:to-orange-950/30 hover:border-amber-400 dark:hover:border-amber-600 hover:shadow-lg transition-all duration-200 active:scale-95"
+            >
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-md">
+                <Zap className="w-7 h-7 text-white" />
+              </div>
+              <div className="text-center">
+                <p className="text-xs font-bold text-foreground">자동매매</p>
+                <p className="text-[9px] text-muted-foreground mt-0.5">주문 · 잔고 관리</p>
               </div>
             </button>
           </div>
@@ -217,6 +232,54 @@ function AiMobileContent() {
   }
 
   // 실시간ETF 모드
+  if (mode === "etf") {
+    return (
+      <div
+        className="flex flex-col bg-background"
+        style={{ height: "calc(var(--vh, 1vh) * 100)" }}
+      >
+        <header className="flex items-center justify-between px-3 py-2 border-b bg-background/95 backdrop-blur-sm shrink-0">
+          <div className="flex items-center gap-2">
+            <button onClick={() => setMode("select")} className="text-muted-foreground hover:text-foreground">
+              <ArrowLeft className="w-4 h-4" />
+            </button>
+            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center">
+              <BarChart3 className="w-4 h-4 text-white" />
+            </div>
+            <div>
+              <h1 className="text-sm font-bold leading-tight">실시간 ETF</h1>
+              <p className="text-[10px] text-muted-foreground leading-tight">{userName || userEmail || "User"}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-[10px] px-2 text-muted-foreground"
+              onClick={() => logout()}
+              disabled={isLoggingOut}
+            >
+              로그아웃
+            </Button>
+          </div>
+        </header>
+
+        <div className="flex-1 overflow-y-auto">
+          <Suspense fallback={
+            <div className="flex items-center justify-center h-full">
+              <Loader2 className="w-8 h-8 animate-spin text-green-500" />
+            </div>
+          }>
+            <div className="p-2">
+              <EtfComponents />
+            </div>
+          </Suspense>
+        </div>
+      </div>
+    );
+  }
+
+  // 자동매매 모드
   return (
     <div
       className="flex flex-col bg-background"
@@ -227,11 +290,11 @@ function AiMobileContent() {
           <button onClick={() => setMode("select")} className="text-muted-foreground hover:text-foreground">
             <ArrowLeft className="w-4 h-4" />
           </button>
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center">
-            <BarChart3 className="w-4 h-4 text-white" />
+          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center">
+            <Zap className="w-4 h-4 text-white" />
           </div>
           <div>
-            <h1 className="text-sm font-bold leading-tight">실시간 ETF</h1>
+            <h1 className="text-sm font-bold leading-tight">자동매매</h1>
             <p className="text-[10px] text-muted-foreground leading-tight">{userName || userEmail || "User"}</p>
           </div>
         </div>
@@ -251,11 +314,11 @@ function AiMobileContent() {
       <div className="flex-1 overflow-y-auto">
         <Suspense fallback={
           <div className="flex items-center justify-center h-full">
-            <Loader2 className="w-8 h-8 animate-spin text-green-500" />
+            <Loader2 className="w-8 h-8 animate-spin text-amber-500" />
           </div>
         }>
           <div className="p-2">
-            <EtfComponents />
+            <Trading />
           </div>
         </Suspense>
       </div>
