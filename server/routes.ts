@@ -157,11 +157,80 @@ setInterval(() => {
   });
 }, 5 * 60 * 1000);
 
+// 보안 관련 테이블 자동 생성 (누락 시)
+async function ensureSecurityTables() {
+  try {
+    const { executeWithClient } = await import("./db.js");
+    const { sql } = await import("drizzle-orm");
+    await executeWithClient(async (db) => {
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS security_audit_logs (
+          id SERIAL PRIMARY KEY,
+          audit_type TEXT NOT NULL,
+          status TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          details TEXT NOT NULL,
+          total_checks INTEGER DEFAULT 0,
+          passed_checks INTEGER DEFAULT 0,
+          warning_checks INTEGER DEFAULT 0,
+          critical_checks INTEGER DEFAULT 0,
+          executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+        )
+      `);
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS security_drill_results (
+          id SERIAL PRIMARY KEY,
+          drill_type TEXT NOT NULL,
+          status TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          details TEXT NOT NULL,
+          total_tests INTEGER DEFAULT 0,
+          passed_tests INTEGER DEFAULT 0,
+          failed_tests INTEGER DEFAULT 0,
+          duration INTEGER DEFAULT 0,
+          executed_by TEXT,
+          executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+        )
+      `);
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS blocked_ips (
+          id SERIAL PRIMARY KEY,
+          ip_address TEXT NOT NULL,
+          reason TEXT NOT NULL,
+          blocked_by TEXT,
+          access_count INTEGER DEFAULT 0,
+          is_active BOOLEAN DEFAULT true,
+          blocked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+          expires_at TIMESTAMP
+        )
+      `);
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS security_remediations (
+          id SERIAL PRIMARY KEY,
+          action_type TEXT NOT NULL,
+          status TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          details TEXT NOT NULL,
+          affected_count INTEGER DEFAULT 0,
+          executed_by TEXT,
+          executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+        )
+      `);
+      console.log("[Security] 보안 테이블 확인/생성 완료");
+    });
+  } catch (error: any) {
+    console.error("[Security] 보안 테이블 생성 실패:", error.message);
+  }
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
   
+  // 보안 관련 테이블 자동 생성
+  ensureSecurityTables().catch(err => console.error("[Security] init error:", err.message));
+
   // 헬스체크 엔드포인트 (가벼운 DB 연결 확인만)
   app.get("/api/health", async (req, res) => {
     try {
