@@ -42,6 +42,12 @@ interface WhoisInfo {
   };
 }
 
+interface SuspiciousIpInfo {
+  ip: string;
+  count: number;
+  accounts: string[];
+}
+
 interface AuditCheck {
   name: string;
   status: "pass" | "warning" | "critical";
@@ -49,6 +55,7 @@ interface AuditCheck {
   remediable?: boolean;
   remediationAction?: string;
   remediationLabel?: string;
+  suspiciousIps?: SuspiciousIpInfo[];
 }
 
 interface AuditLog {
@@ -516,9 +523,11 @@ export default function SecurityAudit() {
                 {/* 상세 항목 + 조치/WHOIS 버튼 */}
                 <div className="border-t">
                   {parseChecks(selectedAudit.details).map((check, i) => {
-                    const suspiciousIps = check.remediationAction === "block-suspicious-ips"
-                      ? extractIpsFromDetail(check.detail)
-                      : [];
+                    // suspiciousIps 필드 우선, 없으면 detail에서 추출
+                    const suspiciousIps: SuspiciousIpInfo[] = check.suspiciousIps
+                      || (check.remediationAction === "block-suspicious-ips"
+                        ? extractIpsFromDetail(check.detail).map(({ ip, count }) => ({ ip, count: parseInt(count) || 0, accounts: [] }))
+                        : []);
                     return (
                       <div key={i} className={`border-b last:border-b-0 ${
                         check.status === "critical" ? "bg-red-50/50 dark:bg-red-950/10" :
@@ -532,25 +541,40 @@ export default function SecurityAudit() {
                               {STATUS_BADGE[check.status]}
                             </div>
                             <div className="text-xs text-muted-foreground mt-0.5">{check.detail}</div>
-                            {/* 의심 IP별 WHOIS 버튼 */}
+                            {/* 의심 IP별 상세 목록 + WHOIS 버튼 */}
                             {suspiciousIps.length > 0 && (
-                              <div className="flex flex-wrap gap-1.5 mt-2">
-                                {suspiciousIps.map(({ ip, count }) => (
-                                  <Button
-                                    key={ip}
-                                    variant="outline"
-                                    size="sm"
-                                    className="h-6 text-[10px] gap-1 px-2 border-blue-300 text-blue-600 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-400 dark:hover:bg-blue-950"
-                                    disabled={whoisLoading === ip}
-                                    onClick={() => handleWhoisLookup(ip)}
-                                  >
-                                    {whoisLoading === ip ? (
-                                      <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                              <div className="mt-2 space-y-1.5">
+                                {suspiciousIps.map(({ ip, count, accounts }) => (
+                                  <div key={ip} className="flex items-center gap-2 flex-wrap bg-muted/40 rounded px-2 py-1.5">
+                                    <span className="text-xs font-mono font-medium text-foreground">{ip}</span>
+                                    <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{count}건</Badge>
+                                    {accounts.length > 0 ? (
+                                      <div className="flex items-center gap-1 flex-wrap">
+                                        <span className="text-[10px] text-muted-foreground">접속계정:</span>
+                                        {accounts.map((acc, ai) => (
+                                          <Badge key={ai} variant="outline" className="text-[10px] px-1.5 py-0 border-orange-300 text-orange-600 dark:border-orange-700 dark:text-orange-400">
+                                            {acc}
+                                          </Badge>
+                                        ))}
+                                      </div>
                                     ) : (
-                                      <Globe className="h-2.5 w-2.5" />
+                                      <span className="text-[10px] text-muted-foreground">비로그인 접속</span>
                                     )}
-                                    WHOIS {ip} {count && `(${count})`}
-                                  </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-5 text-[10px] gap-0.5 px-1.5 ml-auto border-blue-300 text-blue-600 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-400 dark:hover:bg-blue-950"
+                                      disabled={whoisLoading === ip}
+                                      onClick={() => handleWhoisLookup(ip)}
+                                    >
+                                      {whoisLoading === ip ? (
+                                        <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                                      ) : (
+                                        <Globe className="h-2.5 w-2.5" />
+                                      )}
+                                      WHOIS
+                                    </Button>
+                                  </div>
                                 ))}
                               </div>
                             )}

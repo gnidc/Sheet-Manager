@@ -8955,28 +8955,47 @@ ${etfListStr}
     });
 
     // 3. 최근 방문 로그에서 비정상 패턴 탐지
-    let suspiciousIpList: { ip: string; count: number }[] = [];
+    let suspiciousIpList: { ip: string; count: number; accounts: string[] }[] = [];
     try {
       const recentLogs = await storage.getVisitLogs(500);
       const ipCounts = new Map<string, number>();
+      const ipAccounts = new Map<string, Set<string>>();
       recentLogs.forEach((log: any) => {
         if (log.ipAddress) {
           ipCounts.set(log.ipAddress, (ipCounts.get(log.ipAddress) || 0) + 1);
+          // 해당 IP에서 접속한 계정 수집
+          const accountId = log.userName || log.userEmail || (log.userId ? `ID:${log.userId}` : null);
+          if (accountId) {
+            if (!ipAccounts.has(log.ipAddress)) ipAccounts.set(log.ipAddress, new Set());
+            ipAccounts.get(log.ipAddress)!.add(accountId);
+          }
         }
       });
+      // 모든 IP의 접속 계정 정보 수집 (비정상 여부와 무관하게)
       Array.from(ipCounts.entries()).forEach(([ip, count]) => {
-        if (count > 100) suspiciousIpList.push({ ip, count });
+        if (count > 100) {
+          const accounts = ipAccounts.has(ip) ? Array.from(ipAccounts.get(ip)!) : [];
+          suspiciousIpList.push({ ip, count, accounts });
+        }
       });
       checks.push({
         name: "비정상 접속 패턴 탐지",
         status: suspiciousIpList.length > 0 ? "warning" : "pass",
         detail: suspiciousIpList.length > 0
-          ? `${suspiciousIpList.length}개 IP에서 100건 이상 비정상 접속 패턴 감지됨 (${suspiciousIpList.map(s => `${s.ip}:${s.count}건`).join(", ")})`
+          ? `${suspiciousIpList.length}개 IP에서 100건 이상 비정상 접속 패턴 감지됨`
           : `최근 방문 로그 ${recentLogs.length}건 분석 - 비정상 패턴 없음`,
         remediable: suspiciousIpList.length > 0,
         remediationAction: "block-suspicious-ips",
         remediationLabel: "의심 IP 차단",
-      });
+        // 의심 IP별 상세 정보 (프론트에서 활용)
+        ...(suspiciousIpList.length > 0 && {
+          suspiciousIps: suspiciousIpList.map(s => ({
+            ip: s.ip,
+            count: s.count,
+            accounts: s.accounts,
+          })),
+        }),
+      } as any);
 
       // 비로그인 접속 비율 확인
       const unauthLogs = recentLogs.filter((l: any) => !l.userId);
