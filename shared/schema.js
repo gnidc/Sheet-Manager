@@ -74,14 +74,16 @@ const userTradingConfigs = pgTable("user_trading_configs", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull(),
   // 유저당 복수 등록 가능
+  broker: text("broker").default("kis"),
+  // 증권사: "kis" | "kiwoom"
   label: text("label").default("\uAE30\uBCF8"),
   // API 별칭
   appKey: text("app_key").notNull(),
   appSecret: text("app_secret").notNull(),
   accountNo: text("account_no").notNull(),
-  // 계좌번호 앞 8자리
+  // 계좌번호
   accountProductCd: text("account_product_cd").default("01"),
-  // 뒤 2자리
+  // KIS: 뒤 2자리
   mockTrading: boolean("mock_trading").default(true),
   isActive: boolean("is_active").default(false),
   // 현재 활성 API 여부

@@ -20,6 +20,7 @@ import {
 // ========== Interfaces ==========
 interface TradingConfigItem {
   id: number;
+  broker: string; // "kis" | "kiwoom"
   label: string;
   appKey: string;
   accountNo: string;
@@ -159,10 +160,10 @@ function TradingApiSection() {
           <div>
             <CardTitle className="text-base flex items-center gap-2">
               <Zap className="w-4 h-4 text-amber-500" />
-              KIS 자동매매 API
+              자동매매 API
             </CardTitle>
             <CardDescription className="text-xs mt-1">
-              한국투자증권 API를 최대 5개까지 등록하고 전환할 수 있습니다
+              한국투자증권(KIS) / 키움증권 API를 최대 5개까지 등록하고 전환할 수 있습니다
             </CardDescription>
           </div>
           <Button size="sm" onClick={() => setShowAdd(true)} className="gap-1 text-xs" disabled={configs.length >= 5}>
@@ -178,7 +179,7 @@ function TradingApiSection() {
         ) : configs.length === 0 ? (
           <div className="text-center py-8 text-sm text-muted-foreground">
             <Zap className="w-8 h-8 mx-auto mb-2 opacity-30" />
-            등록된 KIS API가 없습니다
+            등록된 자동매매 API가 없습니다
             <br />
             <Button variant="outline" size="sm" className="mt-3 text-xs" onClick={() => setShowAdd(true)}>
               <Plus className="w-3 h-3 mr-1" /> 첫 번째 API 등록하기
@@ -203,6 +204,9 @@ function TradingApiSection() {
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium truncate">{c.label}</span>
                       {c.isActive && <Badge variant="outline" className="text-[9px] px-1 py-0 border-amber-400 text-amber-600">활성</Badge>}
+                      <Badge variant="secondary" className="text-[9px] px-1 py-0">
+                        {c.broker === "kiwoom" ? "키움" : "KIS"}
+                      </Badge>
                       <Badge variant={c.mockTrading ? "secondary" : "destructive"} className="text-[9px] px-1 py-0">
                         {c.mockTrading ? "모의" : "실전"}
                       </Badge>
@@ -244,6 +248,7 @@ function TradingApiSection() {
 // ========== Trading Config Dialog ==========
 function TradingConfigDialog({ open, onClose, editConfig }: { open: boolean; onClose: () => void; editConfig?: TradingConfigItem }) {
   const { toast } = useToast();
+  const [broker, setBroker] = useState(editConfig?.broker || "kis");
   const [label, setLabel] = useState(editConfig?.label || "");
   const [appKey, setAppKey] = useState("");
   const [appSecret, setAppSecret] = useState("");
@@ -277,7 +282,8 @@ function TradingConfigDialog({ open, onClose, editConfig }: { open: boolean; onC
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const data: any = { label: label || "기본", accountProductCd, mockTrading };
+    const data: any = { broker, label: label || "기본", mockTrading };
+    if (broker === "kis") data.accountProductCd = accountProductCd;
     if (!isEdit && (!appKey || !appSecret || !accountNo)) {
       toast({ title: "입력 오류", description: "앱 키, 앱 시크릿, 계좌번호는 필수입니다", variant: "destructive" });
       return;
@@ -288,46 +294,68 @@ function TradingConfigDialog({ open, onClose, editConfig }: { open: boolean; onC
     mutation.mutate(data);
   };
 
+  const brokerLabel = broker === "kiwoom" ? "키움증권" : "한국투자증권(KIS)";
+
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent className="sm:max-w-[460px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-base">
             <Zap className="w-4 h-4 text-amber-500" />
-            {isEdit ? "KIS API 수정" : "KIS API 등록"}
+            {isEdit ? `${brokerLabel} API 수정` : "자동매매 API 등록"}
           </DialogTitle>
           <DialogDescription className="text-xs">
-            {isEdit ? "변경할 항목만 입력하세요. 빈 필드는 기존 값이 유지됩니다." : "한국투자증권 API 인증 정보를 입력하세요."}
+            {isEdit ? "변경할 항목만 입력하세요. 빈 필드는 기존 값이 유지됩니다." : "증권사를 선택하고 API 인증 정보를 입력하세요."}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
+          {!isEdit && (
+            <div className="space-y-1.5">
+              <Label className="text-xs">증권사 선택</Label>
+              <div className="flex gap-2">
+                <Button type="button" variant={broker === "kis" ? "default" : "outline"} size="sm" className="flex-1 text-xs h-9" onClick={() => setBroker("kis")}>
+                  🏦 한국투자증권 (KIS)
+                </Button>
+                <Button type="button" variant={broker === "kiwoom" ? "default" : "outline"} size="sm" className="flex-1 text-xs h-9" onClick={() => setBroker("kiwoom")}>
+                  🏦 키움증권 (REST)
+                </Button>
+              </div>
+            </div>
+          )}
           <div className="space-y-1.5">
             <Label className="text-xs">별칭</Label>
-            <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="예: 모의투자용, 실전용" className="text-sm h-9" />
+            <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={`예: ${brokerLabel} 모의투자`} className="text-sm h-9" />
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs">앱 키 (App Key) {!isEdit && <span className="text-red-500">*</span>}</Label>
-            <Input value={appKey} onChange={(e) => setAppKey(e.target.value)} placeholder={isEdit ? "변경 시 입력" : "PSxxxxxxx..."} className="font-mono text-sm h-9" />
+            <Input value={appKey} onChange={(e) => setAppKey(e.target.value)} placeholder={isEdit ? "변경 시 입력" : (broker === "kiwoom" ? "키움 앱 키" : "PSxxxxxxx...")} className="font-mono text-sm h-9" />
           </div>
           <div className="space-y-1.5">
-            <Label className="text-xs">앱 시크릿 (App Secret) {!isEdit && <span className="text-red-500">*</span>}</Label>
+            <Label className="text-xs">{broker === "kiwoom" ? "시크릿 키 (Secret Key)" : "앱 시크릿 (App Secret)"} {!isEdit && <span className="text-red-500">*</span>}</Label>
             <div className="relative">
-              <Input type={showSecret ? "text" : "password"} value={appSecret} onChange={(e) => setAppSecret(e.target.value)} placeholder={isEdit ? "변경 시 입력" : "앱 시크릿"} className="font-mono text-sm h-9 pr-16" />
+              <Input type={showSecret ? "text" : "password"} value={appSecret} onChange={(e) => setAppSecret(e.target.value)} placeholder={isEdit ? "변경 시 입력" : (broker === "kiwoom" ? "시크릿 키" : "앱 시크릿")} className="font-mono text-sm h-9 pr-16" />
               <Button type="button" variant="ghost" size="sm" className="absolute right-1 top-1/2 -translate-y-1/2 h-6 text-[10px]" onClick={() => setShowSecret(!showSecret)}>
                 {showSecret ? "숨기기" : "보기"}
               </Button>
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div className="col-span-2 space-y-1.5">
-              <Label className="text-xs">계좌번호 (앞 8자리) {!isEdit && <span className="text-red-500">*</span>}</Label>
-              <Input value={accountNo} onChange={(e) => setAccountNo(e.target.value.replace(/\D/g, "").slice(0, 8))} placeholder={isEdit ? "변경 시 입력" : "12345678"} maxLength={8} className="font-mono text-sm h-9" />
+          {broker === "kis" ? (
+            <div className="grid grid-cols-3 gap-3">
+              <div className="col-span-2 space-y-1.5">
+                <Label className="text-xs">계좌번호 (앞 8자리) {!isEdit && <span className="text-red-500">*</span>}</Label>
+                <Input value={accountNo} onChange={(e) => setAccountNo(e.target.value.replace(/\D/g, "").slice(0, 8))} placeholder={isEdit ? "변경 시 입력" : "12345678"} maxLength={8} className="font-mono text-sm h-9" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">상품코드</Label>
+                <Input value={accountProductCd} onChange={(e) => setAccountProductCd(e.target.value.replace(/\D/g, "").slice(0, 2))} placeholder="01" maxLength={2} className="font-mono text-sm h-9" />
+              </div>
             </div>
+          ) : (
             <div className="space-y-1.5">
-              <Label className="text-xs">상품코드</Label>
-              <Input value={accountProductCd} onChange={(e) => setAccountProductCd(e.target.value.replace(/\D/g, "").slice(0, 2))} placeholder="01" maxLength={2} className="font-mono text-sm h-9" />
+              <Label className="text-xs">계좌번호 {!isEdit && <span className="text-red-500">*</span>}</Label>
+              <Input value={accountNo} onChange={(e) => setAccountNo(e.target.value.replace(/[^0-9-]/g, ""))} placeholder={isEdit ? "변경 시 입력" : "키움 계좌번호"} className="font-mono text-sm h-9" />
             </div>
-          </div>
+          )}
           <div className="flex items-center justify-between bg-muted/50 p-3 rounded-lg">
             <div>
               <Label className="text-xs font-medium cursor-pointer">모의투자 모드</Label>
@@ -341,6 +369,17 @@ function TradingConfigDialog({ open, onClose, editConfig }: { open: boolean; onC
               <p className="text-[11px] text-red-600 dark:text-red-400">실전투자 모드에서는 <strong>실제 주문이 체결</strong>됩니다.</p>
             </div>
           )}
+          <div className="text-center text-[11px] text-muted-foreground">
+            {broker === "kis" ? (
+              <a href="https://apiportal.koreainvestment.com/" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-0.5">
+                한국투자증권 API 포탈 <ExternalLink className="w-2.5 h-2.5" />
+              </a>
+            ) : (
+              <a href="https://openapi.kiwoom.com/" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-0.5">
+                키움증권 오픈API <ExternalLink className="w-2.5 h-2.5" />
+              </a>
+            )}
+          </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose} className="text-xs">취소</Button>
             <Button type="submit" disabled={mutation.isPending} className="text-xs gap-1">
@@ -754,8 +793,8 @@ function AdminApiOverview() {
             <thead>
               <tr className="border-b">
                 <th className="text-left py-2 px-2">사용자</th>
-                <th className="text-center py-2 px-2">KIS API</th>
-                <th className="text-center py-2 px-2">활성 KIS</th>
+                <th className="text-center py-2 px-2">자동매매</th>
+                <th className="text-center py-2 px-2">활성 매매API</th>
                 <th className="text-center py-2 px-2">AI API</th>
                 <th className="text-center py-2 px-2">활성 AI</th>
               </tr>
@@ -770,7 +809,7 @@ function AdminApiOverview() {
                   <td className="text-center py-2 px-2">{o.tradingApis}개</td>
                   <td className="text-center py-2 px-2">
                     {o.activeTradingApi ? (
-                      <span className="text-amber-600">{o.activeTradingApi} ({o.tradingMock ? "모의" : "실전"})</span>
+                      <span className="text-amber-600">{o.activeTradingApi} ({o.activeTradingBroker === "kiwoom" ? "키움" : "KIS"}{o.tradingMock ? "/모의" : "/실전"})</span>
                     ) : "—"}
                   </td>
                   <td className="text-center py-2 px-2">{o.aiApis}개</td>

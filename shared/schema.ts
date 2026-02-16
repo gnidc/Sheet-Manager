@@ -93,15 +93,16 @@ export const userLinkedAccounts = pgTable("user_linked_accounts", {
 export type UserLinkedAccount = typeof userLinkedAccounts.$inferSelect;
 export type InsertUserLinkedAccount = typeof userLinkedAccounts.$inferInsert;
 
-// ========== 사용자별 KIS 매매 설정 (멀티 API 지원) ==========
+// ========== 사용자별 자동매매 설정 (멀티 증권사 API 지원) ==========
 export const userTradingConfigs = pgTable("user_trading_configs", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull(),           // 유저당 복수 등록 가능
+  broker: text("broker").default("kis"),           // 증권사: "kis" | "kiwoom"
   label: text("label").default("기본"),            // API 별칭
   appKey: text("app_key").notNull(),
   appSecret: text("app_secret").notNull(),
-  accountNo: text("account_no").notNull(),        // 계좌번호 앞 8자리
-  accountProductCd: text("account_product_cd").default("01"), // 뒤 2자리
+  accountNo: text("account_no").notNull(),        // 계좌번호
+  accountProductCd: text("account_product_cd").default("01"), // KIS: 뒤 2자리
   mockTrading: boolean("mock_trading").default(true),
   isActive: boolean("is_active").default(false),   // 현재 활성 API 여부
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),

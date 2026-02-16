@@ -6,6 +6,7 @@ import { z } from "zod";
 import axios from "axios";
 import bcrypt from "bcryptjs";
 import * as kisApi from "./kisApi.js";
+import * as kiwoomApi from "./kiwoomApi.js";
 import * as cheerio from "cheerio";
 import { encrypt, decrypt, maskApiKey } from "./encryption.js";
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
@@ -263,6 +264,7 @@ async function ensureSecurityTables() {
         )
       `);
       // 멀티 API 지원을 위한 컬럼 추가
+      await db.execute(sql`ALTER TABLE user_trading_configs ADD COLUMN IF NOT EXISTS broker TEXT DEFAULT 'kis'`);
       await db.execute(sql`ALTER TABLE user_trading_configs ADD COLUMN IF NOT EXISTS label TEXT DEFAULT '기본'`);
       await db.execute(sql`ALTER TABLE user_trading_configs ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT false`);
       await db.execute(sql`ALTER TABLE user_ai_configs ADD COLUMN IF NOT EXISTS label TEXT DEFAULT '기본'`);
@@ -607,7 +609,7 @@ export async function registerRoutes(
 
   // seed/export/import 라우트 제거됨 (Tracked ETFs 삭제)
 
-  // ========== KIS 자동매매 API ==========
+  // ========== 자동매매 API (KIS + 키움) ==========
 
   // 헬퍼: DB에서 가져온 KIS 인증정보를 복호화하여 반환
   function decryptKisCreds(config: any): kisApi.UserKisCredentials {
@@ -616,6 +618,16 @@ export async function registerRoutes(
       appSecret: decrypt(config.appSecret),
       accountNo: decrypt(config.accountNo),
       accountProductCd: config.accountProductCd || "01",
+      mockTrading: config.mockTrading ?? true,
+    };
+  }
+
+  // 헬퍼: DB에서 가져온 키움 인증정보를 복호화하여 반환
+  function decryptKiwoomCreds(config: any): kiwoomApi.UserKiwoomCredentials {
+    return {
+      appKey: decrypt(config.appKey),
+      appSecret: decrypt(config.appSecret),
+      accountNo: decrypt(config.accountNo),
       mockTrading: config.mockTrading ?? true,
     };
   }
@@ -635,9 +647,9 @@ export async function registerRoutes(
     };
   }
 
-  // 헬퍼: 현재 세션의 사용자 인증정보를 가져오는 함수
+  // 헬퍼: 현재 세션의 사용자 인증정보를 가져오는 함수 (broker 분기)
   // admin이면 env 기반 (null 반환), 일반 유저면 DB에서 조회
-  async function getUserCredentials(req: Request): Promise<{ userId: number; creds: kisApi.UserKisCredentials } | null> {
+  async function getUserCredentials(req: Request): Promise<{ userId: number; broker: string; kisCreds?: kisApi.UserKisCredentials; kiwoomCreds?: kiwoomApi.UserKiwoomCredentials } | null> {
     if (req.session?.isAdmin) {
       return null; // admin은 기존 env 기반 사용
     }
@@ -647,23 +659,25 @@ export async function registerRoutes(
     const config = await storage.getUserTradingConfig(userId);
     if (!config) return null;
 
-    return {
-      userId,
-      creds: decryptKisCreds(config),
-    };
+    const broker = (config as any).broker || "kis";
+    if (broker === "kiwoom") {
+      return { userId, broker, kiwoomCreds: decryptKiwoomCreds(config) };
+    }
+    return { userId, broker, kisCreds: decryptKisCreds(config) };
   }
 
   // 헬퍼: userId로 직접 인증정보를 가져오는 함수 (손절 감시 등 백그라운드 작업용)
-  async function getUserCredentialsById(userId: number): Promise<{ userId: number; creds: kisApi.UserKisCredentials } | null> {
+  async function getUserCredentialsById(userId: number): Promise<{ userId: number; broker: string; kisCreds?: kisApi.UserKisCredentials; kiwoomCreds?: kiwoomApi.UserKiwoomCredentials } | null> {
     const config = await storage.getUserTradingConfig(userId);
     if (!config) return null;
-    return {
-      userId,
-      creds: decryptKisCreds(config),
-    };
+    const broker = (config as any).broker || "kis";
+    if (broker === "kiwoom") {
+      return { userId, broker, kiwoomCreds: decryptKiwoomCreds(config) };
+    }
+    return { userId, broker, kisCreds: decryptKisCreds(config) };
   }
 
-  // ---- 사용자 KIS 인증정보 관리 ----
+  // ---- 사용자 자동매매 인증정보 관리 ----
 
   // 인증정보 조회 (마스킹됨)
   app.get("/api/trading/config", requireUser, async (req, res) => {
@@ -691,6 +705,7 @@ export async function registerRoutes(
       const plainAccountNo = decrypt(config.accountNo);
       res.json({
         configured: true,
+        broker: (config as any).broker || "kis",
         appKey: plainAppKey.slice(0, 6) + "****",
         accountNo: plainAccountNo.slice(0, 4) + "****",
         accountProductCd: config.accountProductCd,
@@ -780,6 +795,7 @@ export async function registerRoutes(
       const configs = await storage.getUserTradingConfigs(userId);
       const safeConfigs = configs.map((c: any) => ({
         id: c.id,
+        broker: c.broker || "kis",
         label: c.label || "기본",
         appKey: decrypt(c.appKey).slice(0, 6) + "****",
         accountNo: decrypt(c.accountNo).slice(0, 4) + "****",
@@ -795,7 +811,7 @@ export async function registerRoutes(
     }
   });
 
-  // KIS Trading Config 신규 추가
+  // 자동매매 Config 신규 추가 (KIS / 키움)
   app.post("/api/trading/configs", requireUser, async (req, res) => {
     try {
       const userId = req.session?.userId;
@@ -807,39 +823,53 @@ export async function registerRoutes(
         return res.status(400).json({ message: "최대 5개까지 등록할 수 있습니다" });
       }
 
-      const { label, appKey, appSecret, accountNo, accountProductCd, mockTrading } = req.body;
+      const { broker, label, appKey, appSecret, accountNo, accountProductCd, mockTrading } = req.body;
+      const brokerType = broker || "kis";
       if (!appKey || !appSecret || !accountNo) {
         return res.status(400).json({ message: "앱 키, 앱 시크릿, 계좌번호는 필수입니다" });
       }
 
-      // 인증 검증
-      const creds: kisApi.UserKisCredentials = {
-        appKey, appSecret, accountNo,
-        accountProductCd: accountProductCd || "01",
-        mockTrading: mockTrading ?? true,
-      };
-      const validation = await kisApi.validateUserCredentials(userId, creds);
-      if (!validation.success) {
-        return res.status(400).json({ message: `인증 실패: ${validation.message}` });
+      // 인증 검증 (증권사별 분기)
+      if (brokerType === "kiwoom") {
+        const creds: kiwoomApi.UserKiwoomCredentials = {
+          appKey, appSecret, accountNo,
+          mockTrading: mockTrading ?? true,
+        };
+        const validation = await kiwoomApi.validateUserCredentials(userId, creds);
+        if (!validation.success) {
+          return res.status(400).json({ message: `키움 인증 실패: ${validation.message}` });
+        }
+      } else {
+        const creds: kisApi.UserKisCredentials = {
+          appKey, appSecret, accountNo,
+          accountProductCd: accountProductCd || "01",
+          mockTrading: mockTrading ?? true,
+        };
+        const validation = await kisApi.validateUserCredentials(userId, creds);
+        if (!validation.success) {
+          return res.status(400).json({ message: `KIS 인증 실패: ${validation.message}` });
+        }
       }
 
       const config = await storage.createTradingConfig({
         userId,
+        broker: brokerType,
         label: label || "기본",
         appKey: encrypt(appKey),
         appSecret: encrypt(appSecret),
         accountNo: encrypt(accountNo),
-        accountProductCd: accountProductCd || "01",
+        accountProductCd: brokerType === "kis" ? (accountProductCd || "01") : "",
         mockTrading: mockTrading ?? true,
       });
 
-      res.json({ success: true, message: "KIS API가 등록되었습니다", config: { id: config.id, label: config.label, isActive: config.isActive } });
+      const brokerLabel = brokerType === "kiwoom" ? "키움" : "한국투자증권(KIS)";
+      res.json({ success: true, message: `${brokerLabel} API가 등록되었습니다`, config: { id: config.id, label: config.label, isActive: config.isActive } });
     } catch (error: any) {
       res.status(500).json({ message: error.message || "설정 등록 실패" });
     }
   });
 
-  // KIS Trading Config 수정
+  // 자동매매 Config 수정
   app.put("/api/trading/configs/:id", requireUser, async (req, res) => {
     try {
       const userId = req.session?.userId;
@@ -859,13 +889,14 @@ export async function registerRoutes(
       if (!updated) return res.status(404).json({ message: "설정을 찾을 수 없습니다" });
 
       kisApi.clearUserTokenCache(userId);
+      kiwoomApi.clearUserTokenCache(userId);
       res.json({ success: true, message: "설정이 수정되었습니다" });
     } catch (error: any) {
       res.status(500).json({ message: error.message || "설정 수정 실패" });
     }
   });
 
-  // KIS Trading Config 활성화 전환
+  // 자동매매 Config 활성화 전환
   app.post("/api/trading/configs/:id/activate", requireUser, async (req, res) => {
     try {
       const userId = req.session?.userId;
@@ -874,13 +905,14 @@ export async function registerRoutes(
 
       await storage.setActiveTradingConfig(configId, userId);
       kisApi.clearUserTokenCache(userId);
+      kiwoomApi.clearUserTokenCache(userId);
       res.json({ success: true, message: "활성 API가 전환되었습니다" });
     } catch (error: any) {
       res.status(500).json({ message: error.message || "전환 실패" });
     }
   });
 
-  // KIS Trading Config 개별 삭제
+  // 자동매매 Config 개별 삭제
   app.delete("/api/trading/configs/:id", requireUser, async (req, res) => {
     try {
       const userId = req.session?.userId;
@@ -889,6 +921,7 @@ export async function registerRoutes(
 
       await storage.deleteTradingConfig(configId, userId);
       kisApi.clearUserTokenCache(userId);
+      kiwoomApi.clearUserTokenCache(userId);
       res.json({ success: true, message: "설정이 삭제되었습니다" });
     } catch (error: any) {
       res.status(500).json({ message: error.message || "삭제 실패" });
@@ -1090,6 +1123,7 @@ export async function registerRoutes(
             name: u.name,
             tradingApis: tradingConfigs.length,
             activeTradingApi: tradingConfigs.find((c: any) => c.isActive)?.label || null,
+            activeTradingBroker: tradingConfigs.find((c: any) => c.isActive)?.broker || null,
             tradingMock: tradingConfigs.find((c: any) => c.isActive)?.mockTrading ?? null,
             aiApis: aiConfigs.length,
             activeAiApi: aiConfigs.find((c: any) => c.isActive)?.label || null,
@@ -1122,13 +1156,19 @@ export async function registerRoutes(
     });
   });
 
-  // KIS API 연결 상태
+  // 자동매매 API 연결 상태
   app.get("/api/trading/status", requireUser, async (req, res) => {
     try {
       const userCreds = await getUserCredentials(req);
       if (userCreds) {
-        const status = kisApi.getUserTradingStatus(userCreds.creds);
-        return res.json(status);
+        if (userCreds.broker === "kiwoom" && userCreds.kiwoomCreds) {
+          const status = kiwoomApi.getUserTradingStatus(userCreds.kiwoomCreds);
+          return res.json({ ...status, broker: "kiwoom" });
+        }
+        if (userCreds.kisCreds) {
+          const status = kisApi.getUserTradingStatus(userCreds.kisCreds);
+          return res.json({ ...status, broker: "kis" });
+        }
       }
       // admin 또는 인증정보 없는 유저 → env 기반 상태
       const status = kisApi.getTradingStatus();
@@ -1137,10 +1177,10 @@ export async function registerRoutes(
       if (!req.session?.isAdmin && req.session?.userId) {
         const config = await storage.getUserTradingConfig(req.session.userId);
         if (!config) {
-          return res.json({ configured: false, tradingConfigured: false, mockTrading: false, accountNo: "", accountProductCd: "01", needsSetup: true });
+          return res.json({ configured: false, tradingConfigured: false, mockTrading: false, accountNo: "", accountProductCd: "01", needsSetup: true, broker: "kis" });
         }
       }
-      res.json(status);
+      res.json({ ...status, broker: "kis" });
     } catch (error: any) {
       res.status(500).json({ message: error.message || "상태 조회 실패" });
     }
@@ -1151,11 +1191,18 @@ export async function registerRoutes(
     try {
       const userCreds = await getUserCredentials(req);
       if (userCreds) {
-        console.log(`[Balance] User ${userCreds.userId} - mockTrading: ${userCreds.creds.mockTrading}, accountNo: ${userCreds.creds.accountNo?.slice(0,4)}****`);
-        const balance = await kisApi.getUserAccountBalance(userCreds.userId, userCreds.creds);
-        return res.json(balance);
+        if (userCreds.broker === "kiwoom" && userCreds.kiwoomCreds) {
+          console.log(`[Balance] User ${userCreds.userId} (키움) - accountNo: ${userCreds.kiwoomCreds.accountNo?.slice(0,4)}****`);
+          const balance = await kiwoomApi.getUserAccountBalance(userCreds.userId, userCreds.kiwoomCreds);
+          return res.json(balance);
+        }
+        if (userCreds.kisCreds) {
+          console.log(`[Balance] User ${userCreds.userId} (KIS) - mockTrading: ${userCreds.kisCreds.mockTrading}, accountNo: ${userCreds.kisCreds.accountNo?.slice(0,4)}****`);
+          const balance = await kisApi.getUserAccountBalance(userCreds.userId, userCreds.kisCreds);
+          return res.json(balance);
+        }
       }
-      // Admin: env 기반
+      // Admin: env 기반 (KIS)
       const status = kisApi.getTradingStatus();
       console.log(`[Balance] Admin - configured: ${status.tradingConfigured}, mockTrading: ${status.mockTrading}, accountNo: ${status.accountNo}`);
       if (!status.tradingConfigured) {
@@ -1226,25 +1273,26 @@ export async function registerRoutes(
         return res.status(400).json({ message: "주문유형은 buy 또는 sell이어야 합니다" });
       }
       
-      // 사용자별 인증정보 분기
+      // 사용자별 인증정보 분기 (KIS / 키움)
       const userCreds = await getUserCredentials(req);
       let result;
+      const orderParams = {
+        stockCode,
+        orderType,
+        quantity: Number(quantity),
+        price: price ? Number(price) : undefined,
+        orderMethod: orderMethod || "limit",
+      };
       if (userCreds) {
-        result = await kisApi.userPlaceOrder(userCreds.userId, userCreds.creds, {
-          stockCode,
-          orderType,
-          quantity: Number(quantity),
-          price: price ? Number(price) : undefined,
-          orderMethod: orderMethod || "limit",
-        });
+        if (userCreds.broker === "kiwoom" && userCreds.kiwoomCreds) {
+          result = await kiwoomApi.userPlaceOrder(userCreds.userId, userCreds.kiwoomCreds, orderParams);
+        } else if (userCreds.kisCreds) {
+          result = await kisApi.userPlaceOrder(userCreds.userId, userCreds.kisCreds, orderParams);
+        } else {
+          return res.status(400).json({ message: "자동매매 API가 설정되지 않았습니다." });
+        }
       } else {
-        result = await kisApi.placeOrder({
-          stockCode,
-          orderType,
-          quantity: Number(quantity),
-          price: price ? Number(price) : undefined,
-          orderMethod: orderMethod || "limit",
-        });
+        result = await kisApi.placeOrder(orderParams);
       }
       
       // 주문 결과를 DB에 기록
@@ -1271,7 +1319,7 @@ export async function registerRoutes(
     }
   });
 
-  // KIS 주문 체결 내역 조회
+  // 증권사 주문 체결 내역 조회 (KIS / 키움)
   app.get("/api/trading/kis-orders", requireUser, async (req, res) => {
     try {
       const startDate = req.query.startDate as string | undefined;
@@ -1279,8 +1327,14 @@ export async function registerRoutes(
       
       const userCreds = await getUserCredentials(req);
       if (userCreds) {
-        const history = await kisApi.getUserOrderHistory(userCreds.userId, userCreds.creds, startDate, endDate);
-        return res.json(history);
+        if (userCreds.broker === "kiwoom" && userCreds.kiwoomCreds) {
+          const history = await kiwoomApi.getUserOrderHistory(userCreds.userId, userCreds.kiwoomCreds, startDate, endDate);
+          return res.json(history);
+        }
+        if (userCreds.kisCreds) {
+          const history = await kisApi.getUserOrderHistory(userCreds.userId, userCreds.kisCreds, startDate, endDate);
+          return res.json(history);
+        }
       }
       const history = await kisApi.getOrderHistory(startDate, endDate);
       res.json(history);
@@ -1422,22 +1476,23 @@ export async function registerRoutes(
           
           if (shouldExecute) {
             let orderResult;
+            const ruleOrderParams = {
+              stockCode: rule.stockCode,
+              orderType: orderType as "buy" | "sell",
+              quantity: rule.quantity,
+              price: currentPrice,
+              orderMethod: (rule.orderMethod as "market" | "limit") || "limit",
+            };
             if (userCreds) {
-              orderResult = await kisApi.userPlaceOrder(userCreds.userId, userCreds.creds, {
-                stockCode: rule.stockCode,
-                orderType,
-                quantity: rule.quantity,
-                price: currentPrice,
-                orderMethod: (rule.orderMethod as "market" | "limit") || "limit",
-              });
+              if (userCreds.broker === "kiwoom" && userCreds.kiwoomCreds) {
+                orderResult = await kiwoomApi.userPlaceOrder(userCreds.userId, userCreds.kiwoomCreds, ruleOrderParams);
+              } else if (userCreds.kisCreds) {
+                orderResult = await kisApi.userPlaceOrder(userCreds.userId, userCreds.kisCreds, ruleOrderParams);
+              } else {
+                orderResult = { success: false, message: "자동매매 API 미설정" };
+              }
             } else {
-              orderResult = await kisApi.placeOrder({
-                stockCode: rule.stockCode,
-                orderType,
-                quantity: rule.quantity,
-                price: currentPrice,
-                orderMethod: (rule.orderMethod as "market" | "limit") || "limit",
-              });
+              orderResult = await kisApi.placeOrder(ruleOrderParams);
             }
             
             // 주문 기록 저장
@@ -1754,20 +1809,22 @@ export async function registerRoutes(
           if (currentPrice <= currentStopPrice) {
             const userCreds = sl.userId ? await getUserCredentialsById(sl.userId) : null;
             let orderResult;
+            const sellParams = {
+              stockCode: sl.stockCode,
+              orderType: "sell" as const,
+              quantity: sl.quantity,
+              orderMethod: "market" as const,
+            };
             if (userCreds) {
-              orderResult = await kisApi.userPlaceOrder(userCreds.userId, userCreds.creds, {
-                stockCode: sl.stockCode,
-                orderType: "sell",
-                quantity: sl.quantity,
-                orderMethod: "market",
-              });
+              if (userCreds.broker === "kiwoom" && userCreds.kiwoomCreds) {
+                orderResult = await kiwoomApi.userPlaceOrder(userCreds.userId, userCreds.kiwoomCreds, sellParams);
+              } else if (userCreds.kisCreds) {
+                orderResult = await kisApi.userPlaceOrder(userCreds.userId, userCreds.kisCreds, sellParams);
+              } else {
+                orderResult = { success: false, message: "자동매매 API 미설정" };
+              }
             } else {
-              orderResult = await kisApi.placeOrder({
-                stockCode: sl.stockCode,
-                orderType: "sell",
-                quantity: sl.quantity,
-                orderMethod: "market",
-              });
+              orderResult = await kisApi.placeOrder(sellParams);
             }
 
             await storage.createTradingOrder({
@@ -8886,20 +8943,22 @@ ${etfListStr}
 
           const userCreds = sl.userId ? await getUserCredentialsById(sl.userId) : null;
           let orderResult;
+          const sellParams = {
+            stockCode: sl.stockCode,
+            orderType: "sell" as const,
+            quantity: sl.quantity,
+            orderMethod: "market" as const,
+          };
           if (userCreds) {
-            orderResult = await kisApi.userPlaceOrder(userCreds.userId, userCreds.creds, {
-              stockCode: sl.stockCode,
-              orderType: "sell",
-              quantity: sl.quantity,
-              orderMethod: "market",
-            });
+            if (userCreds.broker === "kiwoom" && userCreds.kiwoomCreds) {
+              orderResult = await kiwoomApi.userPlaceOrder(userCreds.userId, userCreds.kiwoomCreds, sellParams);
+            } else if (userCreds.kisCreds) {
+              orderResult = await kisApi.userPlaceOrder(userCreds.userId, userCreds.kisCreds, sellParams);
+            } else {
+              orderResult = { success: false, message: "자동매매 API 미설정" };
+            }
           } else {
-            orderResult = await kisApi.placeOrder({
-              stockCode: sl.stockCode,
-              orderType: "sell",
-              quantity: sl.quantity,
-              orderMethod: "market",
-            });
+            orderResult = await kisApi.placeOrder(sellParams);
           }
 
           // 주문 기록 저장
@@ -10545,7 +10604,13 @@ ${etfListStr}
             const userCreds = await getUserCredentials(req);
             let result;
             if (userCreds) {
-              result = await kisApi.getUserAccountBalance(userCreds.userId, userCreds.creds);
+              if (userCreds.broker === "kiwoom" && userCreds.kiwoomCreds) {
+                result = await kiwoomApi.getUserAccountBalance(userCreds.userId, userCreds.kiwoomCreds);
+              } else if (userCreds.kisCreds) {
+                result = await kisApi.getUserAccountBalance(userCreds.userId, userCreds.kisCreds);
+              } else {
+                return { type: "error", message: "자동매매 API가 설정되지 않았습니다." };
+              }
             } else {
               result = await kisApi.getAccountBalance();
             }
@@ -10795,23 +10860,24 @@ ${etfListStr}
           // confirm된 주문 실행
           try {
             const userCreds = await getUserCredentials(req);
+            const agentOrderParams = {
+              stockCode: params.stockCode,
+              orderType: params.orderType as "buy" | "sell",
+              quantity: Number(params.quantity),
+              price: params.price ? Number(params.price) : undefined,
+              orderMethod: (params.orderMethod || "limit") as "market" | "limit",
+            };
             let result;
             if (userCreds) {
-              result = await kisApi.userPlaceOrder(userCreds.userId, userCreds.creds, {
-                stockCode: params.stockCode,
-                orderType: params.orderType,
-                quantity: Number(params.quantity),
-                price: params.price ? Number(params.price) : undefined,
-                orderMethod: params.orderMethod || "limit",
-              });
+              if (userCreds.broker === "kiwoom" && userCreds.kiwoomCreds) {
+                result = await kiwoomApi.userPlaceOrder(userCreds.userId, userCreds.kiwoomCreds, agentOrderParams);
+              } else if (userCreds.kisCreds) {
+                result = await kisApi.userPlaceOrder(userCreds.userId, userCreds.kisCreds, agentOrderParams);
+              } else {
+                result = { success: false, message: "자동매매 API 미설정" };
+              }
             } else {
-              result = await kisApi.placeOrder({
-                stockCode: params.stockCode,
-                orderType: params.orderType,
-                quantity: Number(params.quantity),
-                price: params.price ? Number(params.price) : undefined,
-                orderMethod: params.orderMethod || "limit",
-              });
+              result = await kisApi.placeOrder(agentOrderParams);
             }
             
             // 주문 기록
