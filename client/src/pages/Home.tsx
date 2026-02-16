@@ -128,7 +128,7 @@ export default function Home() {
               >
                 {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
               </button>
-              {/* AI Agent 모바일웹/앱 버튼 */}
+              {/* AI Agent 모바일웹 버튼 */}
               <a
                 href="/ai-mobile"
                 target="_blank"
@@ -137,15 +137,6 @@ export default function Home() {
                 className="inline-flex items-center justify-center w-7 h-7 rounded-md bg-red-500 hover:bg-red-600 text-white text-[10px] font-bold transition-colors shadow-sm"
               >
                 M
-              </a>
-              <a
-                href="/ai-mobile"
-                target="_blank"
-                rel="noopener noreferrer"
-                title="AI Agent 앱 설치 (PWA)"
-                className="inline-flex items-center justify-center w-7 h-7 rounded-md bg-red-500 hover:bg-red-600 text-white text-[10px] font-bold transition-colors shadow-sm"
-              >
-                A
               </a>
               <QnABoard />
               {(isAdmin || isLoggedIn) && (
