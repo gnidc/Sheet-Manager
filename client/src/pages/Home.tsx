@@ -1665,17 +1665,16 @@ function HomeEmbed({ onNavigate }: { onNavigate: (tab: string) => void }) {
     },
   });
 
-  // 글 목록 조회 (게시판 필터 지원)
+  // 글 목록 조회 (최근 3일치 충분히 포함하도록 50개 로드)
   const { data, isLoading, isFetching } = useQuery<{
     articles: CafeArticle[];
     page: number;
     perPage: number;
     totalArticles: number;
   }>({
-    queryKey: ["/api/cafe/articles", page, selectedMenuId],
+    queryKey: ["/api/cafe/articles", 1],
     queryFn: async () => {
-      const params = new URLSearchParams({ page: String(page), perPage: "20" });
-      if (selectedMenuId !== "0") params.set("menuId", selectedMenuId);
+      const params = new URLSearchParams({ page: "1", perPage: "50" });
       const res = await fetch(`/api/cafe/articles?${params}`, { credentials: "include" });
       if (!res.ok) throw new Error("카페 글 목록을 불러올 수 없습니다.");
       return res.json();
@@ -2103,33 +2102,6 @@ function HomeEmbed({ onNavigate }: { onNavigate: (tab: string) => void }) {
                     </div>
                 </div>
 
-        {/* 게시판 필터 탭 */}
-        {!isSearchMode && menus.length > 0 && (
-          <div className="px-4 py-2 border-b overflow-x-auto">
-            <div className="flex gap-1 min-w-max">
-                  <Button
-                variant={selectedMenuId === "0" ? "default" : "ghost"}
-                    size="sm"
-                onClick={() => handleMenuChange("0")}
-                className="h-7 text-xs px-3 whitespace-nowrap"
-            >
-                전체
-            </Button>
-              {menus.map((menu) => (
-                <Button
-                  key={menu.menuId}
-                  variant={selectedMenuId === String(menu.menuId) ? "default" : "ghost"}
-                  size="sm"
-                  onClick={() => handleMenuChange(String(menu.menuId))}
-                  className="h-7 text-xs px-3 whitespace-nowrap"
-                >
-                  {menu.menuName}
-                  </Button>
-                ))}
-              </div>
-            </div>
-        )}
-
         {/* 검색 모드 해제 버튼 */}
         {isSearchMode && (
           <div className="px-4 py-2 border-b bg-primary/5">
@@ -2140,161 +2112,129 @@ function HomeEmbed({ onNavigate }: { onNavigate: (tab: string) => void }) {
               <Button variant="ghost" size="sm" onClick={clearSearch} className="h-6 text-xs gap-1">
                 <X className="w-3 h-3" />
                 검색 해제
-                  </Button>
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* 검색 결과 글 목록 */}
+        {isSearchMode && (
+          <div className="divide-y">
+            {loading ? (
+              <div className="py-12 text-center">
+                <Loader2 className="w-6 h-6 animate-spin text-primary mx-auto mb-2" />
+                <p className="text-xs text-muted-foreground">검색 중...</p>
               </div>
-              </div>
-            )}
-            
-        {/* 글 목록 */}
-        <div className="divide-y">
-          {loading ? (
-            <div className="py-12 text-center">
-              <Loader2 className="w-6 h-6 animate-spin text-primary mx-auto mb-2" />
-              <p className="text-xs text-muted-foreground">{isSearchMode ? "검색 중..." : "로딩 중..."}</p>
-              </div>
-          ) : articles.length === 0 ? (
-            <div className="py-16 text-center text-muted-foreground">
-              {isSearchMode ? "검색 결과가 없습니다." : "게시글이 없습니다."}
+            ) : articles.length === 0 ? (
+              <div className="py-16 text-center text-muted-foreground">
+                검색 결과가 없습니다.
               </div>
             ) : (
-            articles.map((article) => (
-              <div
-                key={article.articleId}
-                className="w-full text-left px-4 py-3 hover:bg-muted/40 transition-colors flex gap-3 group"
-              >
-                {/* 썸네일 */}
-                {article.representImage && (
-                  <div className="flex-shrink-0 w-16 h-16 rounded-md overflow-hidden bg-muted cursor-pointer"
-                    onClick={() => setPreviewArticleId(article.articleId)}
-                  >
-                    <img
-                      src={article.representImage}
-                      alt=""
-                      className="w-full h-full object-cover"
-                      loading="lazy"
-                    />
-              </div>
-            )}
-                {/* 본문 */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium truncate max-w-[100px]">
-                      {article.menuName}
-                    </span>
-                    {article.newArticle && (
-                      <span className="text-[10px] px-1 py-0.5 rounded bg-red-500 text-white font-bold">N</span>
-                    )}
-        </div>
-                  <h4
-                    className="text-sm font-medium line-clamp-1 mb-1 cursor-pointer hover:text-primary transition-colors"
-                    onClick={() => setPreviewArticleId(article.articleId)}
-                  >
-                    {article.subject}
-                  </h4>
-                  <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                    <span>{article.writerNickname}</span>
-                    <span className="opacity-40">|</span>
-                    <span>{formatDate(article.writeDateTimestamp)}</span>
-                    <span className="opacity-40">|</span>
-                    <span>조회 {article.readCount}</span>
-                    {article.commentCount > 0 && (
-                      <>
-                        <span className="opacity-40">|</span>
-                        <span className="text-primary">댓글 {article.commentCount}</span>
-                      </>
-                    )}
-                    {article.likeItCount > 0 && (
-                      <>
-                        <span className="opacity-40">|</span>
-                        <span className="text-red-400">♥ {article.likeItCount}</span>
-                      </>
-      )}
-    </div>
-      </div>
-                {/* 미리보기 / 새탭 버튼 */}
-                <div className="flex-shrink-0 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7"
-                    title="미리보기"
-                    onClick={() => setPreviewArticleId(article.articleId)}
-                  >
-                    <Eye className="w-3.5 h-3.5" />
-        </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7"
-                    title="새 탭에서 열기"
-                    onClick={() => window.open(`${CAFE_URL}/${article.articleId}`, "_blank", "noopener,noreferrer")}
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </Button>
-                            </div>
-              </div>
-            ))
-        )}
-      </div>
-
-        {/* 페이지네이션 */}
-        {totalPages > 1 && (
-          <div className="flex items-center justify-center gap-1 py-3 border-t bg-muted/20">
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={page <= 1 || isFetching}
-              onClick={() => setPage(1)}
-              className="h-8 w-8 p-0 text-xs"
-            >
-              «
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={page <= 1 || isFetching}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              className="h-8 w-8 p-0 text-xs"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </Button>
-            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-              const startPage = Math.max(1, Math.min(page - 2, totalPages - 4));
-              const p = startPage + i;
-              if (p > totalPages) return null;
-  return (
-                <Button
-                  key={p}
-                  variant={p === page ? "default" : "ghost"}
-                  size="sm"
-                  onClick={() => setPage(p)}
-                  disabled={isFetching}
-                  className="h-8 w-8 p-0 text-xs"
+              articles.map((article) => (
+                <a
+                  key={article.articleId}
+                  href={`${CAFE_URL}/${article.articleId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/30 transition-colors group"
+                  onClick={(e) => { e.preventDefault(); setPreviewArticleId(article.articleId); }}
                 >
-                  {p}
-              </Button>
-                            );
-                          })}
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={page >= totalPages || isFetching}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              className="h-8 w-8 p-0 text-xs"
-            >
-              <ChevronRight className="w-4 h-4" />
-                </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={page >= totalPages || isFetching}
-              onClick={() => setPage(totalPages)}
-              className="h-8 w-8 p-0 text-xs"
-            >
-              »
-            </Button>
-            </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium truncate group-hover:text-primary transition-colors">
+                        {article.subject}
+                      </span>
+                      {article.commentCount > 0 && (
+                        <span className="text-xs text-primary font-bold flex-shrink-0">[{article.commentCount}]</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-0.5">
+                      <span className="text-blue-500/70 font-medium">{article.menuName}</span>
+                      <span className="opacity-40">|</span>
+                      <span>{article.writerNickname}</span>
+                      <span className="opacity-40">|</span>
+                      <span>👁 {article.readCount}</span>
+                      {article.likeItCount > 0 && (
+                        <>
+                          <span className="opacity-40">|</span>
+                          <span>❤️ {article.likeItCount}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <span className="text-xs text-muted-foreground flex-shrink-0 tabular-nums">
+                    {formatDate(article.writeDateTimestamp)}
+                  </span>
+                </a>
+              ))
             )}
+          </div>
+        )}
+
+        {/* 최신글 (검색 모드가 아닐 때만) */}
+        {!isSearchMode && (
+          <>
+            <div className="px-4 pt-3 pb-1">
+              <h4 className="text-sm font-semibold flex items-center gap-1.5 mb-2">
+                <FileText className="w-4 h-4 text-primary" />
+                최신글 <span className="text-xs text-muted-foreground font-normal">(최근 3일, {totalArticles}건)</span>
+              </h4>
+            </div>
+            {loading ? (
+              <div className="py-12 text-center">
+                <Loader2 className="w-6 h-6 animate-spin text-primary mx-auto mb-2" />
+                <p className="text-xs text-muted-foreground">로딩 중...</p>
+              </div>
+            ) : articles.length === 0 ? (
+              <div className="py-8 text-center text-muted-foreground text-sm">
+                최근 3일간 게시글이 없습니다.
+              </div>
+            ) : (
+              <div className="divide-y">
+                {articles.map((article) => (
+                  <a
+                    key={article.articleId}
+                    href={`${CAFE_URL}/${article.articleId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/30 transition-colors group"
+                    onClick={(e) => { e.preventDefault(); setPreviewArticleId(article.articleId); }}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium truncate group-hover:text-primary transition-colors">
+                          {article.subject}
+                        </span>
+                        {article.newArticle && (
+                          <span className="text-[10px] px-1 py-0 rounded bg-red-500 text-white font-bold flex-shrink-0">N</span>
+                        )}
+                        {article.commentCount > 0 && (
+                          <span className="text-xs text-primary font-bold flex-shrink-0">[{article.commentCount}]</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-0.5">
+                        <span className="text-blue-500/70 font-medium">{article.menuName}</span>
+                        <span className="opacity-40">|</span>
+                        <span>{article.writerNickname}</span>
+                        <span className="opacity-40">|</span>
+                        <span>👁 {article.readCount}</span>
+                        {article.likeItCount > 0 && (
+                          <>
+                            <span className="opacity-40">|</span>
+                            <span>❤️ {article.likeItCount}</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <span className="text-xs text-muted-foreground flex-shrink-0 tabular-nums">
+                      {formatDate(article.writeDateTimestamp)}
+                    </span>
+                  </a>
+                ))}
+              </div>
+            )}
+          </>
+        )}
         </div>
 
       {/* 글 본문 미리보기 모달 */}
