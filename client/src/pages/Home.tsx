@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, Suspense, lazy, useTransition, useCallback } from "react";
+import { useState, useEffect, useRef, Suspense, lazy } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { Input } from "@/components/ui/input";
@@ -49,15 +49,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 
 export default function Home() {
   const [, navigate] = useLocation();
-  const [activeTab, setActiveTabRaw] = useState("home");
-  const [isTabPending, startTabTransition] = useTransition();
-  const setActiveTab = useCallback((tab: string) => {
-    // useTransition만 사용: React가 자체적으로 non-blocking 처리
-    // rAF 제거로 ~32ms 불필요 지연 해소
-    startTabTransition(() => {
-      setActiveTabRaw(tab);
-    });
-  }, []);
+  const [activeTab, setActiveTab] = useState("home");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [darkMode, setDarkMode] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -172,9 +164,7 @@ export default function Home() {
                   variant="outline"
                   size="sm"
                   className="gap-1.5 border-amber-300 text-amber-600 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-400 dark:hover:bg-amber-950 btn-hover-lift"
-                  onClick={() => {
-                    startTabTransition(() => { navigate("/trading"); });
-                  }}
+                  onClick={() => { navigate("/trading"); }}
                 >
                   <Zap className="w-3.5 h-3.5" />
                   <span className="hidden sm:inline text-xs">자동매매</span>
@@ -518,7 +508,7 @@ export default function Home() {
           </div>
 
           {/* 오른쪽 콘텐츠 영역 */}
-          <div className={`flex-1 min-w-0 ${isTabPending ? 'opacity-70 transition-opacity duration-150' : ''}`} style={{ contain: 'layout style' }}>
+          <div className="flex-1 min-w-0" style={{ contain: 'layout style' }}>
 
           <TabsContent value="home">
             <HomeEmbed onNavigate={setActiveTab} />
@@ -770,7 +760,7 @@ function SidebarAccordion({ icon, label, active, items, activeTab, onSelect }: {
             <button
               key={item.value}
               onClick={() => onSelect(item.value)}
-              className={`w-full text-left rounded-md px-2.5 py-1.5 text-xs font-medium transition-all duration-150 ${
+              className={`w-full text-left rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors duration-100 ${
                 activeTab === item.value
                   ? 'bg-primary/10 text-primary dark:bg-primary/15'
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
