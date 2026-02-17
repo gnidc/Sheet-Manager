@@ -91,18 +91,22 @@ export default function Home() {
     }
   }, [darkMode]);
 
-  // 방문 추적: 탭 전환 시 기록
+  // 방문 추적: 탭 전환 시 기록 (초기 로딩 블로킹 방지를 위해 idle 콜백으로 defer)
   useEffect(() => {
-    const trackVisit = async () => {
-      try {
-        await fetch("/api/visit/track", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ page: activeTab }),
-        });
-      } catch {}
+    const trackVisit = () => {
+      fetch("/api/visit/track", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ page: activeTab }),
+      }).catch(() => {});
     };
-    trackVisit();
+    if (typeof requestIdleCallback !== "undefined") {
+      const id = requestIdleCallback(trackVisit);
+      return () => cancelIdleCallback(id);
+    } else {
+      const id = setTimeout(trackVisit, 300);
+      return () => clearTimeout(id);
+    }
   }, [activeTab]);
 
   return (
@@ -133,7 +137,7 @@ export default function Home() {
               {/* Dark mode toggle */}
               <button
                 onClick={() => setDarkMode(!darkMode)}
-                className="flex items-center justify-center w-9 h-9 rounded-xl hover:bg-muted/60 transition-all duration-200 text-muted-foreground hover:text-foreground"
+                className="flex items-center justify-center w-9 h-9 rounded-xl hover:bg-muted/60 transition-colors duration-100 text-muted-foreground hover:text-foreground"
                 title={darkMode ? "라이트 모드" : "다크 모드"}
               >
                 {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
@@ -181,7 +185,7 @@ export default function Home() {
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <div className="flex gap-4">
           {/* 왼쪽 세로 메인탭 사이드바 */}
-          <div className={`hidden md:flex flex-col shrink-0 sticky top-[73px] self-start max-h-[calc(100vh-85px)] overflow-y-auto scrollbar-thin transition-all duration-300 ease-in-out ${sidebarCollapsed ? 'w-14' : 'w-44'}`}>
+          <div className={`hidden md:flex flex-col shrink-0 sticky top-[73px] self-start max-h-[calc(100vh-85px)] overflow-y-auto scrollbar-thin ${sidebarCollapsed ? 'w-14' : 'w-44'}`} style={{ transition: 'width 200ms ease-out' }}>
             <nav className="sidebar-nav bg-card border border-border/60 shadow-sm">
               {/* 홈 */}
               <SidebarButton icon={<HomeIcon className="h-4 w-4 shrink-0" />} label="홈" active={activeTab === "home"} collapsed={sidebarCollapsed} onClick={() => setActiveTab("home")} />
@@ -401,7 +405,7 @@ export default function Home() {
             </TabsTrigger>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                  <button className={`inline-flex items-center gap-1 shrink-0 px-2 py-1.5 text-xs font-medium rounded-sm transition-all ${
+                  <button className={`inline-flex items-center gap-1 shrink-0 px-2 py-1.5 text-xs font-medium rounded-sm transition-colors duration-100 ${
                     activeTab === "etf-components" || activeTab === "new-etf" || activeTab === "watchlist-etf" || activeTab === "satellite-etf"
                       ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"
                   }`}>
@@ -417,7 +421,7 @@ export default function Home() {
             </DropdownMenu>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                  <button className={`inline-flex items-center gap-1 shrink-0 px-2 py-1.5 text-xs font-medium rounded-sm transition-all ${
+                  <button className={`inline-flex items-center gap-1 shrink-0 px-2 py-1.5 text-xs font-medium rounded-sm transition-colors duration-100 ${
                     activeTab.startsWith("markets-") ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"
                   }`}>
                     <Globe className="h-3.5 w-3.5" /> Markets <ChevronDown className="h-2.5 w-2.5" />
@@ -434,7 +438,7 @@ export default function Home() {
             </DropdownMenu>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                  <button className={`inline-flex items-center gap-1 shrink-0 px-2 py-1.5 text-xs font-medium rounded-sm transition-all ${
+                  <button className={`inline-flex items-center gap-1 shrink-0 px-2 py-1.5 text-xs font-medium rounded-sm transition-colors duration-100 ${
                     activeTab.startsWith("stocks-") ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"
                   }`}>
                     <BarChart3 className="h-3.5 w-3.5" /> 주식 <ChevronDown className="h-2.5 w-2.5" />
@@ -448,7 +452,7 @@ export default function Home() {
               </DropdownMenu>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <button className={`inline-flex items-center gap-1 shrink-0 px-2 py-1.5 text-xs font-medium rounded-sm transition-all ${
+                  <button className={`inline-flex items-center gap-1 shrink-0 px-2 py-1.5 text-xs font-medium rounded-sm transition-colors duration-100 ${
                     activeTab.startsWith("strategy-") ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"
                   }`}>
                     <Calendar className="h-3.5 w-3.5" /> 전략 <ChevronDown className="h-2.5 w-2.5" />
@@ -464,7 +468,7 @@ export default function Home() {
                 {isAdmin && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <button className={`inline-flex items-center gap-1 shrink-0 px-2 py-1.5 text-xs font-medium rounded-sm transition-all ${
+                  <button className={`inline-flex items-center gap-1 shrink-0 px-2 py-1.5 text-xs font-medium rounded-sm transition-colors duration-100 ${
                     activeTab.startsWith("crypto-") ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"
                   }`}>
                     <Zap className="h-3.5 w-3.5" /> CRYPTO <ChevronDown className="h-2.5 w-2.5" />
@@ -490,7 +494,7 @@ export default function Home() {
               {isAdmin && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <button className={`inline-flex items-center gap-1 shrink-0 px-2 py-1.5 text-xs font-medium rounded-sm transition-all ${
+                    <button className={`inline-flex items-center gap-1 shrink-0 px-2 py-1.5 text-xs font-medium rounded-sm transition-colors duration-100 ${
                       activeTab === "admin-dashboard" || activeTab === "admin-system" || activeTab === "admin-security" || activeTab === "mobile-preview" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"
                     }`}>
                       <BarChart3 className="h-3.5 w-3.5 text-emerald-500" /> Dashboard <ChevronDown className="h-2.5 w-2.5" />
@@ -754,7 +758,7 @@ function SidebarAccordion({ icon, label, active, items, activeTab, onSelect }: {
         <span className="truncate flex-1">{label}</span>
         <ChevronDown className={`h-3 w-3 opacity-50 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
       </button>
-      <div className={`overflow-hidden transition-all duration-200 ease-in-out ${open ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0'}`}>
+      <div className={`overflow-hidden ${open ? 'max-h-96' : 'max-h-0'}`} style={{ transition: 'max-height 150ms ease-out' }}>
         <div className="ml-3 pl-3 border-l border-border/40 space-y-0.5 py-1">
           {items.map((item) => (
             <button
