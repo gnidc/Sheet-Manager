@@ -11413,13 +11413,16 @@ ${etfListStr}
 
       // 4. 환경 변수 설정 상태 (값은 노출하지 않음)
       const envKeys = [
-        "DATABASE_URL", "SESSION_SECRET", "ENCRYPTION_KEY",
-        "VITE_GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET",
-        "NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET",
+        // 필수: 서버 운영
+        "DATABASE_URL", "SESSION_SECRET", "ENCRYPTION_KEY", "ADMIN_PASSWORD_HASH",
+        // 필수: 인증
+        "VITE_GOOGLE_CLIENT_ID", "NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET",
+        // AI API (하나 이상 설정 권장)
         "GEMINI_API_KEY", "OPENAI_API_KEY", "GROQ_API_KEY",
+        // 자동매매: KIS
         "KIS_APP_KEY", "KIS_APP_SECRET", "KIS_ACCOUNT_NO", "KIS_MOCK_TRADING",
+        // 자동매매: 키움 (선택)
         "KIWOOM_APP_KEY", "KIWOOM_APP_SECRET", "KIWOOM_ACCOUNT_NO",
-        "ADMIN_PASSWORD",
       ];
       result.environment = {
         configured: envKeys.filter(k => !!process.env[k]).map(k => k),
