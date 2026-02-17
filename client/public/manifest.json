@@ -1,7 +1,7 @@
 {
-  "name": "AI Investment Agent",
-  "short_name": "AI Agent",
-  "description": "AI 투자 에이전트 - 실시간 시장 분석 및 투자 조언",
+  "name": "LifeFit",
+  "short_name": "LifeFit",
+  "description": "LifeFit - AI 투자 에이전트 & 실시간 시장 분석",
   "start_url": "/ai-mobile",
   "display": "standalone",
   "orientation": "portrait",

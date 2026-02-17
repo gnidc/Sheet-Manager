@@ -74,7 +74,7 @@ export function AiMobileContent() {
             <Bot className="w-8 h-8 text-white" />
           </div>
           <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-            LifeFit Mobile
+            LifeFit
           </h1>
           <p className="text-sm text-muted-foreground">
             로그인 후 이용할 수 있습니다
@@ -107,7 +107,7 @@ export function AiMobileContent() {
               <ArrowLeft className="w-4 h-4" />
             </a>
             <div>
-              <h1 className="text-sm font-bold leading-tight">LifeFit Mobile</h1>
+              <h1 className="text-sm font-bold leading-tight">LifeFit</h1>
               <p className="text-[10px] text-muted-foreground leading-tight">{userName || userEmail || "User"}</p>
             </div>
           </div>
