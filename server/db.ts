@@ -155,9 +155,9 @@ export function getPool(): pg.Pool {
       connectionTimeoutMillis: isVercel ? 8000 : 30000, // Vercel: 8초, 로컬: 30초
       // SSL 설정 - connection string의 sslmode와 함께 명시적으로 설정
       ssl: sslConfig,
-      // Vercel에서는 keep-alive 비활성화 (연결을 빠르게 정리)
-      keepAlive: !isVercel, // Vercel에서는 keep-alive 비활성화
-      keepAliveInitialDelayMillis: isVercel ? 0 : 0, // Vercel에서는 사용 안 함
+      // keep-alive 활성화: 함수 수명 내에서 연결 재사용 극대화
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 0,
     });
             
     // Pool 에러 핸들링 - 연결이 끊어졌을 때 재연결
@@ -192,9 +192,12 @@ export function getPool(): pg.Pool {
         });
       });
     } else {
-      // Vercel 환경에서는 이벤트 리스너를 전혀 등록하지 않음
-      // 이벤트 리스너가 함수 종료를 방해할 수 있으므로 완전히 제거
-      // statement_timeout은 쿼리 실행 시 직접 설정하거나 DB 레벨에서 처리
+      // Vercel 환경: 최소한의 에러 핸들러만 등록
+      _pool.on('error', (err: any) => {
+        console.error('[DB Pool Error]', err.message);
+        _pool = null;
+        _db = null;
+      });
     }
     
     console.log(`Database pool created (max: ${isVercel ? 1 : 10}, min: 0, Vercel: ${isVercel}, connectionTimeout: ${isVercel ? 8000 : 30000}ms, SSL: ${sslConfig ? 'enabled' : 'disabled'})`);

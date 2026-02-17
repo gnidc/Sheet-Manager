@@ -11279,24 +11279,45 @@ ${etfListStr}
   app.get("/api/admin/security/whois/:ip", requireAdmin, whoisHandler);
 
   // ========== 시스템 모니터링 ==========
+  // 결과 캐시: 60초 TTL (무거운 쿼리 반복 방지)
+  let systemStatusCache: { data: any; expiry: number } | null = null;
+  const SYSTEM_STATUS_CACHE_TTL = 60 * 1000; // 60초
+
   app.get("/api/admin/system/status", requireAdmin, async (_req, res) => {
     const startTime = Date.now();
     try {
+      // 캐시 히트 시 즉시 반환 (메모리 정보만 실시간 갱신)
+      const now = Date.now();
+      if (systemStatusCache && now < systemStatusCache.expiry) {
+        const cached = { ...systemStatusCache.data };
+        // 메모리 정보만 실시간으로 갱신
+        const memUsage = process.memoryUsage();
+        cached.server = {
+          ...cached.server,
+          uptime: process.uptime(),
+          memory: {
+            rss: memUsage.rss,
+            heapTotal: memUsage.heapTotal,
+            heapUsed: memUsage.heapUsed,
+            external: memUsage.external,
+            arrayBuffers: memUsage.arrayBuffers || 0,
+            rssFormatted: `${(memUsage.rss / 1024 / 1024).toFixed(1)} MB`,
+            heapTotalFormatted: `${(memUsage.heapTotal / 1024 / 1024).toFixed(1)} MB`,
+            heapUsedFormatted: `${(memUsage.heapUsed / 1024 / 1024).toFixed(1)} MB`,
+            heapUsagePercent: `${((memUsage.heapUsed / memUsage.heapTotal) * 100).toFixed(1)}%`,
+          },
+        };
+        cached.timestamp = new Date().toISOString();
+        cached._cached = true;
+        return res.json(cached);
+      }
+
       const { db } = await import("./db.js");
       const { sql } = await import("drizzle-orm");
 
-      const result: any = {
-        timestamp: new Date().toISOString(),
-        server: {},
-        database: {},
-        api: {},
-        environment: {},
-        performance: {},
-      };
-
-      // 1. 서버 프로세스 정보
+      // 1. 서버 프로세스 정보 (즉시)
       const memUsage = process.memoryUsage();
-      result.server = {
+      const serverInfo = {
         platform: process.platform,
         nodeVersion: process.version,
         uptime: process.uptime(),
@@ -11318,114 +11339,105 @@ ${etfListStr}
         vercelEnv: process.env.VERCEL_ENV || "unknown",
       };
 
-      // 2. 데이터베이스 상태 (단일 쿼리로 통합 → DB 왕복 1회)
-      try {
-        const dbStart = Date.now();
-        const dbInfo = await db.execute(sql`
-          SELECT 
-            pg_size_pretty(pg_database_size(current_database())) as db_size,
-            (SELECT count(*) FROM pg_stat_activity WHERE state = 'active') as active_connections,
-            json_agg(json_build_object(
-              'name', t.relname, 
-              'rows', t.n_live_tup::int, 
-              'size', pg_size_pretty(pg_total_relation_size(t.relid))
-            ) ORDER BY t.n_live_tup DESC) as tables
-          FROM (
-            SELECT relname, n_live_tup, relid 
-            FROM pg_stat_user_tables 
-            ORDER BY n_live_tup DESC 
-            LIMIT 15
-          ) t
-        `);
-        const dbPing = Date.now() - dbStart;
-        const row = (dbInfo as any).rows?.[0];
-
-        result.database = {
-          status: "connected",
-          pingMs: dbPing,
-          dbSize: row?.db_size || "unknown",
-          activeConnections: parseInt(row?.active_connections || "0"),
-          tables: row?.tables || [],
-        };
-      } catch (dbErr: any) {
-        result.database = {
-          status: "error",
-          error: dbErr.message,
-        };
-      }
-
-      // 3. 외부 API 상태 체크
+      // 2. DB 체크 + API 체크 + 에러 로그 → 모두 병렬 실행
       const apiChecks: { name: string; url: string; timeout: number }[] = [
-        { name: "Naver Finance", url: "https://finance.naver.com", timeout: 5000 },
-        { name: "KRX", url: "https://data.krx.co.kr", timeout: 5000 },
+        { name: "Naver Finance", url: "https://finance.naver.com", timeout: 3000 },
+        { name: "KRX", url: "https://data.krx.co.kr", timeout: 3000 },
       ];
-      
-      // KIS API 체크
       if (process.env.KIS_APP_KEY) {
-        apiChecks.push({ name: "KIS API", url: "https://openapi.koreainvestment.com:9443", timeout: 5000 });
+        apiChecks.push({ name: "KIS API", url: "https://openapi.koreainvestment.com:9443", timeout: 3000 });
       }
-      // Kiwoom API 체크
       if (process.env.KIWOOM_APP_KEY) {
-        apiChecks.push({ name: "Kiwoom API", url: "https://mockapi.kiwoom.com", timeout: 5000 });
+        apiChecks.push({ name: "Kiwoom API", url: "https://mockapi.kiwoom.com", timeout: 3000 });
       }
 
-      const apiResults = await Promise.allSettled(
-        apiChecks.map(async (api) => {
-          const s = Date.now();
+      // ★ 핵심: DB 쿼리, API 체크, 에러로그를 모두 병렬로 실행
+      const [dbResult, apiResults, errorResult] = await Promise.all([
+        // DB: 경량 쿼리 (pg_total_relation_size 제거 → pg_relation_size 사용)
+        (async () => {
           try {
-            const resp = await axios.get(api.url, { timeout: api.timeout, maxRedirects: 0, validateStatus: () => true });
-            return { name: api.name, status: "ok", responseTime: Date.now() - s, httpStatus: resp.status };
-          } catch (err: any) {
-            if (err.code === "ECONNREFUSED") {
-              return { name: api.name, status: "unreachable", responseTime: Date.now() - s, error: "Connection refused" };
-            }
-            return { name: api.name, status: "reachable", responseTime: Date.now() - s, note: err.code || err.message };
+            const dbStart = Date.now();
+            const dbInfo = await db.execute(sql`
+              SELECT 
+                pg_size_pretty(pg_database_size(current_database())) as db_size,
+                (SELECT count(*)::int FROM pg_stat_activity WHERE state = 'active') as active_connections,
+                (SELECT json_agg(json_build_object(
+                  'name', relname, 
+                  'rows', n_live_tup::int
+                ) ORDER BY n_live_tup DESC)
+                FROM (SELECT relname, n_live_tup FROM pg_stat_user_tables ORDER BY n_live_tup DESC LIMIT 10) sub
+                ) as tables
+            `);
+            const dbPing = Date.now() - dbStart;
+            const row = (dbInfo as any).rows?.[0];
+            return {
+              status: "connected",
+              pingMs: dbPing,
+              dbSize: row?.db_size || "unknown",
+              activeConnections: parseInt(row?.active_connections || "0"),
+              tables: row?.tables || [],
+            };
+          } catch (dbErr: any) {
+            return { status: "error", error: dbErr.message, pingMs: 0 };
           }
-        })
-      );
-      result.api = apiResults.map((r) => r.status === "fulfilled" ? r.value : { name: "unknown", status: "error", error: (r as any).reason?.message });
+        })(),
+        // API 체크 (병렬)
+        Promise.allSettled(
+          apiChecks.map(async (api) => {
+            const s = Date.now();
+            try {
+              const resp = await axios.get(api.url, { timeout: api.timeout, maxRedirects: 0, validateStatus: () => true });
+              return { name: api.name, status: "ok", responseTime: Date.now() - s, httpStatus: resp.status };
+            } catch (err: any) {
+              return { name: api.name, status: err.code === "ECONNREFUSED" ? "unreachable" : "reachable", responseTime: Date.now() - s, note: err.code || err.message };
+            }
+          })
+        ),
+        // 에러 로그
+        (async () => {
+          try {
+            const recentErrors = await db.execute(sql`
+              SELECT page, ip, created_at FROM visit_logs 
+              WHERE page LIKE '%error%' OR page LIKE '%500%' OR page LIKE '%404%'
+              ORDER BY created_at DESC LIMIT 10
+            `);
+            return (recentErrors as any).rows || [];
+          } catch { return []; }
+        })(),
+      ]);
 
-      // 4. 환경 변수 설정 상태 (값은 노출하지 않음)
+      // 4. 환경 변수 (즉시, 메모리만)
       const envKeys = [
-        // 필수: 서버 운영
         "DATABASE_URL", "SESSION_SECRET", "ENCRYPTION_KEY", "ADMIN_PASSWORD_HASH",
-        // 필수: 인증
         "VITE_GOOGLE_CLIENT_ID", "NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET",
-        // AI API (하나 이상 설정 권장)
         "GEMINI_API_KEY", "OPENAI_API_KEY", "GROQ_API_KEY",
-        // 자동매매: KIS
         "KIS_APP_KEY", "KIS_APP_SECRET", "KIS_ACCOUNT_NO", "KIS_MOCK_TRADING",
-        // 자동매매: 키움 (선택)
         "KIWOOM_APP_KEY", "KIWOOM_APP_SECRET", "KIWOOM_ACCOUNT_NO",
       ];
-      result.environment = {
-        configured: envKeys.filter(k => !!process.env[k]).map(k => k),
-        missing: envKeys.filter(k => !process.env[k]).map(k => k),
-        total: envKeys.length,
-        configuredCount: envKeys.filter(k => !!process.env[k]).length,
+
+      const result: any = {
+        timestamp: new Date().toISOString(),
+        server: serverInfo,
+        database: dbResult,
+        api: apiResults.map((r) => r.status === "fulfilled" ? r.value : { name: "unknown", status: "error" }),
+        environment: {
+          configured: envKeys.filter(k => !!process.env[k]),
+          missing: envKeys.filter(k => !process.env[k]),
+          total: envKeys.length,
+          configuredCount: envKeys.filter(k => !!process.env[k]).length,
+        },
+        performance: {
+          totalCheckTimeMs: Date.now() - startTime,
+          eventLoopLag: await new Promise<number>((resolve) => {
+            const s = Date.now();
+            setImmediate(() => resolve(Date.now() - s));
+          }),
+        },
+        recentErrors: errorResult,
       };
 
-      // 5. 성능 지표
-      const totalCheckTime = Date.now() - startTime;
-      result.performance = {
-        totalCheckTimeMs: totalCheckTime,
-        eventLoopLag: await new Promise<number>((resolve) => {
-          const s = Date.now();
-          setImmediate(() => resolve(Date.now() - s));
-        }),
-      };
-
-      // 6. 최근 에러 로그 (visit_logs에서 에러 패턴 추출)
-      try {
-        const recentErrors = await db.execute(sql`
-          SELECT page, ip, created_at 
-          FROM visit_logs 
-          WHERE page LIKE '%error%' OR page LIKE '%500%' OR page LIKE '%404%'
-          ORDER BY created_at DESC 
-          LIMIT 10
-        `);
-        result.recentErrors = (recentErrors as any).rows || [];
-      } catch { result.recentErrors = []; }
+      // 캐시 저장
+      systemStatusCache = { data: result, expiry: now + SYSTEM_STATUS_CACHE_TTL };
 
       res.json(result);
     } catch (error: any) {
