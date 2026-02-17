@@ -862,11 +862,16 @@ export async function registerRoutes(
         return res.status(400).json({ message: "앱 키, 앱 시크릿, 계좌번호는 필수입니다" });
       }
 
+      // 키움증권은 현재 모의투자만 지원
+      if (brokerType === "kiwoom" && mockTrading === false) {
+        return res.status(400).json({ message: "키움증권 REST API는 현재 모의투자 모드만 지원됩니다. 실전투자는 추후 업데이트 예정입니다." });
+      }
+
       // 인증 검증 (증권사별 분기)
       if (brokerType === "kiwoom") {
         const creds: kiwoomApi.UserKiwoomCredentials = {
           appKey, appSecret, accountNo,
-          mockTrading: mockTrading ?? true,
+          mockTrading: true, // 키움은 항상 모의투자
         };
         const validation = await kiwoomApi.validateUserCredentials(userId, creds);
         if (!validation.success) {
@@ -909,11 +914,17 @@ export async function registerRoutes(
       if (!userId) return res.status(400).json({ message: "로그인 필요" });
       const configId = parseInt(req.params.id);
 
-      const { label, appKey, appSecret, accountNo, accountProductCd, mockTrading } = req.body;
+      const { label, appKey, appSecret, accountNo, accountProductCd, mockTrading, broker } = req.body;
+      
+      // 키움증권은 실전투자 전환 불가
+      if (broker === "kiwoom" && mockTrading === false) {
+        return res.status(400).json({ message: "키움증권 REST API는 현재 모의투자 모드만 지원됩니다." });
+      }
+
       const updates: any = { updatedAt: new Date() };
       if (label !== undefined) updates.label = label;
       if (accountProductCd !== undefined) updates.accountProductCd = accountProductCd;
-      if (mockTrading !== undefined) updates.mockTrading = mockTrading;
+      if (mockTrading !== undefined) updates.mockTrading = (broker === "kiwoom") ? true : mockTrading;
       if (appKey) updates.appKey = encrypt(appKey);
       if (appSecret) updates.appSecret = encrypt(appSecret);
       if (accountNo) updates.accountNo = encrypt(accountNo);

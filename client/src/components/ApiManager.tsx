@@ -334,7 +334,7 @@ function TradingConfigDialog({ open, onClose, editConfig }: { open: boolean; onC
                 <Button type="button" variant={broker === "kis" ? "default" : "outline"} size="sm" className="flex-1 text-xs h-9" onClick={() => setBroker("kis")}>
                   🏦 한국투자증권 (KIS)
                 </Button>
-                <Button type="button" variant={broker === "kiwoom" ? "default" : "outline"} size="sm" className="flex-1 text-xs h-9" onClick={() => setBroker("kiwoom")}>
+                <Button type="button" variant={broker === "kiwoom" ? "default" : "outline"} size="sm" className="flex-1 text-xs h-9" onClick={() => { setBroker("kiwoom"); setMockTrading(true); }}>
                   🏦 키움증권 (REST)
                 </Button>
               </div>
@@ -377,11 +377,24 @@ function TradingConfigDialog({ open, onClose, editConfig }: { open: boolean; onC
           <div className="flex items-center justify-between bg-muted/50 p-3 rounded-lg">
             <div>
               <Label className="text-xs font-medium cursor-pointer">모의투자 모드</Label>
-              <p className="text-[10px] text-muted-foreground mt-0.5">처음 사용 시 모의투자로 테스트하세요</p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">
+                {broker === "kiwoom" ? "키움증권은 현재 모의투자만 지원됩니다" : "처음 사용 시 모의투자로 테스트하세요"}
+              </p>
             </div>
-            <Switch checked={mockTrading} onCheckedChange={setMockTrading} />
+            <Switch checked={mockTrading} onCheckedChange={setMockTrading} disabled={broker === "kiwoom"} />
           </div>
-          {!mockTrading && (
+          {broker === "kiwoom" && (
+            <div className="flex items-start gap-2 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
+              <AlertTriangle className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
+              <div className="text-[11px] text-blue-600 dark:text-blue-400 space-y-1">
+                <p><strong>키움증권 REST API 안내</strong></p>
+                <p>• 현재 <strong>모의투자 전용</strong>으로만 등록 가능합니다</p>
+                <p>• 실전투자 연동은 추후 업데이트 예정입니다</p>
+                <p>• 모의투자 도메인: mockapi.kiwoom.com</p>
+              </div>
+            </div>
+          )}
+          {!mockTrading && broker !== "kiwoom" && (
             <div className="flex items-start gap-2 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg p-3">
               <AlertTriangle className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
               <p className="text-[11px] text-red-600 dark:text-red-400">실전투자 모드에서는 <strong>실제 주문이 체결</strong>됩니다.</p>
