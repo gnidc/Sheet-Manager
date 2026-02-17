@@ -11318,43 +11318,34 @@ ${etfListStr}
         vercelEnv: process.env.VERCEL_ENV || "unknown",
       };
 
-      // 2. 데이터베이스 상태
+      // 2. 데이터베이스 상태 (단일 쿼리로 통합 → DB 왕복 1회)
       try {
         const dbStart = Date.now();
-        await db.execute(sql`SELECT 1 as test`);
-        const dbPing = Date.now() - dbStart;
-
-        // 테이블 크기 조회
-        const tableStats = await db.execute(sql`
+        const dbInfo = await db.execute(sql`
           SELECT 
-            relname as table_name,
-            n_live_tup as row_count,
-            pg_size_pretty(pg_total_relation_size(relid)) as total_size
-          FROM pg_stat_user_tables
-          ORDER BY n_live_tup DESC
-          LIMIT 20
+            pg_size_pretty(pg_database_size(current_database())) as db_size,
+            (SELECT count(*) FROM pg_stat_activity WHERE state = 'active') as active_connections,
+            json_agg(json_build_object(
+              'name', t.relname, 
+              'rows', t.n_live_tup::int, 
+              'size', pg_size_pretty(pg_total_relation_size(t.relid))
+            ) ORDER BY t.n_live_tup DESC) as tables
+          FROM (
+            SELECT relname, n_live_tup, relid 
+            FROM pg_stat_user_tables 
+            ORDER BY n_live_tup DESC 
+            LIMIT 15
+          ) t
         `);
-
-        // DB 크기 조회
-        const dbSize = await db.execute(sql`
-          SELECT pg_size_pretty(pg_database_size(current_database())) as db_size
-        `);
-
-        // 활성 커넥션 수
-        const connCount = await db.execute(sql`
-          SELECT count(*) as active_connections FROM pg_stat_activity WHERE state = 'active'
-        `);
+        const dbPing = Date.now() - dbStart;
+        const row = (dbInfo as any).rows?.[0];
 
         result.database = {
           status: "connected",
           pingMs: dbPing,
-          dbSize: (dbSize as any).rows?.[0]?.db_size || "unknown",
-          activeConnections: parseInt((connCount as any).rows?.[0]?.active_connections || "0"),
-          tables: (tableStats as any).rows?.map((r: any) => ({
-            name: r.table_name,
-            rows: parseInt(r.row_count || "0"),
-            size: r.total_size,
-          })) || [],
+          dbSize: row?.db_size || "unknown",
+          activeConnections: parseInt(row?.active_connections || "0"),
+          tables: row?.tables || [],
         };
       } catch (dbErr: any) {
         result.database = {

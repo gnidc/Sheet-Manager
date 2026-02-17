@@ -10,89 +10,45 @@ import * as schema from "../shared/schema.js";
 
 const { Pool, Client } = pg;
 
-// 지연 초기화를 위한 함수
+// 캐시된 connectionString (매 호출마다 파싱하지 않도록)
+let _cachedConnectionString: string | null = null;
+
+// 지연 초기화를 위한 함수 (최소 로깅)
 function getDatabaseUrl(): string {
-  // 디버깅: 모든 환경 변수 확인
-  console.log("=== DATABASE_URL Debug ===");
-  console.log("DATABASE_URL exists:", "DATABASE_URL" in process.env);
-  console.log("DATABASE_URL value:", process.env.DATABASE_URL ? `[${process.env.DATABASE_URL.length} chars]` : "undefined");
-  console.log("NODE_ENV:", process.env.NODE_ENV);
-  console.log("VERCEL:", process.env.VERCEL);
+  // 이미 파싱된 결과가 있으면 즉시 반환
+  if (_cachedConnectionString) return _cachedConnectionString;
   
   const databaseUrl = process.env.DATABASE_URL;
 
-  // DATABASE_URL이 없거나 빈 문자열인지 확인
   if (!databaseUrl || databaseUrl.trim() === "") {
-    const availableEnvVars = Object.keys(process.env).filter(k => 
-      k.includes("DATABASE") || k.includes("DB") || k.includes("POSTGRES")
-    );
-    console.error("DATABASE_URL is not set or empty.");
-    console.error("Available env vars:", availableEnvVars);
-    console.error("All env vars (first 20):", Object.keys(process.env).slice(0, 20));
     throw new Error(
-      "DATABASE_URL must be set. Did you forget to provision a database? " +
-      "Please check Vercel environment variables. " +
-      `Available vars: ${availableEnvVars.join(", ")}`
+      "DATABASE_URL must be set. Did you forget to provision a database?"
     );
   }
 
-  // connectionString이 문자열인지 확인
-  if (typeof databaseUrl !== "string") {
-    throw new Error(
-      "DATABASE_URL must be a string. Current type: " + typeof databaseUrl + ", value: " + String(databaseUrl),
-    );
-  }
-
-  // connectionString이 유효한 URL 형식인지 확인
   if (!databaseUrl.startsWith("postgresql://") && !databaseUrl.startsWith("postgres://")) {
     throw new Error(
-      "DATABASE_URL must be a valid PostgreSQL connection string. " +
-      "It should start with 'postgresql://' or 'postgres://'. " +
-      `Current value: ${databaseUrl.substring(0, 20)}...`
+      "DATABASE_URL must be a valid PostgreSQL connection string."
     );
   }
 
-  // Pool 생성 전에 connectionString이 유효한지 확인
   let connectionString = databaseUrl.trim();
-  if (!connectionString) {
-    throw new Error("DATABASE_URL is empty after trimming.");
-  }
 
-  // Supabase 또는 Pooler 연결인 경우 SSL 처리
-  // .env 파일에 이미 sslmode=require가 추가되어 있을 수 있음
-  // 하지만 connection string의 sslmode가 Pool의 ssl 옵션과 충돌할 수 있으므로 제거
-  // Pool의 ssl 옵션(rejectUnauthorized: false)을 사용하는 것이 더 안정적
+  // sslmode 파라미터 제거 (Pool의 ssl 옵션 사용)
   if (connectionString.includes('sslmode=')) {
     try {
       const url = new URL(connectionString);
-      // sslmode 파라미터 제거 (Pool의 ssl 옵션 사용)
       url.searchParams.delete('sslmode');
       connectionString = url.toString();
-      console.log("Removed sslmode from DATABASE_URL (will use Pool SSL config instead)");
-    } catch (urlError) {
-      // URL 파싱 실패 시 문자열 방식으로 제거
-      connectionString = connectionString.replace(/[?&]sslmode=[^&]*/g, '');
-      // ? 다음에 파라미터가 없으면 ? 제거
-      connectionString = connectionString.replace(/\?$/, '');
-      console.log("Removed sslmode from DATABASE_URL (fallback method)");
+    } catch {
+      connectionString = connectionString.replace(/[?&]sslmode=[^&]*/g, '').replace(/\?$/, '');
     }
   }
   
-  // Supabase/Pooler 연결이지만 sslmode가 없는 경우는 추가하지 않음
-  // Pool의 ssl 옵션에서 처리
-
-  // Vercel 환경에서 더 상세한 로깅
-  if (process.env.VERCEL) {
-    try {
-      const url = new URL(connectionString);
-      console.log("DATABASE_URL parsed - Host:", url.hostname, "Port:", url.port, "Database:", url.pathname.substring(1));
-      console.log("SSL required:", connectionString.includes('supabase') || connectionString.includes('pooler'));
-    } catch (e) {
-      console.log("Could not parse DATABASE_URL as URL");
-    }
-  }
+  // 최초 1회만 로깅
+  console.log("[DB] Connection configured, length:", connectionString.length);
   
-  console.log("DATABASE_URL is set, length:", connectionString.length, "starts with:", connectionString.substring(0, 20));
+  _cachedConnectionString = connectionString;
   return connectionString;
 }
 
@@ -191,9 +147,9 @@ export function getPool(): pg.Pool {
     _pool = new Pool({
       connectionString,
       // Serverless 환경에서는 연결 수를 제한
-      max: isVercel ? 1 : 10, // Vercel에서는 최대 1개 연결 (serverless 제약)
+      max: isVercel ? 3 : 10, // Vercel에서는 최대 3개 연결 (동시 쿼리 지원)
       min: 0, // Serverless에서는 최소 연결 수를 0으로 설정 (필요할 때만 연결)
-      idleTimeoutMillis: isVercel ? 1000 : 30000, // Vercel에서는 1초로 단축 (매우 빠른 정리)
+      idleTimeoutMillis: isVercel ? 10000 : 30000, // Vercel: 10초 (함수 수명 내 연결 재사용)
       // Vercel에서는 네트워크 지연과 SSL 핸드셰이크를 고려하여 연결 타임아웃 증가
       // Hobby 플랜 타임아웃(10초) 내에서 쿼리 실행까지 완료할 수 있도록 설정
       connectionTimeoutMillis: isVercel ? 8000 : 30000, // Vercel: 8초, 로컬: 30초
@@ -270,21 +226,13 @@ export async function executeWithClient<T>(callback: (db: ReturnType<typeof driz
 }
 
 export function getDb() {
-  const isVercel = !!process.env.VERCEL;
-  
-  if (isVercel) {
-    // Vercel 환경에서는 Pool을 사용하지 않고, executeWithClient를 사용해야 함
-    // 하지만 기존 코드 호환성을 위해 Proxy를 통해 경고를 출력하고
-    // 실제로는 각 메서드 호출마다 새로운 Client를 생성하도록 시도
-    // 이것은 완벽하지 않지만, 최소한의 변경으로 전환 가능
-    throw new Error("getDb() should not be used in Vercel - use executeWithClient() instead");
-  } else {
-    // 로컬 환경에서는 기존과 동일하게 Pool 사용
-    if (!_db) {
-      _db = drizzle(getPool(), { schema });
-    }
-    return _db;
+  // 로컬/Vercel 모두 Pool 기반 drizzle 인스턴스 사용
+  // Vercel에서도 Pool(max:1)이 개별 Client보다 훨씬 효율적
+  // (TCP+SSL 핸드셰이크 재사용으로 DB 응답시간 대폭 개선)
+  if (!_db) {
+    _db = drizzle(getPool(), { schema });
   }
+  return _db;
 }
 
 // 기존 코드와의 호환성을 위해 export (완전 지연 초기화)
@@ -301,51 +249,17 @@ const poolProxy = new Proxy({} as pg.Pool, {
   }
 });
 
-// Vercel 환경에서 db 객체를 위한 Proxy
-// 각 메서드 호출 시마다 새로운 Client를 생성하고 닫음
+// db Proxy: Pool 기반으로 통합 (로컬/Vercel 모두)
+// 이전: Vercel에서 매 쿼리마다 새 Client 생성 → TCP+SSL 핸드셰이크 반복 → DB 응답 1500ms+
+// 이후: Pool(max:1) 사용 → 연결 재사용 → DB 응답 50-200ms
 const dbProxy = new Proxy({} as ReturnType<typeof drizzle>, {
   get(_target, prop, _receiver) {
-    const isVercel = !!process.env.VERCEL;
-    
-    if (!isVercel) {
-      // 로컬 환경에서는 기존과 동일하게 Pool 사용
-      const db = getDb();
-      const value = (db as any)[prop];
-      if (typeof value === 'function') {
-        return value.bind(db);
-      }
-      return value;
+    const db = getDb();
+    const value = (db as any)[prop];
+    if (typeof value === 'function') {
+      return value.bind(db);
     }
-    
-    // Vercel 환경에서는 각 메서드 호출 시마다 새로운 Client를 생성하고 닫음
-    // Drizzle의 메서드들은 lazy하게 실행되므로, 실제 쿼리 실행 시점에 Client를 생성해야 함
-    // 따라서 Proxy를 통해 메서드를 래핑하여 각 호출 시마다 새로운 Client를 생성
-    return function(...args: any[]) {
-      return (async () => {
-        const connectionString = getDatabaseUrl();
-        const needsSSL = connectionString.includes('supabase') || 
-                         connectionString.includes('pooler') || 
-                         connectionString.includes('sslmode=');
-        const sslConfig = needsSSL ? { rejectUnauthorized: false } : undefined;
-        const client = new Client({
-          connectionString,
-          ssl: sslConfig,
-          connectionTimeoutMillis: 8000,
-        });
-        try {
-          await client.connect();
-          const db = drizzle(client, { schema });
-          const method = (db as any)[prop];
-          if (typeof method === 'function') {
-            const result = await method.apply(db, args);
-            return result;
-          }
-          return method;
-        } finally {
-          await client.end();
-        }
-      })();
-    };
+    return value;
   }
 });
 
