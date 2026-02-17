@@ -1865,9 +1865,11 @@ function HomeEmbed({ onNavigate }: { onNavigate: (tab: string) => void }) {
   }
 
   const activeData = isSearchMode ? searchData : data;
-  const articles = activeData?.articles || [];
-  const totalArticles = activeData?.totalArticles || 0;
-  const totalPages = Math.ceil(totalArticles / 20);
+  const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000;
+  const rawArticles = activeData?.articles || [];
+  const articles = isSearchMode ? rawArticles : rawArticles.filter(a => a.writeDateTimestamp >= threeDaysAgo);
+  const totalArticles = articles.length;
+  const totalPages = Math.ceil((activeData?.totalArticles || 0) / 20);
   const menus = menusData?.menus || [];
   const loading = isLoading || (isSearchMode && isSearching);
 
@@ -1927,7 +1929,7 @@ function HomeEmbed({ onNavigate }: { onNavigate: (tab: string) => void }) {
             />
             <h3 className="font-semibold text-sm">Life Fitness</h3>
             {!isSearchMode && (
-              <span className="text-xs text-muted-foreground">({totalArticles})</span>
+              <span className="text-xs text-muted-foreground">(최근 3일 · {totalArticles}건)</span>
             )}
             {isSearchMode && searchQuery && (
               <span className="text-xs text-primary font-medium">"{searchQuery}" 검색결과</span>
