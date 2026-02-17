@@ -6957,11 +6957,24 @@ ${newsSummary}`;
   });
 
   // 카페 글 목록 조회 (게시판 필터 지원)
+  // 서버 사이드 캐시: 키별 2분 TTL
+  const adminArticlesCache = new Map<string, { data: any; expiry: number }>();
+  const ADMIN_ARTICLES_CACHE_TTL = 2 * 60 * 1000; // 2분
+  const ADMIN_ARTICLES_CACHE_MAX = 20; // 최대 20개 캐시 (메모리 보호)
+
   app.get("/api/cafe/articles", requireAdmin, async (req, res) => {
+    const page = parseInt(req.query.page as string) || 1;
+    const perPage = Math.min(parseInt(req.query.perPage as string) || 20, 50);
+    const menuId = req.query.menuId as string;
+    const cacheKey = `${page}-${perPage}-${menuId || "0"}`;
+
     try {
-      const page = parseInt(req.query.page as string) || 1;
-      const perPage = Math.min(parseInt(req.query.perPage as string) || 20, 50);
-      const menuId = req.query.menuId as string;
+      // 캐시 히트 확인
+      const now = Date.now();
+      const cached = adminArticlesCache.get(cacheKey);
+      if (cached && now < cached.expiry) {
+        return res.json(cached.data);
+      }
 
       const params: Record<string, string | number> = {
         "search.clubid": CAFE_ID,
@@ -7001,22 +7014,45 @@ ${newsSummary}`;
         openArticle: a.openArticle,
       }));
 
-      return res.json({
+      const responseData = {
         articles,
         page,
         perPage,
         totalArticles: result?.totalArticleCount || articles.length,
-      });
+      };
+
+      // 캐시 저장 (만료된 것 정리 + 크기 제한)
+      adminArticlesCache.forEach((v, k) => { if (now > v.expiry) adminArticlesCache.delete(k); });
+      if (adminArticlesCache.size >= ADMIN_ARTICLES_CACHE_MAX) {
+        const firstKey = adminArticlesCache.keys().next().value;
+        if (firstKey) adminArticlesCache.delete(firstKey);
+      }
+      adminArticlesCache.set(cacheKey, { data: responseData, expiry: now + ADMIN_ARTICLES_CACHE_TTL });
+
+      return res.json(responseData);
     } catch (error: any) {
       console.error("[Cafe] Failed to fetch articles:", error.message);
+      // 에러 시 만료된 캐시라도 fallback
+      const fallbackCached = adminArticlesCache.get(cacheKey);
+      if (fallbackCached) return res.json(fallbackCached.data);
       return res.status(500).json({ message: "카페 글 목록을 불러올 수 없습니다." });
     }
   });
 
   // ===== 공개 카페 글 목록 (인증 불필요 - 일반 유저용) =====
   // 최신 3개 글만 가져옴 (공지글 수집 로직 제거 - 성능 최적화)
+  // 서버 사이드 캐시: 2분 TTL (네이버 API 반복 호출 방지)
+  let publicArticlesCache: { data: any; expiry: number } | null = null;
+  const PUBLIC_ARTICLES_CACHE_TTL = 2 * 60 * 1000; // 2분
+
   app.get("/api/cafe/public-articles", async (req, res) => {
     try {
+      // 캐시 히트: 2분 이내 동일 요청 시 즉시 반환
+      const now = Date.now();
+      if (publicArticlesCache && now < publicArticlesCache.expiry) {
+        return res.json(publicArticlesCache.data);
+      }
+
       const latestRes = await axios.get(
         "https://apis.naver.com/cafe-web/cafe2/ArticleListV2.json",
         {
@@ -7044,11 +7080,14 @@ ${newsSummary}`;
         newArticle: a.newArticle,
       }));
 
-      return res.json({
-        latestArticles,
-      });
+      const responseData = { latestArticles };
+      publicArticlesCache = { data: responseData, expiry: now + PUBLIC_ARTICLES_CACHE_TTL };
+
+      return res.json(responseData);
     } catch (error: any) {
       console.error("[Cafe] Failed to fetch public articles:", error.message);
+      // 캐시가 만료되었어도 에러 시 fallback
+      if (publicArticlesCache) return res.json(publicArticlesCache.data);
       return res.status(500).json({ message: "카페 글 목록을 불러올 수 없습니다." });
     }
   });

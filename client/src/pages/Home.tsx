@@ -1094,7 +1094,8 @@ function PublicCafeView() {
       if (!res.ok) throw new Error("카페 글 목록을 불러올 수 없습니다.");
       return res.json();
     },
-    staleTime: 3 * 60 * 1000,
+    staleTime: 5 * 60 * 1000, // 5분 (서버 캐시 2분과 조합하여 불필요한 재요청 방지)
+    gcTime: 10 * 60 * 1000, // 10분간 가비지컬렉션 방지
   });
 
   // 검색 쿼리
@@ -1676,7 +1677,8 @@ function HomeEmbed({ onNavigate }: { onNavigate: (tab: string) => void }) {
       return res.json();
     },
     enabled: isAdmin && !isSearchMode,
-    staleTime: 2 * 60 * 1000,
+    staleTime: 5 * 60 * 1000, // 5분 (서버 캐시 2분과 조합)
+    gcTime: 10 * 60 * 1000,
   });
 
   // 검색 결과 조회
