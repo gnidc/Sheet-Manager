@@ -351,8 +351,13 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   
-  // 보안 관련 테이블 자동 생성
-  ensureSecurityTables().catch(err => console.error("[Security] init error:", err.message));
+  // 보안 관련 테이블 자동 생성 (스킬 시드 전에 완료 필요)
+  try {
+    await ensureSecurityTables();
+    console.log("[Security] 테이블 초기화 완료");
+  } catch (err: any) {
+    console.error("[Security] init error:", err.message);
+  }
 
   // 헬스체크 엔드포인트 (가벼운 DB 연결 확인만)
   app.get("/api/health", async (req, res) => {
@@ -1884,17 +1889,15 @@ export async function registerRoutes(
     },
   ];
 
-  // 빌트인 스킬 시드 (서버 시작 시 upsert)
-  (async () => {
-    try {
-      for (const skill of BUILTIN_SKILLS) {
-        await storage.upsertTradingSkill(skill as any);
-      }
-      console.log(`[Skills] ${BUILTIN_SKILLS.length}개 빌트인 스킬 시드 완료`);
-    } catch (err: any) {
-      console.error("[Skills] 빌트인 스킬 시드 실패:", err.message);
+  // 빌트인 스킬 시드 (서버 시작 시 upsert) - 테이블 생성 후 즉시 실행
+  try {
+    for (const skill of BUILTIN_SKILLS) {
+      await storage.upsertTradingSkill(skill as any);
     }
-  })();
+    console.log(`[Skills] ${BUILTIN_SKILLS.length}개 빌트인 스킬 시드 완료`);
+  } catch (err: any) {
+    console.error("[Skills] 빌트인 스킬 시드 실패:", err.message);
+  }
 
   // 스킬 목록 조회 (모든 로그인 사용자)
   app.get("/api/trading/skills", requireUser, async (req, res) => {
