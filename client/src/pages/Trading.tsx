@@ -2733,17 +2733,31 @@ interface ManualSkillItem {
 
 function ManualSkillsSection() {
   const { toast } = useToast();
+  const { isAdmin, userId } = useAuth();
+  // 계정별 고유 키 (admin → "admin", 일반유저 → userId)
+  const accountKey = isAdmin ? "admin" : (userId ? String(userId) : "guest");
+  const storageKey = `manual-custom-skills-${accountKey}`;
+
   const [activeSkill, setActiveSkill] = useState<string>("gap-strategy");
   const [showAddManual, setShowAddManual] = useState(false);
   const [customSkills, setCustomSkills] = useState<ManualSkillItem[]>(() => {
     try {
-      const saved = localStorage.getItem("manual-custom-skills");
+      const saved = localStorage.getItem(storageKey);
       return saved ? JSON.parse(saved) : [];
     } catch { return []; }
   });
   const [newSkillName, setNewSkillName] = useState("");
   const [newSkillIcon, setNewSkillIcon] = useState("🎯");
   const [newSkillDesc, setNewSkillDesc] = useState("");
+
+  // 계정 전환 시 스킬 목록 다시 로드
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(storageKey);
+      setCustomSkills(saved ? JSON.parse(saved) : []);
+      setActiveSkill("gap-strategy");
+    } catch { setCustomSkills([]); }
+  }, [storageKey]);
 
   const builtinSkills: ManualSkillItem[] = [
     {
@@ -2759,7 +2773,7 @@ function ManualSkillsSection() {
 
   const saveCustomSkills = (skills: ManualSkillItem[]) => {
     setCustomSkills(skills);
-    localStorage.setItem("manual-custom-skills", JSON.stringify(skills));
+    localStorage.setItem(storageKey, JSON.stringify(skills));
   };
 
   const handleAddSkill = () => {
@@ -2785,6 +2799,11 @@ function ManualSkillsSection() {
   const handleDeleteSkill = (id: string) => {
     if (!confirm("이 수동 스킬을 삭제하시겠습니까?")) return;
     saveCustomSkills(customSkills.filter(s => s.id !== id));
+    // 스킬 관련 메모/조건 데이터도 정리
+    try {
+      localStorage.removeItem(`manual-skill-memo-${accountKey}-${id}`);
+      localStorage.removeItem(`manual-skill-conditions-${accountKey}-${id}`);
+    } catch { /* empty */ }
     if (activeSkill === id) setActiveSkill("gap-strategy");
     toast({ title: "수동 스킬 삭제 완료" });
   };
@@ -2844,6 +2863,7 @@ function ManualSkillsSection() {
       ) : (
         <CustomSkillContent
           skill={allSkills.find(s => s.id === activeSkill)}
+          accountKey={accountKey}
         />
       )}
 
@@ -2889,17 +2909,20 @@ function ManualSkillsSection() {
 }
 
 // 사용자 정의 수동 스킬 콘텐츠
-function CustomSkillContent({ skill }: { skill?: ManualSkillItem }) {
+function CustomSkillContent({ skill, accountKey }: { skill?: ManualSkillItem; accountKey: string }) {
+  const memoKey = skill ? `manual-skill-memo-${accountKey}-${skill.id}` : "";
+  const condKey = skill ? `manual-skill-conditions-${accountKey}-${skill.id}` : "";
+
   const [memo, setMemo] = useState(() => {
     if (!skill) return "";
     try {
-      return localStorage.getItem(`manual-skill-memo-${skill.id}`) || "";
+      return localStorage.getItem(memoKey) || "";
     } catch { return ""; }
   });
   const [conditions, setConditions] = useState<string[]>(() => {
     if (!skill) return [];
     try {
-      const saved = localStorage.getItem(`manual-skill-conditions-${skill.id}`);
+      const saved = localStorage.getItem(condKey);
       return saved ? JSON.parse(saved) : [];
     } catch { return []; }
   });
@@ -2909,22 +2932,22 @@ function CustomSkillContent({ skill }: { skill?: ManualSkillItem }) {
   useEffect(() => {
     if (!skill) return;
     try {
-      setMemo(localStorage.getItem(`manual-skill-memo-${skill.id}`) || "");
-      const saved = localStorage.getItem(`manual-skill-conditions-${skill.id}`);
+      setMemo(localStorage.getItem(memoKey) || "");
+      const saved = localStorage.getItem(condKey);
       setConditions(saved ? JSON.parse(saved) : []);
     } catch { /* empty */ }
-  }, [skill?.id]);
+  }, [skill?.id, memoKey, condKey]);
 
   if (!skill) return null;
 
   const saveMemo = (text: string) => {
     setMemo(text);
-    localStorage.setItem(`manual-skill-memo-${skill.id}`, text);
+    localStorage.setItem(memoKey, text);
   };
 
   const saveConditions = (list: string[]) => {
     setConditions(list);
-    localStorage.setItem(`manual-skill-conditions-${skill.id}`, JSON.stringify(list));
+    localStorage.setItem(condKey, JSON.stringify(list));
   };
 
   const addCondition = () => {
