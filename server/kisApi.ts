@@ -63,6 +63,51 @@ let cachedMarketToken: { token: string; expiresAt: number } | null = null;
 const userTokenCache = new Map<number, { trade: { token: string; expiresAt: number } | null; market: { token: string; expiresAt: number } | null }>();
 const USER_TOKEN_CACHE_MAX_SIZE = 50;
 
+// ========== DB 기반 토큰 캐싱 (Vercel cold start 대응) ==========
+// 메모리 캐시에서 DB 재확인까지의 간격 (30분)
+const DB_TOKEN_MEMORY_TTL = 30 * 60 * 1000;
+
+async function getTokenFromDB(cacheKey: string): Promise<{ token: string; expiresAt: number } | null> {
+  try {
+    const { db } = await import("./db.js");
+    const { sql } = await import("drizzle-orm");
+    const result = await db.execute(
+      sql`SELECT token, expires_at FROM kis_token_cache WHERE cache_key = ${cacheKey} LIMIT 1`
+    );
+    const row = (result as any).rows?.[0];
+    if (row && Date.now() < Number(row.expires_at)) {
+      console.log(`[KIS] Token cache HIT from DB: ${cacheKey}`);
+      return { token: row.token, expiresAt: Number(row.expires_at) };
+    }
+    return null;
+  } catch (err: any) {
+    // 테이블이 아직 없을 수 있음 (첫 실행 시)
+    if (err.message?.includes('does not exist') || err.code === '42P01') {
+      return null;
+    }
+    console.warn(`[KIS] Token DB read failed for ${cacheKey}:`, err.message);
+    return null;
+  }
+}
+
+async function saveTokenToDB(cacheKey: string, token: string, expiresAt: number): Promise<void> {
+  try {
+    const { db } = await import("./db.js");
+    const { sql } = await import("drizzle-orm");
+    await db.execute(sql`
+      INSERT INTO kis_token_cache (cache_key, token, expires_at)
+      VALUES (${cacheKey}, ${token}, ${String(expiresAt)})
+      ON CONFLICT (cache_key) DO UPDATE SET token = ${token}, expires_at = ${String(expiresAt)}, created_at = CURRENT_TIMESTAMP
+    `);
+    console.log(`[KIS] Token saved to DB: ${cacheKey}`);
+  } catch (err: any) {
+    if (err.message?.includes('does not exist') || err.code === '42P01') {
+      return; // 테이블 미존재 시 무시
+    }
+    console.warn(`[KIS] Token DB save failed for ${cacheKey}:`, err.message);
+  }
+}
+
 // ========== 인증 ==========
 async function getTokenFromServer(baseUrl: string, label: string, retries = 2): Promise<string> {
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -93,15 +138,27 @@ async function getTokenFromServer(baseUrl: string, label: string, retries = 2): 
 
 // 매매용 토큰 (모의/실전 서버)
 export async function getAccessToken(): Promise<string> {
+  // 1순위: 메모리 캐시 (동일 인스턴스 내 가장 빠름)
   if (cachedTradeToken && Date.now() < cachedTradeToken.expiresAt) {
     return cachedTradeToken.token;
   }
 
+  // 2순위: DB 캐시 (다른 인스턴스에서 발급한 토큰 재사용 - Vercel cold start 대응)
+  const dbCached = await getTokenFromDB("admin-trade");
+  if (dbCached) {
+    // 메모리에도 캐싱 (DB_TOKEN_MEMORY_TTL 후 DB 재확인)
+    cachedTradeToken = { token: dbCached.token, expiresAt: Math.min(dbCached.expiresAt, Date.now() + DB_TOKEN_MEMORY_TTL) };
+    return dbCached.token;
+  }
+
+  // 3순위: KIS API에서 새 토큰 발급
   const token = await getTokenFromServer(KIS_TRADE_URL, "trade");
-  cachedTradeToken = {
-    token,
-    expiresAt: Date.now() + (86400 - 300) * 1000,
-  };
+  const expiresAt = Date.now() + (86400 - 300) * 1000;
+  cachedTradeToken = { token, expiresAt };
+
+  // DB에 저장 (비동기, 실패해도 무방)
+  saveTokenToDB("admin-trade", token, expiresAt);
+
   return token;
 }
 
@@ -112,15 +169,23 @@ async function getMarketToken(): Promise<string> {
     return getAccessToken();
   }
 
+  // 1순위: 메모리 캐시
   if (cachedMarketToken && Date.now() < cachedMarketToken.expiresAt) {
     return cachedMarketToken.token;
   }
 
+  // 2순위: DB 캐시
+  const dbCached = await getTokenFromDB("admin-market");
+  if (dbCached) {
+    cachedMarketToken = { token: dbCached.token, expiresAt: Math.min(dbCached.expiresAt, Date.now() + DB_TOKEN_MEMORY_TTL) };
+    return dbCached.token;
+  }
+
+  // 3순위: KIS API 새 토큰 발급
   const token = await getTokenFromServer(KIS_REAL_URL, "market");
-  cachedMarketToken = {
-    token,
-    expiresAt: Date.now() + (86400 - 300) * 1000,
-  };
+  const expiresAt = Date.now() + (86400 - 300) * 1000;
+  cachedMarketToken = { token, expiresAt };
+  saveTokenToDB("admin-market", token, expiresAt);
   return token;
 }
 
@@ -1256,36 +1321,49 @@ async function getUserToken(
   creds: UserKisCredentials,
   type: "trade" | "market"
 ): Promise<string> {
-  let cache = userTokenCache.get(userId);
-  if (!cache) {
-    cache = { trade: null, market: null };
-    // 크기 제한: 최대치 초과 시 만료된 토큰부터 정리
-    if (userTokenCache.size >= USER_TOKEN_CACHE_MAX_SIZE) {
-      const now = Date.now();
-      for (const [uid, uc] of userTokenCache) {
-        const tradeExpired = !uc.trade || now >= uc.trade.expiresAt;
-        const marketExpired = !uc.market || now >= uc.market.expiresAt;
-        if (tradeExpired && marketExpired) { userTokenCache.delete(uid); }
-      }
-      // 여전히 초과 시 FIFO 제거
-      if (userTokenCache.size >= USER_TOKEN_CACHE_MAX_SIZE) {
-        const k = userTokenCache.keys().next().value;
-        if (k !== undefined) userTokenCache.delete(k);
-      }
-    }
-    userTokenCache.set(userId, cache);
-  }
-
   // market 토큰: 실전투자 모드면 trade와 동일
   if (type === "market" && !creds.mockTrading) {
     type = "trade";
   }
 
-  const cached = cache[type];
+  // 메모리 캐시 초기화/확보 헬퍼
+  function ensureMemoryCache() {
+    let cache = userTokenCache.get(userId);
+    if (!cache) {
+      cache = { trade: null, market: null };
+      if (userTokenCache.size >= USER_TOKEN_CACHE_MAX_SIZE) {
+        const now = Date.now();
+        for (const [uid, uc] of userTokenCache) {
+          const tradeExpired = !uc.trade || now >= uc.trade.expiresAt;
+          const marketExpired = !uc.market || now >= uc.market.expiresAt;
+          if (tradeExpired && marketExpired) { userTokenCache.delete(uid); }
+        }
+        if (userTokenCache.size >= USER_TOKEN_CACHE_MAX_SIZE) {
+          const k = userTokenCache.keys().next().value;
+          if (k !== undefined) userTokenCache.delete(k);
+        }
+      }
+      userTokenCache.set(userId, cache);
+    }
+    return cache;
+  }
+
+  // 1순위: 메모리 캐시
+  const memCache = ensureMemoryCache();
+  const cached = memCache[type];
   if (cached && Date.now() < cached.expiresAt) {
     return cached.token;
   }
 
+  // 2순위: DB 캐시 (Vercel cold start 대응)
+  const dbCacheKey = `user-${userId}-${type}`;
+  const dbCached = await getTokenFromDB(dbCacheKey);
+  if (dbCached) {
+    memCache[type] = { token: dbCached.token, expiresAt: Math.min(dbCached.expiresAt, Date.now() + DB_TOKEN_MEMORY_TTL) };
+    return dbCached.token;
+  }
+
+  // 3순위: KIS API 새 토큰 발급
   const baseUrl = type === "trade" ? getTradeUrl(creds.mockTrading) : KIS_REAL_URL;
   const label = `user(${userId})-${type}`;
 
@@ -1298,7 +1376,12 @@ async function getUserToken(
       });
       const token = response.data.access_token;
       console.log(`KIS API ${label} token obtained successfully`);
-      cache[type] = { token, expiresAt: Date.now() + (86400 - 300) * 1000 };
+      const expiresAt = Date.now() + (86400 - 300) * 1000;
+      memCache[type] = { token, expiresAt };
+
+      // DB에 저장
+      saveTokenToDB(dbCacheKey, token, expiresAt);
+
       return token;
     } catch (error: any) {
       const errCode = error.response?.data?.error_code;

@@ -360,7 +360,18 @@ async function ensureSecurityTables() {
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
         )
       `);
-      console.log("[Security] 보안 테이블 및 멀티 API 테이블 확인/생성 완료");
+      // ========== KIS 토큰 DB 캐시 테이블 (Vercel cold start 대응) ==========
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS kis_token_cache (
+          id SERIAL PRIMARY KEY,
+          cache_key TEXT UNIQUE NOT NULL,
+          token TEXT NOT NULL,
+          expires_at TEXT NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_kis_token_cache_key ON kis_token_cache(cache_key)`);
+      console.log("[Security] 보안 테이블, 멀티 API 테이블, 토큰 캐시 테이블 확인/생성 완료");
     });
   } catch (error: any) {
     console.error("[Security] 테이블 생성/마이그레이션 실패:", error.message);
