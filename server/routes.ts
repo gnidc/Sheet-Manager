@@ -1272,6 +1272,7 @@ export async function registerRoutes(
   app.get("/api/trading/diagnose", requireAdmin, async (_req, res) => {
     const status = kisApi.getTradingStatus();
     res.json({
+      ...status,
       kisAppKey: !!process.env.KIS_APP_KEY,
       kisAppSecret: !!process.env.KIS_APP_SECRET,
       kisAccountNo: !!process.env.KIS_ACCOUNT_NO,
@@ -1280,10 +1281,8 @@ export async function registerRoutes(
       kisAccountProductCd: process.env.KIS_ACCOUNT_PRODUCT_CD || "(auto from account)",
       kisMockTrading: process.env.KIS_MOCK_TRADING,
       kisMockTradingParsed: process.env.KIS_MOCK_TRADING?.toLowerCase() === "true",
-      tradingConfigured: status.tradingConfigured,
       geminiKey: !!process.env.GEMINI_API_KEY,
       openaiKey: !!process.env.OPENAI_API_KEY,
-      ...status,
     });
   });
 
