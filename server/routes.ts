@@ -11295,6 +11295,185 @@ ${etfListStr}
   app.get("/api/admin/security/whois", requireAdmin, whoisHandler);
   app.get("/api/admin/security/whois/:ip", requireAdmin, whoisHandler);
 
+  // ========== 시스템 모니터링 ==========
+  app.get("/api/admin/system/status", requireAdmin, async (_req, res) => {
+    const startTime = Date.now();
+    try {
+      const { db } = await import("./db.js");
+      const { sql } = await import("drizzle-orm");
+
+      const result: any = {
+        timestamp: new Date().toISOString(),
+        server: {},
+        database: {},
+        api: {},
+        environment: {},
+        performance: {},
+      };
+
+      // 1. 서버 프로세스 정보
+      const memUsage = process.memoryUsage();
+      result.server = {
+        platform: process.platform,
+        nodeVersion: process.version,
+        uptime: process.uptime(),
+        pid: process.pid,
+        memory: {
+          rss: memUsage.rss,
+          heapTotal: memUsage.heapTotal,
+          heapUsed: memUsage.heapUsed,
+          external: memUsage.external,
+          arrayBuffers: memUsage.arrayBuffers || 0,
+          rssFormatted: `${(memUsage.rss / 1024 / 1024).toFixed(1)} MB`,
+          heapTotalFormatted: `${(memUsage.heapTotal / 1024 / 1024).toFixed(1)} MB`,
+          heapUsedFormatted: `${(memUsage.heapUsed / 1024 / 1024).toFixed(1)} MB`,
+          heapUsagePercent: `${((memUsage.heapUsed / memUsage.heapTotal) * 100).toFixed(1)}%`,
+        },
+        cpuUsage: process.cpuUsage(),
+        isVercel: !!process.env.VERCEL,
+        vercelRegion: process.env.VERCEL_REGION || "unknown",
+        vercelEnv: process.env.VERCEL_ENV || "unknown",
+      };
+
+      // 2. 데이터베이스 상태
+      try {
+        const dbStart = Date.now();
+        await db.execute(sql`SELECT 1 as test`);
+        const dbPing = Date.now() - dbStart;
+
+        // 테이블 크기 조회
+        const tableStats = await db.execute(sql`
+          SELECT 
+            relname as table_name,
+            n_live_tup as row_count,
+            pg_size_pretty(pg_total_relation_size(relid)) as total_size
+          FROM pg_stat_user_tables
+          ORDER BY n_live_tup DESC
+          LIMIT 20
+        `);
+
+        // DB 크기 조회
+        const dbSize = await db.execute(sql`
+          SELECT pg_size_pretty(pg_database_size(current_database())) as db_size
+        `);
+
+        // 활성 커넥션 수
+        const connCount = await db.execute(sql`
+          SELECT count(*) as active_connections FROM pg_stat_activity WHERE state = 'active'
+        `);
+
+        result.database = {
+          status: "connected",
+          pingMs: dbPing,
+          dbSize: (dbSize as any).rows?.[0]?.db_size || "unknown",
+          activeConnections: parseInt((connCount as any).rows?.[0]?.active_connections || "0"),
+          tables: (tableStats as any).rows?.map((r: any) => ({
+            name: r.table_name,
+            rows: parseInt(r.row_count || "0"),
+            size: r.total_size,
+          })) || [],
+        };
+      } catch (dbErr: any) {
+        result.database = {
+          status: "error",
+          error: dbErr.message,
+        };
+      }
+
+      // 3. 외부 API 상태 체크
+      const apiChecks: { name: string; url: string; timeout: number }[] = [
+        { name: "Naver Finance", url: "https://finance.naver.com", timeout: 5000 },
+        { name: "KRX", url: "https://data.krx.co.kr", timeout: 5000 },
+      ];
+      
+      // KIS API 체크
+      if (process.env.KIS_APP_KEY) {
+        apiChecks.push({ name: "KIS API", url: "https://openapi.koreainvestment.com:9443", timeout: 5000 });
+      }
+      // Kiwoom API 체크
+      if (process.env.KIWOOM_APP_KEY) {
+        apiChecks.push({ name: "Kiwoom API", url: "https://mockapi.kiwoom.com", timeout: 5000 });
+      }
+
+      const apiResults = await Promise.allSettled(
+        apiChecks.map(async (api) => {
+          const s = Date.now();
+          try {
+            const resp = await axios.get(api.url, { timeout: api.timeout, maxRedirects: 0, validateStatus: () => true });
+            return { name: api.name, status: "ok", responseTime: Date.now() - s, httpStatus: resp.status };
+          } catch (err: any) {
+            if (err.code === "ECONNREFUSED") {
+              return { name: api.name, status: "unreachable", responseTime: Date.now() - s, error: "Connection refused" };
+            }
+            return { name: api.name, status: "reachable", responseTime: Date.now() - s, note: err.code || err.message };
+          }
+        })
+      );
+      result.api = apiResults.map((r) => r.status === "fulfilled" ? r.value : { name: "unknown", status: "error", error: (r as any).reason?.message });
+
+      // 4. 환경 변수 설정 상태 (값은 노출하지 않음)
+      const envKeys = [
+        "DATABASE_URL", "SESSION_SECRET", "ENCRYPTION_KEY",
+        "VITE_GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET",
+        "NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET",
+        "GEMINI_API_KEY", "OPENAI_API_KEY", "GROQ_API_KEY",
+        "KIS_APP_KEY", "KIS_APP_SECRET", "KIS_ACCOUNT_NO", "KIS_MOCK_TRADING",
+        "KIWOOM_APP_KEY", "KIWOOM_APP_SECRET", "KIWOOM_ACCOUNT_NO",
+        "ADMIN_PASSWORD",
+      ];
+      result.environment = {
+        configured: envKeys.filter(k => !!process.env[k]).map(k => k),
+        missing: envKeys.filter(k => !process.env[k]).map(k => k),
+        total: envKeys.length,
+        configuredCount: envKeys.filter(k => !!process.env[k]).length,
+      };
+
+      // 5. 성능 지표
+      const totalCheckTime = Date.now() - startTime;
+      result.performance = {
+        totalCheckTimeMs: totalCheckTime,
+        eventLoopLag: await new Promise<number>((resolve) => {
+          const s = Date.now();
+          setImmediate(() => resolve(Date.now() - s));
+        }),
+      };
+
+      // 6. 최근 에러 로그 (visit_logs에서 에러 패턴 추출)
+      try {
+        const recentErrors = await db.execute(sql`
+          SELECT page, ip, created_at 
+          FROM visit_logs 
+          WHERE page LIKE '%error%' OR page LIKE '%500%' OR page LIKE '%404%'
+          ORDER BY created_at DESC 
+          LIMIT 10
+        `);
+        result.recentErrors = (recentErrors as any).rows || [];
+      } catch { result.recentErrors = []; }
+
+      // 7. Cron Job 상태 (보안 점검 최근 실행)
+      try {
+        const lastAudit = await db.execute(sql`
+          SELECT id, created_at, results
+          FROM security_audit_logs
+          ORDER BY created_at DESC
+          LIMIT 1
+        `);
+        const lastRow = (lastAudit as any).rows?.[0];
+        result.cronJobs = {
+          lastSecurityAudit: lastRow ? {
+            id: lastRow.id,
+            time: lastRow.created_at,
+            resultCount: lastRow.results ? JSON.parse(lastRow.results).length : 0,
+          } : null,
+        };
+      } catch { result.cronJobs = { lastSecurityAudit: null }; }
+
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "시스템 상태 조회 실패" });
+    }
+  });
+
   // ========== AI Agent 시스템 ==========
 
   // 🔒 프롬프트 내용 보안 검증 (인젝션 패턴 제거)

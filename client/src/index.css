@@ -102,8 +102,10 @@
     font-family: var(--font-mono);
   }
 
-  /* Smooth page transitions */
-  * {
+  /* Smooth color transitions — 전체 * 에 적용하면 INP 성능 저하되므로 주요 요소만 적용 */
+  a, button, input, select, textarea,
+  [role="tab"], [role="menuitem"], [role="button"],
+  .sidebar-item, .badge-rise, .badge-fall, .badge-steady {
     @apply transition-colors duration-150;
   }
 }
@@ -240,6 +242,11 @@
   /* ===== Tab Content Transition ===== */
   [data-state="active"][role="tabpanel"] {
     animation: fadeInUp 0.25s ease-out;
+  }
+  /* 비활성 탭 패널 렌더링 최적화 — 브라우저가 숨겨진 탭의 레이아웃/페인트 건너뜀 */
+  [data-state="inactive"][role="tabpanel"] {
+    content-visibility: auto;
+    contain-intrinsic-size: 0 500px;
   }
 
   /* ===== Sidebar Styles ===== */
