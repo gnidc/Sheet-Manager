@@ -1119,7 +1119,6 @@ function PublicCafeView() {
   const latestArticles = (data?.latestArticles || []).filter(
     (a) => a.writeDateTimestamp >= threeDaysAgo
   );
-  const noticeArticles = data?.noticeArticles || [];
   const searchArticles = searchData?.articles || [];
   const searchTotalArticles = searchData?.totalArticles || 0;
   const searchTotalPages = Math.ceil(searchTotalArticles / 20);
@@ -1359,55 +1358,7 @@ function PublicCafeView() {
         )}
       </div>
 
-      {/* 전체 공지글 (검색 모드가 아닐 때만) */}
-      {!isSearchMode && noticeArticles.length > 0 && (
-        <div className="overflow-hidden">
-          <div className="px-4 pt-3 pb-1 bg-amber-50/50 border-b border-amber-200/30">
-            <h4 className="text-sm font-semibold flex items-center gap-1.5 mb-2">
-              <Newspaper className="w-4 h-4 text-amber-600" />
-              <span className="text-amber-700">전체공지</span>
-              <span className="text-xs text-muted-foreground font-normal">({noticeArticles.length})</span>
-            </h4>
-          </div>
-          <div className="divide-y">
-            {noticeArticles.map((article) => (
-              <a
-                key={article.articleId}
-                href={`${CAFE_URL}/${article.articleId}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-3 px-4 py-2.5 hover:bg-amber-50/30 transition-colors group"
-              >
-                <span className="text-amber-500 text-xs font-bold flex-shrink-0">📌</span>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium truncate group-hover:text-amber-600 transition-colors">
-                      {article.subject}
-                    </span>
-                    {article.commentCount > 0 && (
-                      <span className="text-xs text-primary font-bold flex-shrink-0">[{article.commentCount}]</span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-0.5">
-                    <span>{article.writerNickname}</span>
-                    <span className="opacity-40">|</span>
-                    <span>👁 {article.readCount}</span>
-                    {article.likeItCount > 0 && (
-                      <>
-                        <span className="opacity-40">|</span>
-                        <span>❤️ {article.likeItCount}</span>
-                      </>
-                    )}
-                  </div>
-                </div>
-                <span className="text-xs text-muted-foreground flex-shrink-0 tabular-nums">
-                  {formatDate(article.writeDateTimestamp)}
-                </span>
-              </a>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* 전체 공지글은 일반계정에서 표시하지 않음 */}
     </div>
   );
 }
