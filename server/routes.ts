@@ -273,9 +273,17 @@ async function ensureSecurityTables() {
       // unique 제약 조건 제거 (멀티 API 지원)
       await db.execute(sql`ALTER TABLE user_trading_configs DROP CONSTRAINT IF EXISTS user_trading_configs_user_id_unique`);
       await db.execute(sql`ALTER TABLE user_ai_configs DROP CONSTRAINT IF EXISTS user_ai_configs_user_id_unique`);
-      // 기존 단일 설정에 is_active=true 적용
-      await db.execute(sql`UPDATE user_trading_configs SET is_active = true WHERE is_active IS NULL OR is_active = false AND id IN (SELECT MIN(id) FROM user_trading_configs GROUP BY user_id)`);
-      await db.execute(sql`UPDATE user_ai_configs SET is_active = true WHERE is_active IS NULL OR is_active = false AND id IN (SELECT MIN(id) FROM user_ai_configs GROUP BY user_id)`);
+      // 기존 단일 설정에 is_active=true 적용 (활성 설정이 없는 유저에 대해서만)
+      await db.execute(sql`UPDATE user_trading_configs SET is_active = true WHERE id IN (
+        SELECT MIN(utc.id) FROM user_trading_configs utc
+        WHERE utc.user_id NOT IN (SELECT user_id FROM user_trading_configs WHERE is_active = true)
+        GROUP BY utc.user_id
+      )`);
+      await db.execute(sql`UPDATE user_ai_configs SET is_active = true WHERE id IN (
+        SELECT MIN(uac.id) FROM user_ai_configs uac
+        WHERE uac.user_id NOT IN (SELECT user_id FROM user_ai_configs WHERE is_active = true)
+        GROUP BY uac.user_id
+      )`);
       // Google 계정 연결 테이블
       await db.execute(sql`
         CREATE TABLE IF NOT EXISTS user_linked_accounts (
