@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, Suspense, lazy, useTransition, useCallback } from "react";
-import { Link } from "wouter";
+import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -48,6 +48,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 
 export default function Home() {
+  const [, navigate] = useLocation();
   const [activeTab, setActiveTabRaw] = useState("home");
   const [isTabPending, startTabTransition] = useTransition();
   const setActiveTab = useCallback((tab: string) => {
@@ -167,12 +168,17 @@ export default function Home() {
               </a>
               <QnABoard />
               {(isAdmin || isLoggedIn) && (
-                <Link href="/trading">
-                  <Button variant="outline" size="sm" className="gap-1.5 border-amber-300 text-amber-600 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-400 dark:hover:bg-amber-950 btn-hover-lift">
-                    <Zap className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline text-xs">자동매매</span>
-                    </Button>
-                </Link>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 border-amber-300 text-amber-600 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-400 dark:hover:bg-amber-950 btn-hover-lift"
+                  onClick={() => {
+                    startTabTransition(() => { navigate("/trading"); });
+                  }}
+                >
+                  <Zap className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline text-xs">자동매매</span>
+                </Button>
               )}
               <LoginDialog />
             </div>
