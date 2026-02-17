@@ -192,11 +192,15 @@ export function getPool(): pg.Pool {
         });
       });
     } else {
-      // Vercel 환경: 최소한의 에러 핸들러만 등록
+      // Vercel 환경: 최소한의 에러 핸들러 + statement_timeout 설정
       _pool.on('error', (err: any) => {
         console.error('[DB Pool Error]', err.message);
         _pool = null;
         _db = null;
+      });
+      // Vercel에서도 statement_timeout 설정 (쿼리 무한 실행 방지)
+      _pool.on('connect', (client) => {
+        client.query('SET statement_timeout = 15000').catch(() => {}); // 15초
       });
     }
     

@@ -218,7 +218,9 @@ function rateLimit(maxRequests: number, windowMs: number) {
 }
 
 // 보안 관련 테이블 자동 생성 (누락 시)
+let _securityTablesInitialized = false;
 async function ensureSecurityTables() {
+  if (_securityTablesInitialized) return; // 중복 실행 방지
   try {
     const { executeWithClient } = await import("./db.js");
     const { sql } = await import("drizzle-orm");
@@ -372,6 +374,7 @@ async function ensureSecurityTables() {
       `);
       await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_kis_token_cache_key ON kis_token_cache(cache_key)`);
       console.log("[Security] 보안 테이블, 멀티 API 테이블, 토큰 캐시 테이블 확인/생성 완료");
+      _securityTablesInitialized = true;
     });
   } catch (error: any) {
     console.error("[Security] 테이블 생성/마이그레이션 실패:", error.message);
@@ -11289,35 +11292,40 @@ ${etfListStr}
   app.get("/api/admin/security/whois/:ip", requireAdmin, whoisHandler);
 
   // ========== 시스템 모니터링 ==========
-  // 결과 캐시: 60초 TTL (무거운 쿼리 반복 방지)
+  // 결과 캐시: 120초 TTL (무거운 쿼리 반복 방지)
   let systemStatusCache: { data: any; expiry: number } | null = null;
-  const SYSTEM_STATUS_CACHE_TTL = 60 * 1000; // 60초
+  const SYSTEM_STATUS_CACHE_TTL = 120 * 1000; // 120초
+  // DB 상세 정보 (db_size, tables) 별도 캐시: 5분 TTL (변동 적음)
+  let dbDetailCache: { dbSize: string; tables: any[]; expiry: number } | null = null;
+  const DB_DETAIL_CACHE_TTL = 5 * 60 * 1000; // 5분
 
   app.get("/api/admin/system/status", requireAdmin, async (_req, res) => {
     const startTime = Date.now();
     try {
-      // 캐시 히트 시 즉시 반환 (메모리 정보만 실시간 갱신)
       const now = Date.now();
+
+      // 메모리 정보 생성 헬퍼 (공통 사용)
+      function getMemoryInfo() {
+        const m = process.memoryUsage();
+        return {
+          rss: m.rss,
+          heapTotal: m.heapTotal,
+          heapUsed: m.heapUsed,
+          external: m.external,
+          arrayBuffers: m.arrayBuffers || 0,
+          rssFormatted: `${(m.rss / 1024 / 1024).toFixed(1)} MB`,
+          heapTotalFormatted: `${(m.heapTotal / 1024 / 1024).toFixed(1)} MB`,
+          heapUsedFormatted: `${(m.heapUsed / 1024 / 1024).toFixed(1)} MB`,
+          heapUsagePercent: `${((m.heapUsed / m.heapTotal) * 100).toFixed(1)}%`,
+        };
+      }
+
+      // 캐시 히트 시 즉시 반환 (메모리 정보만 실시간 갱신)
       if (systemStatusCache && now < systemStatusCache.expiry) {
         const cached = { ...systemStatusCache.data };
-        // 메모리 정보만 실시간으로 갱신
-        const memUsage = process.memoryUsage();
-        cached.server = {
-          ...cached.server,
-          uptime: process.uptime(),
-          memory: {
-            rss: memUsage.rss,
-            heapTotal: memUsage.heapTotal,
-            heapUsed: memUsage.heapUsed,
-            external: memUsage.external,
-            arrayBuffers: memUsage.arrayBuffers || 0,
-            rssFormatted: `${(memUsage.rss / 1024 / 1024).toFixed(1)} MB`,
-            heapTotalFormatted: `${(memUsage.heapTotal / 1024 / 1024).toFixed(1)} MB`,
-            heapUsedFormatted: `${(memUsage.heapUsed / 1024 / 1024).toFixed(1)} MB`,
-            heapUsagePercent: `${((memUsage.heapUsed / memUsage.heapTotal) * 100).toFixed(1)}%`,
-          },
-        };
+        cached.server = { ...cached.server, uptime: process.uptime(), memory: getMemoryInfo() };
         cached.timestamp = new Date().toISOString();
+        cached.performance = { ...cached.performance, totalCheckTimeMs: Date.now() - startTime };
         cached._cached = true;
         return res.json(cached);
       }
@@ -11326,30 +11334,19 @@ ${etfListStr}
       const { sql } = await import("drizzle-orm");
 
       // 1. 서버 프로세스 정보 (즉시)
-      const memUsage = process.memoryUsage();
       const serverInfo = {
         platform: process.platform,
         nodeVersion: process.version,
         uptime: process.uptime(),
         pid: process.pid,
-        memory: {
-          rss: memUsage.rss,
-          heapTotal: memUsage.heapTotal,
-          heapUsed: memUsage.heapUsed,
-          external: memUsage.external,
-          arrayBuffers: memUsage.arrayBuffers || 0,
-          rssFormatted: `${(memUsage.rss / 1024 / 1024).toFixed(1)} MB`,
-          heapTotalFormatted: `${(memUsage.heapTotal / 1024 / 1024).toFixed(1)} MB`,
-          heapUsedFormatted: `${(memUsage.heapUsed / 1024 / 1024).toFixed(1)} MB`,
-          heapUsagePercent: `${((memUsage.heapUsed / memUsage.heapTotal) * 100).toFixed(1)}%`,
-        },
+        memory: getMemoryInfo(),
         cpuUsage: process.cpuUsage(),
         isVercel: !!process.env.VERCEL,
         vercelRegion: process.env.VERCEL_REGION || "unknown",
         vercelEnv: process.env.VERCEL_ENV || "unknown",
       };
 
-      // 2. DB 체크 + API 체크 + 에러 로그 → 모두 병렬 실행
+      // 2. DB ping (SELECT 1 - 가장 가벼운 쿼리) + DB 상세(캐시 or 쿼리) + API 체크 + 에러로그 → 병렬
       const apiChecks: { name: string; url: string; timeout: number }[] = [
         { name: "Naver Finance", url: "https://finance.naver.com", timeout: 3000 },
         { name: "KRX", url: "https://data.krx.co.kr", timeout: 3000 },
@@ -11361,34 +11358,45 @@ ${etfListStr}
         apiChecks.push({ name: "Kiwoom API", url: "https://mockapi.kiwoom.com", timeout: 3000 });
       }
 
-      // ★ 핵심: DB 쿼리, API 체크, 에러로그를 모두 병렬로 실행
-      const [dbResult, apiResults, errorResult] = await Promise.all([
-        // DB: 경량 쿼리 (pg_total_relation_size 제거 → pg_relation_size 사용)
+      // ★ 핵심: DB ping + DB 상세 + API 체크 + 에러로그를 모두 병렬로 실행
+      const [dbPingResult, dbDetailResult, apiResults, errorResult] = await Promise.all([
+        // DB ping: SELECT 1 (연결 상태 + 응답시간만 측정)
         (async () => {
           try {
             const dbStart = Date.now();
+            await db.execute(sql`SELECT 1`);
+            return { status: "connected", pingMs: Date.now() - dbStart };
+          } catch (dbErr: any) {
+            return { status: "error", pingMs: 0, error: dbErr.message };
+          }
+        })(),
+        // DB 상세: 별도 장기 캐시 (5분) - pg_database_size, 테이블 정보는 자주 안 바뀜
+        (async (): Promise<{ dbSize: string; activeConnections: number; tables: any[] }> => {
+          if (dbDetailCache && now < dbDetailCache.expiry) {
+            // active_connections만 실시간 조회
+            try {
+              const connResult = await db.execute(sql`SELECT count(*)::int as cnt FROM pg_stat_activity WHERE state = 'active'`);
+              const cnt = (connResult as any).rows?.[0]?.cnt || 0;
+              return { dbSize: dbDetailCache.dbSize, activeConnections: cnt, tables: dbDetailCache.tables };
+            } catch {
+              return { dbSize: dbDetailCache.dbSize, activeConnections: 0, tables: dbDetailCache.tables };
+            }
+          }
+          try {
             const dbInfo = await db.execute(sql`
               SELECT 
                 pg_size_pretty(pg_database_size(current_database())) as db_size,
                 (SELECT count(*)::int FROM pg_stat_activity WHERE state = 'active') as active_connections,
-                (SELECT json_agg(json_build_object(
-                  'name', relname, 
-                  'rows', n_live_tup::int
-                ) ORDER BY n_live_tup DESC)
-                FROM (SELECT relname, n_live_tup FROM pg_stat_user_tables ORDER BY n_live_tup DESC LIMIT 10) sub
-                ) as tables
+                (SELECT json_agg(json_build_object('name', relname, 'rows', n_live_tup::int) ORDER BY n_live_tup DESC)
+                FROM (SELECT relname, n_live_tup FROM pg_stat_user_tables ORDER BY n_live_tup DESC LIMIT 10) sub) as tables
             `);
-            const dbPing = Date.now() - dbStart;
             const row = (dbInfo as any).rows?.[0];
-            return {
-              status: "connected",
-              pingMs: dbPing,
-              dbSize: row?.db_size || "unknown",
-              activeConnections: parseInt(row?.active_connections || "0"),
-              tables: row?.tables || [],
-            };
-          } catch (dbErr: any) {
-            return { status: "error", error: dbErr.message, pingMs: 0 };
+            const dbSize = row?.db_size || "unknown";
+            const tables = row?.tables || [];
+            dbDetailCache = { dbSize, tables, expiry: now + DB_DETAIL_CACHE_TTL };
+            return { dbSize, activeConnections: parseInt(row?.active_connections || "0"), tables };
+          } catch (err: any) {
+            return { dbSize: "error", activeConnections: 0, tables: [] };
           }
         })(),
         // API 체크 (병렬)
@@ -11409,7 +11417,7 @@ ${etfListStr}
             const recentErrors = await db.execute(sql`
               SELECT page, ip, created_at FROM visit_logs 
               WHERE page LIKE '%error%' OR page LIKE '%500%' OR page LIKE '%404%'
-              ORDER BY created_at DESC LIMIT 10
+              ORDER BY created_at DESC LIMIT 5
             `);
             return (recentErrors as any).rows || [];
           } catch { return []; }
@@ -11428,7 +11436,12 @@ ${etfListStr}
       const result: any = {
         timestamp: new Date().toISOString(),
         server: serverInfo,
-        database: dbResult,
+        database: {
+          ...dbPingResult,
+          dbSize: dbDetailResult.dbSize,
+          activeConnections: dbDetailResult.activeConnections,
+          tables: dbDetailResult.tables,
+        },
         api: apiResults.map((r) => r.status === "fulfilled" ? r.value : { name: "unknown", status: "error" }),
         environment: {
           configured: envKeys.filter(k => !!process.env[k]),
