@@ -11465,9 +11465,9 @@ ${etfListStr}
           try {
             const errStart = Date.now();
             const recentErrors = await db.execute(sql`
-              SELECT page, ip, created_at FROM visit_logs 
+              SELECT page, ip_address, visited_at FROM visit_logs 
               WHERE page LIKE '%error%' OR page LIKE '%500%' OR page LIKE '%404%'
-              ORDER BY created_at DESC LIMIT 5
+              ORDER BY visited_at DESC LIMIT 5
             `);
             queryTimings.push({ name: "Error Logs", ms: Date.now() - errStart, cached: false, query: "SELECT FROM visit_logs WHERE page LIKE '%%error%%'" });
             return (recentErrors as any).rows || [];

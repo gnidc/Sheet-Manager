@@ -597,8 +597,8 @@ export default function SystemMonitor() {
                 <div key={idx} className="flex items-center justify-between text-xs bg-red-50 dark:bg-red-950/20 rounded p-2">
                   <span className="font-mono">{err.page}</span>
                   <div className="flex items-center gap-2 text-muted-foreground">
-                    <span>{err.ip}</span>
-                    <span>{new Date(err.created_at).toLocaleString("ko-KR")}</span>
+                    <span>{err.ip_address || err.ip || "-"}</span>
+                    <span>{new Date(err.visited_at || err.created_at).toLocaleString("ko-KR")}</span>
                   </div>
                 </div>
               ))}
