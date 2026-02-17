@@ -86,7 +86,7 @@ import {
   ArrowLeft, TrendingUp, Wallet, BarChart3, Plus, Trash2, Play, Pause,
   RefreshCw, Loader2, AlertTriangle, CheckCircle2, XCircle, Search,
   ArrowUpRight, ArrowDownRight, Zap, Clock, Settings, ShieldCheck, ShieldAlert, Rocket,
-  Sparkles, Eye, Power, ChevronDown, ChevronUp, Activity,
+  Sparkles, Eye, Power, ChevronDown, ChevronUp, Activity, FileText,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
@@ -304,11 +304,11 @@ export default function Trading() {
               </TabsTrigger>
               <TabsTrigger value="skills" className="gap-1 text-xs sm:text-sm">
                 <Sparkles className="h-4 w-4" />
-                스킬
+                표준스킬
               </TabsTrigger>
-              <TabsTrigger value="gap-strategy" className="gap-1 text-xs sm:text-sm">
+              <TabsTrigger value="manual-skills" className="gap-1 text-xs sm:text-sm">
                 <Rocket className="h-4 w-4" />
-                시가급등
+                수동스킬
               </TabsTrigger>
               <TabsTrigger value="history" className="gap-1 text-xs sm:text-sm">
                 <Clock className="h-4 w-4" />
@@ -334,8 +334,8 @@ export default function Trading() {
             <TabsContent value="skills">
               <SkillsSection />
             </TabsContent>
-            <TabsContent value="gap-strategy">
-              <GapStrategyPanel />
+            <TabsContent value="manual-skills">
+              <ManualSkillsSection />
             </TabsContent>
             <TabsContent value="history">
               <OrderHistorySection />
@@ -2790,6 +2790,287 @@ function SkillsSection() {
       {showAddDialog && (
         <AddSkillDialog skills={skills} open={showAddDialog} onClose={() => setShowAddDialog(false)} onSuccess={() => { refetchInstances(); setShowAddDialog(false); }} />
       )}
+    </div>
+  );
+}
+
+// ========== 수동스킬 섹션 ==========
+interface ManualSkillItem {
+  id: string;
+  name: string;
+  icon: string;
+  description: string;
+  isBuiltin: boolean;
+  component?: React.ReactNode;
+}
+
+function ManualSkillsSection() {
+  const { toast } = useToast();
+  const [activeSkill, setActiveSkill] = useState<string>("gap-strategy");
+  const [showAddManual, setShowAddManual] = useState(false);
+  const [customSkills, setCustomSkills] = useState<ManualSkillItem[]>(() => {
+    try {
+      const saved = localStorage.getItem("manual-custom-skills");
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+  const [newSkillName, setNewSkillName] = useState("");
+  const [newSkillIcon, setNewSkillIcon] = useState("🎯");
+  const [newSkillDesc, setNewSkillDesc] = useState("");
+
+  const builtinSkills: ManualSkillItem[] = [
+    {
+      id: "gap-strategy",
+      name: "시가급등 추세추종",
+      icon: "🚀",
+      description: "장 시작 시 갭 상승 종목을 감지하고 추세를 추종하여 분할매수/매도",
+      isBuiltin: true,
+    },
+  ];
+
+  const allSkills = [...builtinSkills, ...customSkills];
+
+  const saveCustomSkills = (skills: ManualSkillItem[]) => {
+    setCustomSkills(skills);
+    localStorage.setItem("manual-custom-skills", JSON.stringify(skills));
+  };
+
+  const handleAddSkill = () => {
+    if (!newSkillName.trim()) {
+      toast({ title: "스킬 이름을 입력하세요", variant: "destructive" });
+      return;
+    }
+    const newSkill: ManualSkillItem = {
+      id: `custom-${Date.now()}`,
+      name: newSkillName.trim(),
+      icon: newSkillIcon || "🎯",
+      description: newSkillDesc.trim() || "사용자 정의 수동 스킬",
+      isBuiltin: false,
+    };
+    saveCustomSkills([...customSkills, newSkill]);
+    setNewSkillName("");
+    setNewSkillIcon("🎯");
+    setNewSkillDesc("");
+    setShowAddManual(false);
+    toast({ title: "수동 스킬 등록 완료", description: `${newSkill.icon} ${newSkill.name}` });
+  };
+
+  const handleDeleteSkill = (id: string) => {
+    if (!confirm("이 수동 스킬을 삭제하시겠습니까?")) return;
+    saveCustomSkills(customSkills.filter(s => s.id !== id));
+    if (activeSkill === id) setActiveSkill("gap-strategy");
+    toast({ title: "수동 스킬 삭제 완료" });
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* 헤더 */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Rocket className="w-5 h-5 text-orange-500" />
+                수동스킬
+              </CardTitle>
+              <CardDescription className="mt-1">
+                사용자가 직접 설정하고 수동으로 실행하는 전략 스킬셋입니다
+              </CardDescription>
+            </div>
+            <Button size="sm" onClick={() => setShowAddManual(true)} className="text-xs gap-1">
+              <Plus className="w-3 h-3" />
+              스킬 추가
+            </Button>
+          </div>
+        </CardHeader>
+      </Card>
+
+      {/* 스킬 목록 (탭처럼) */}
+      <div className="flex gap-2 flex-wrap">
+        {allSkills.map(skill => (
+          <div key={skill.id} className="relative group">
+            <Button
+              variant={activeSkill === skill.id ? "default" : "outline"}
+              size="sm"
+              className="text-xs gap-1.5 pr-2"
+              onClick={() => setActiveSkill(skill.id)}
+            >
+              <span>{skill.icon}</span>
+              {skill.name}
+            </Button>
+            {!skill.isBuiltin && (
+              <button
+                onClick={(e) => { e.stopPropagation(); handleDeleteSkill(skill.id); }}
+                className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white rounded-full text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                title="삭제"
+              >
+                ×
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* 선택된 스킬 콘텐츠 */}
+      {activeSkill === "gap-strategy" ? (
+        <GapStrategyPanel />
+      ) : (
+        <CustomSkillContent
+          skill={allSkills.find(s => s.id === activeSkill)}
+        />
+      )}
+
+      {/* 수동 스킬 추가 다이얼로그 */}
+      <Dialog open={showAddManual} onOpenChange={setShowAddManual}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Plus className="w-4 h-4" />
+              수동 스킬 등록
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              새로운 수동 매매 전략을 등록하세요. 등록 후 설정 및 메모를 관리할 수 있습니다.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="flex gap-2">
+              <div className="space-y-1.5 w-20">
+                <Label className="text-xs">아이콘</Label>
+                <Input value={newSkillIcon} onChange={(e) => setNewSkillIcon(e.target.value)} className="text-center text-lg h-9" maxLength={2} />
+              </div>
+              <div className="space-y-1.5 flex-1">
+                <Label className="text-xs">스킬 이름 <span className="text-red-500">*</span></Label>
+                <Input value={newSkillName} onChange={(e) => setNewSkillName(e.target.value)} placeholder="예: 눌림목 매수, 돌파 매매" className="text-sm h-9" />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">설명</Label>
+              <Input value={newSkillDesc} onChange={(e) => setNewSkillDesc(e.target.value)} placeholder="전략 설명 (선택사항)" className="text-sm h-9" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAddManual(false)} className="text-xs">취소</Button>
+            <Button onClick={handleAddSkill} className="text-xs gap-1">
+              <Plus className="w-3 h-3" />
+              등록
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// 사용자 정의 수동 스킬 콘텐츠
+function CustomSkillContent({ skill }: { skill?: ManualSkillItem }) {
+  const [memo, setMemo] = useState(() => {
+    if (!skill) return "";
+    try {
+      return localStorage.getItem(`manual-skill-memo-${skill.id}`) || "";
+    } catch { return ""; }
+  });
+  const [conditions, setConditions] = useState<string[]>(() => {
+    if (!skill) return [];
+    try {
+      const saved = localStorage.getItem(`manual-skill-conditions-${skill.id}`);
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+  const [newCondition, setNewCondition] = useState("");
+  const { toast } = useToast();
+
+  useEffect(() => {
+    if (!skill) return;
+    try {
+      setMemo(localStorage.getItem(`manual-skill-memo-${skill.id}`) || "");
+      const saved = localStorage.getItem(`manual-skill-conditions-${skill.id}`);
+      setConditions(saved ? JSON.parse(saved) : []);
+    } catch { /* empty */ }
+  }, [skill?.id]);
+
+  if (!skill) return null;
+
+  const saveMemo = (text: string) => {
+    setMemo(text);
+    localStorage.setItem(`manual-skill-memo-${skill.id}`, text);
+  };
+
+  const saveConditions = (list: string[]) => {
+    setConditions(list);
+    localStorage.setItem(`manual-skill-conditions-${skill.id}`, JSON.stringify(list));
+  };
+
+  const addCondition = () => {
+    if (!newCondition.trim()) return;
+    saveConditions([...conditions, newCondition.trim()]);
+    setNewCondition("");
+  };
+
+  const removeCondition = (idx: number) => {
+    saveConditions(conditions.filter((_, i) => i !== idx));
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <span className="text-xl">{skill.icon}</span>
+            {skill.name}
+          </CardTitle>
+          <CardDescription className="text-xs">{skill.description}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* 매매 조건 체크리스트 */}
+          <div className="space-y-2">
+            <Label className="text-xs font-medium flex items-center gap-1.5">
+              <Activity className="w-3.5 h-3.5" />
+              매매 조건 체크리스트
+            </Label>
+            {conditions.length > 0 ? (
+              <div className="space-y-1.5">
+                {conditions.map((cond, idx) => (
+                  <div key={idx} className="flex items-center gap-2 bg-muted/30 rounded-lg px-3 py-2">
+                    <span className="text-xs text-muted-foreground w-5">{idx + 1}.</span>
+                    <span className="text-sm flex-1">{cond}</span>
+                    <button onClick={() => removeCondition(idx)} className="text-red-400 hover:text-red-600 text-xs shrink-0">
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground py-2">등록된 조건이 없습니다</p>
+            )}
+            <div className="flex gap-2">
+              <Input
+                value={newCondition}
+                onChange={(e) => setNewCondition(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") addCondition(); }}
+                placeholder="매매 조건 입력 (Enter로 추가)"
+                className="text-sm h-8 flex-1"
+              />
+              <Button variant="outline" size="sm" className="h-8 text-xs shrink-0" onClick={addCondition}>
+                <Plus className="w-3 h-3" />
+              </Button>
+            </div>
+          </div>
+
+          {/* 전략 메모 */}
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium flex items-center gap-1.5">
+              <FileText className="w-3.5 h-3.5" />
+              전략 메모
+            </Label>
+            <Textarea
+              value={memo}
+              onChange={(e) => saveMemo(e.target.value)}
+              placeholder="전략 운영 메모, 진입/퇴출 조건, 주의사항 등을 자유롭게 기록하세요..."
+              className="text-sm min-h-[120px] resize-y"
+            />
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
