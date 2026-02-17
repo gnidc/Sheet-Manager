@@ -2738,7 +2738,19 @@ function ManualSkillsSection() {
   const accountKey = isAdmin ? "admin" : (userId ? String(userId) : "guest");
   const storageKey = `manual-custom-skills-${accountKey}`;
 
-  const [activeSkill, setActiveSkill] = useState<string>("gap-strategy");
+  // 내장 스킬은 admin만 표시
+  const builtinSkills: ManualSkillItem[] = isAdmin ? [
+    {
+      id: "gap-strategy",
+      name: "시가급등 추세추종",
+      icon: "🚀",
+      description: "장 시작 시 갭 상승 종목을 감지하고 추세를 추종하여 분할매수/매도",
+      isBuiltin: true,
+    },
+  ] : [];
+
+  const defaultActiveSkill = builtinSkills.length > 0 ? "gap-strategy" : "";
+  const [activeSkill, setActiveSkill] = useState<string>(defaultActiveSkill);
   const [showAddManual, setShowAddManual] = useState(false);
   const [customSkills, setCustomSkills] = useState<ManualSkillItem[]>(() => {
     try {
@@ -2754,20 +2766,12 @@ function ManualSkillsSection() {
   useEffect(() => {
     try {
       const saved = localStorage.getItem(storageKey);
-      setCustomSkills(saved ? JSON.parse(saved) : []);
-      setActiveSkill("gap-strategy");
+      const loaded = saved ? JSON.parse(saved) : [];
+      setCustomSkills(loaded);
+      // admin이면 내장 스킬 선택, 일반유저면 첫 번째 커스텀 스킬 또는 빈값
+      setActiveSkill(isAdmin ? "gap-strategy" : (loaded.length > 0 ? loaded[0].id : ""));
     } catch { setCustomSkills([]); }
-  }, [storageKey]);
-
-  const builtinSkills: ManualSkillItem[] = [
-    {
-      id: "gap-strategy",
-      name: "시가급등 추세추종",
-      icon: "🚀",
-      description: "장 시작 시 갭 상승 종목을 감지하고 추세를 추종하여 분할매수/매도",
-      isBuiltin: true,
-    },
-  ];
+  }, [storageKey, isAdmin]);
 
   const allSkills = [...builtinSkills, ...customSkills];
 
@@ -2858,14 +2862,21 @@ function ManualSkillsSection() {
       </div>
 
       {/* 선택된 스킬 콘텐츠 */}
-      {activeSkill === "gap-strategy" ? (
+      {activeSkill === "gap-strategy" && isAdmin ? (
         <GapStrategyPanel />
-      ) : (
+      ) : activeSkill ? (
         <CustomSkillContent
           skill={allSkills.find(s => s.id === activeSkill)}
           accountKey={accountKey}
         />
-      )}
+      ) : allSkills.length === 0 ? (
+        <Card>
+          <CardContent className="py-8 text-center text-muted-foreground">
+            <p className="text-sm">등록된 수동 스킬이 없습니다.</p>
+            <p className="text-xs mt-1">상단의 "스킬 추가" 버튼으로 나만의 매매 전략을 등록하세요.</p>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* 수동 스킬 추가 다이얼로그 */}
       <Dialog open={showAddManual} onOpenChange={setShowAddManual}>
