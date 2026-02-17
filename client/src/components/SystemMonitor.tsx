@@ -8,7 +8,7 @@ import { Progress } from "@/components/ui/progress";
 import {
   RefreshCw, Server, Database, Globe, Key, Activity, Clock, HardDrive,
   Cpu, MemoryStick, CheckCircle2, XCircle, AlertTriangle, Loader2,
-  Gauge, Wifi, Lightbulb, ArrowRight,
+  Gauge, Wifi, Lightbulb, ArrowRight, Copy, Check,
 } from "lucide-react";
 
 interface QueryTiming {
@@ -605,6 +605,51 @@ export default function SystemMonitor() {
 // ===== DB 쿼리 상세 분석 패널 =====
 function DbDebugPanel({ dbDebug, isCached }: { dbDebug: DbDebug; isCached: boolean }) {
   const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  // 클립보드 복사
+  function handleCopy() {
+    const lines: string[] = [];
+    lines.push("=== DB 쿼리 상세 분석 ===");
+    lines.push(`조회 시간: ${new Date().toLocaleString("ko-KR")}`);
+    lines.push(`응답 소스: ${isCached ? "캐시" : "실시간 조회"}`);
+    lines.push(`실행 모드: ${dbDebug.executionMode}`);
+    lines.push("");
+
+    lines.push("── 개별 쿼리 실행시간 ──");
+    dbDebug.queryTimings.forEach(q => {
+      lines.push(`  ${q.cached ? "[캐시]" : "[쿼리]"} ${q.name}: ${q.cached ? "0ms (캐시)" : `${q.ms}ms`}`);
+      if (q.query) lines.push(`         └ ${q.query}`);
+    });
+    lines.push(`  합계: ${dbDebug.totalDbQueryMs}ms`);
+    lines.push("");
+
+    if (dbDebug.poolStats) {
+      lines.push("── 커넥션 풀 상태 ──");
+      lines.push(`  활성 연결: ${dbDebug.poolStats.totalCount - dbDebug.poolStats.idleCount} / ${dbDebug.poolStats.maxConnections}`);
+      lines.push(`  유휴 연결: ${dbDebug.poolStats.idleCount}`);
+      lines.push(`  대기 요청: ${dbDebug.poolStats.waitingCount}`);
+      lines.push(`  전체 연결: ${dbDebug.poolStats.totalCount}`);
+      lines.push(`  유휴 타임아웃: ${dbDebug.poolStats.idleTimeoutMs}ms`);
+      lines.push(`  연결 타임아웃: ${dbDebug.poolStats.connectionTimeoutMs}ms`);
+      lines.push("");
+    }
+
+    lines.push("── 캐시 상태 ──");
+    const sc = dbDebug.cacheStatus.systemStatusCache;
+    lines.push(`  시스템 상태 캐시: ${sc.active ? "활성" : "비활성"} (TTL: ${sc.ttlSeconds}초${sc.remainingSeconds !== undefined ? `, 남은시간: ${sc.remainingSeconds}초` : ""})`);
+    lines.push(`    └ ${sc.note}`);
+    const dc = dbDebug.cacheStatus.dbDetailCache;
+    lines.push(`  DB 상세 캐시: ${dc.active ? "활성" : "비활성"} (TTL: ${dc.ttlSeconds}초${dc.remainingSeconds > 0 ? `, 남은시간: ${dc.remainingSeconds}초` : ""})`);
+    lines.push(`    └ ${dc.note}`);
+    lines.push("");
+    lines.push(`참고: ${dbDebug.note}`);
+
+    navigator.clipboard.writeText(lines.join("\n")).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
 
   // 쿼리 시간 색상 결정
   function getTimeColor(ms: number, cached: boolean): string {
@@ -633,7 +678,20 @@ function DbDebugPanel({ dbDebug, isCached }: { dbDebug: DbDebug; isCached: boole
           {isCached && (
             <Badge className="text-[10px] bg-blue-500">캐시 응답</Badge>
           )}
-          <span className="ml-auto text-xs text-muted-foreground">{expanded ? "▲ 접기" : "▼ 펼치기"}</span>
+          <div className="ml-auto flex items-center gap-2">
+            {expanded && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-[10px] gap-1"
+                onClick={(e) => { e.stopPropagation(); handleCopy(); }}
+              >
+                {copied ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
+                {copied ? "복사됨" : "복사"}
+              </Button>
+            )}
+            <span className="text-xs text-muted-foreground">{expanded ? "▲ 접기" : "▼ 펼치기"}</span>
+          </div>
         </CardTitle>
       </CardHeader>
       {expanded && (
