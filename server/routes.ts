@@ -6992,13 +6992,24 @@ ${newsSummary}`;
   });
 
   // ===== 공개 카페 글 목록 (인증 불필요 - 일반 유저용) =====
-  // 전체공지(noticeType=N) 캐시 (5분)
-  let publicNoticeCache: { data: any[]; timestamp: number } = { data: [], timestamp: 0 };
-  const NOTICE_CACHE_TTL = 5 * 60 * 1000; // 5분
-
+  // 최신 3개 글만 가져옴 (공지글 수집 로직 제거 - 성능 최적화)
   app.get("/api/cafe/public-articles", async (req, res) => {
     try {
-      const mapArticle = (a: any) => ({
+      const latestRes = await axios.get(
+        "https://apis.naver.com/cafe-web/cafe2/ArticleListV2.json",
+        {
+          params: {
+            "search.clubid": CAFE_ID,
+            "search.boardtype": "L",
+            "search.page": 1,
+            "search.perPage": 3,
+          },
+          headers: CAFE_HEADERS,
+          timeout: 10000,
+        }
+      );
+      const latestResult = latestRes.data?.message?.result;
+      const latestArticles = (latestResult?.articleList || []).map((a: any) => ({
         articleId: a.articleId,
         subject: a.subject,
         writerNickname: a.writerNickname,
@@ -7009,76 +7020,10 @@ ${newsSummary}`;
         likeItCount: a.likeItCount,
         writeDateTimestamp: a.writeDateTimestamp,
         newArticle: a.newArticle,
-      });
-
-      // 1) 최신 10개 글 가져오기
-      const latestRes = await axios.get(
-        "https://apis.naver.com/cafe-web/cafe2/ArticleListV2.json",
-        {
-          params: {
-            "search.clubid": CAFE_ID,
-            "search.boardtype": "L",
-            "search.page": 1,
-            "search.perPage": 10,
-          },
-          headers: CAFE_HEADERS,
-          timeout: 10000,
-        }
-      );
-      const latestResult = latestRes.data?.message?.result;
-      const latestArticles = (latestResult?.articleList || []).map(mapArticle);
-
-      // 2) 전체공지글 가져오기 (noticeType === "N" 필터링)
-      //    - 전체공지는 일반 글 목록 중 noticeType 필드가 있는 글을 스캔하여 추출
-      //    - 캐시 사용 (5분)
-      let noticeArticles: any[] = [];
-      const now = Date.now();
-      if (publicNoticeCache.data.length > 0 && (now - publicNoticeCache.timestamp) < NOTICE_CACHE_TTL) {
-        noticeArticles = publicNoticeCache.data;
-      } else {
-        try {
-          const noticeSet = new Map<number, any>();
-          // 여러 페이지를 순회하며 noticeType === "N" (전체공지) 글 수집
-          for (let page = 1; page <= 8; page++) {
-            const pageRes = await axios.get(
-              "https://apis.naver.com/cafe-web/cafe2/ArticleListV2.json",
-              {
-                params: {
-                  "search.clubid": CAFE_ID,
-                  "search.boardtype": "L",
-                  "search.page": page,
-                  "search.perPage": 50,
-                },
-                headers: CAFE_HEADERS,
-                timeout: 10000,
-              }
-            );
-            const pageArticles = pageRes.data?.message?.result?.articleList || [];
-            for (const a of pageArticles) {
-              if (a.noticeType === "N") {
-                noticeSet.set(a.articleId, mapArticle(a));
-              }
-            }
-            if (pageArticles.length < 50) break; // 마지막 페이지
-          }
-          noticeArticles = Array.from(noticeSet.values());
-          // 최신순 정렬
-          noticeArticles.sort((a: any, b: any) => b.writeDateTimestamp - a.writeDateTimestamp);
-          // 캐시 저장
-          publicNoticeCache = { data: noticeArticles, timestamp: now };
-          console.log(`[Cafe] Public notice cache updated: ${noticeArticles.length} articles`);
-        } catch (noticeErr: any) {
-          console.warn("[Cafe] Failed to fetch notice articles:", noticeErr.message);
-          // 캐시가 있으면 만료되어도 사용
-          if (publicNoticeCache.data.length > 0) {
-            noticeArticles = publicNoticeCache.data;
-          }
-        }
-      }
+      }));
 
       return res.json({
         latestArticles,
-        noticeArticles,
       });
     } catch (error: any) {
       console.error("[Cafe] Failed to fetch public articles:", error.message);

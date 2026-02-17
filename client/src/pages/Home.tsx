@@ -1087,7 +1087,6 @@ function PublicCafeView() {
 
   const { data, isLoading } = useQuery<{
     latestArticles: CafeArticle[];
-    noticeArticles: CafeArticle[];
   }>({
     queryKey: ["/api/cafe/public-articles"],
     queryFn: async () => {
@@ -1114,11 +1113,8 @@ function PublicCafeView() {
     staleTime: 60 * 1000,
   });
 
-  // 일반계정: 최근 3일치 글만 표시
-  const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000;
-  const latestArticles = (data?.latestArticles || []).filter(
-    (a) => a.writeDateTimestamp >= threeDaysAgo
-  );
+  // 서버에서 최신 3개만 가져오므로 추가 필터링 불필요
+  const latestArticles = data?.latestArticles || [];
   const searchArticles = searchData?.articles || [];
   const searchTotalArticles = searchData?.totalArticles || 0;
   const searchTotalPages = Math.ceil(searchTotalArticles / 20);
@@ -1298,13 +1294,13 @@ function PublicCafeView() {
           </>
         )}
 
-        {/* 최신글 10개 (검색 모드가 아닐 때만) */}
+        {/* 최신 3개 글 (검색 모드가 아닐 때만) */}
         {!isSearchMode && (
           <>
             <div className="px-4 pt-3 pb-1">
               <h4 className="text-sm font-semibold flex items-center gap-1.5 mb-2">
                 <FileText className="w-4 h-4 text-primary" />
-                최신글 <span className="text-xs text-muted-foreground font-normal">(최근 3일, {latestArticles.length}건)</span>
+                최신글 <span className="text-xs text-muted-foreground font-normal">({latestArticles.length}건)</span>
               </h4>
             </div>
             {latestArticles.length === 0 ? (
@@ -1665,7 +1661,7 @@ function HomeEmbed({ onNavigate }: { onNavigate: (tab: string) => void }) {
     },
   });
 
-  // 글 목록 조회 (최근 3일치 충분히 포함하도록 50개 로드)
+  // 최신 3개 글만 조회 (성능 최적화)
   const { data, isLoading, isFetching } = useQuery<{
     articles: CafeArticle[];
     page: number;
@@ -1674,7 +1670,7 @@ function HomeEmbed({ onNavigate }: { onNavigate: (tab: string) => void }) {
   }>({
     queryKey: ["/api/cafe/articles", 1],
     queryFn: async () => {
-      const params = new URLSearchParams({ page: "1", perPage: "50" });
+      const params = new URLSearchParams({ page: "1", perPage: "3" });
       const res = await fetch(`/api/cafe/articles?${params}`, { credentials: "include" });
       if (!res.ok) throw new Error("카페 글 목록을 불러올 수 없습니다.");
       return res.json();
@@ -1815,9 +1811,7 @@ function HomeEmbed({ onNavigate }: { onNavigate: (tab: string) => void }) {
   }
 
   const activeData = isSearchMode ? searchData : data;
-  const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000;
-  const rawArticles = activeData?.articles || [];
-  const articles = isSearchMode ? rawArticles : rawArticles.filter(a => a.writeDateTimestamp >= threeDaysAgo);
+  const articles = activeData?.articles || [];
   const totalArticles = articles.length;
   const totalPages = Math.ceil((activeData?.totalArticles || 0) / 20);
   const menus = menusData?.menus || [];
@@ -1879,7 +1873,7 @@ function HomeEmbed({ onNavigate }: { onNavigate: (tab: string) => void }) {
             />
             <h3 className="font-semibold text-sm">Life Fitness</h3>
             {!isSearchMode && (
-              <span className="text-xs text-muted-foreground">(최근 3일 · {totalArticles}건)</span>
+              <span className="text-xs text-muted-foreground">({totalArticles}건)</span>
             )}
             {isSearchMode && searchQuery && (
               <span className="text-xs text-primary font-medium">"{searchQuery}" 검색결과</span>
@@ -2177,7 +2171,7 @@ function HomeEmbed({ onNavigate }: { onNavigate: (tab: string) => void }) {
             <div className="px-4 pt-3 pb-1">
               <h4 className="text-sm font-semibold flex items-center gap-1.5 mb-2">
                 <FileText className="w-4 h-4 text-primary" />
-                최신글 <span className="text-xs text-muted-foreground font-normal">(최근 3일, {totalArticles}건)</span>
+                최신글 <span className="text-xs text-muted-foreground font-normal">({totalArticles}건)</span>
               </h4>
             </div>
             {loading ? (
@@ -2187,7 +2181,7 @@ function HomeEmbed({ onNavigate }: { onNavigate: (tab: string) => void }) {
               </div>
             ) : articles.length === 0 ? (
               <div className="py-8 text-center text-muted-foreground text-sm">
-                최근 3일간 게시글이 없습니다.
+                게시글이 없습니다.
               </div>
             ) : (
               <div className="divide-y">
