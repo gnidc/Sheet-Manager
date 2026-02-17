@@ -149,7 +149,7 @@ export function getPool(): pg.Pool {
       // Serverless 환경에서는 연결 수를 제한
       max: isVercel ? 3 : 10, // Vercel에서는 최대 3개 연결 (동시 쿼리 지원)
       min: 0, // Serverless에서는 최소 연결 수를 0으로 설정 (필요할 때만 연결)
-      idleTimeoutMillis: isVercel ? 10000 : 30000, // Vercel: 10초 (함수 수명 내 연결 재사용)
+      idleTimeoutMillis: isVercel ? 20000 : 30000, // Vercel: 20초 (함수 수명 내 연결 재사용 극대화)
       // Vercel에서는 네트워크 지연과 SSL 핸드셰이크를 고려하여 연결 타임아웃 증가
       // Hobby 플랜 타임아웃(10초) 내에서 쿼리 실행까지 완료할 수 있도록 설정
       connectionTimeoutMillis: isVercel ? 8000 : 30000, // Vercel: 8초, 로컬: 30초

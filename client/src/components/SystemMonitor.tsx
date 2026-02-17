@@ -73,6 +73,7 @@ interface SystemStatus {
   database: {
     status: string;
     pingMs?: number;
+    coldStartMs?: number;
     dbSize?: string;
     activeConnections?: number;
     tables?: { name: string; rows: number; size: string }[];
@@ -120,6 +121,10 @@ function generateRecommendations(data: SystemStatus): Recommendation[] {
   if (data.database.status !== "connected") {
     recs.push({ level: "critical", category: "데이터베이스", title: "DB 연결 실패", detail: `오류: ${data.database.error || "알 수 없음"}. 즉시 DATABASE_URL 환경변수와 DB 서버 상태를 확인하세요.` });
   } else {
+    // Cold Start가 있었으면 별도 표시
+    if (data.database.coldStartMs && data.database.coldStartMs > 500) {
+      recs.push({ level: "info", category: "데이터베이스", title: `DB Cold Start 감지 (${data.database.coldStartMs}ms)`, detail: `TCP+SSL 핸드셰이크에 ${data.database.coldStartMs}ms 소요. 실제 DB 응답시간은 ${data.database.pingMs}ms입니다. Cold Start는 서버리스 환경에서 정상적인 현상입니다.` });
+    }
     if (data.database.pingMs && data.database.pingMs > 500) {
       recs.push({ level: "warning", category: "데이터베이스", title: `DB 응답 느림 (${data.database.pingMs}ms)`, detail: "DB 응답시간이 500ms를 초과했습니다. DB 서버 부하 또는 네트워크 지연을 점검하세요. Connection Pool 설정 최적화를 고려하세요." });
     } else if (data.database.pingMs && data.database.pingMs > 200) {
@@ -335,7 +340,11 @@ export default function SystemMonitor() {
               <span className="text-xs font-medium">DB</span>
             </div>
             <p className="text-sm font-bold">{dbOk ? `${data.database.pingMs}ms` : "오류"}</p>
-            <p className="text-[10px] text-muted-foreground">{data.database.dbSize || "N/A"}</p>
+            <p className="text-[10px] text-muted-foreground">
+              {data.database.coldStartMs
+                ? `Cold ${data.database.coldStartMs}ms · ${data.database.dbSize}`
+                : data.database.dbSize || "N/A"}
+            </p>
           </CardContent>
         </Card>
         <Card>
@@ -440,7 +449,9 @@ export default function SystemMonitor() {
           </CardTitle>
           {dbOk && (
             <CardDescription className="text-xs">
-              응답시간 {data.database.pingMs}ms · 크기 {data.database.dbSize} · 활성 커넥션 {data.database.activeConnections}
+              응답시간 {data.database.pingMs}ms
+              {data.database.coldStartMs ? ` (Cold Start ${data.database.coldStartMs}ms)` : ""}
+              {" "}· 크기 {data.database.dbSize} · 활성 커넥션 {data.database.activeConnections}
             </CardDescription>
           )}
         </CardHeader>

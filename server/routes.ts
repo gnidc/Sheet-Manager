@@ -11363,7 +11363,7 @@ ${etfListStr}
         vercelEnv: process.env.VERCEL_ENV || "unknown",
       };
 
-      // 2. DB ping (SELECT 1 - 가장 가벼운 쿼리) + DB 상세(캐시 or 쿼리) + API 체크 + 에러로그 → 병렬
+      // 2. DB 연결 워밍업 + 쿼리 실행
       const apiChecks: { name: string; url: string; timeout: number }[] = [
         { name: "Naver Finance", url: "https://finance.naver.com", timeout: 3000 },
         { name: "KRX", url: "https://data.krx.co.kr", timeout: 3000 },
@@ -11375,25 +11375,42 @@ ${etfListStr}
         apiChecks.push({ name: "Kiwoom API", url: "https://mockapi.kiwoom.com", timeout: 3000 });
       }
 
-      // ★ 핵심: DB ping + DB 상세 + API 체크 + 에러로그를 모두 병렬로 실행
       // 개별 쿼리 타이밍 추적 (디버그용)
       const queryTimings: { name: string; ms: number; cached: boolean; query?: string }[] = [];
       const dbDetailCacheHit = !!(dbDetailCache && now < dbDetailCache.expiry);
 
-      const [dbPingResult, dbDetailResult, apiResults, errorResult] = await Promise.all([
-        // DB ping: SELECT 1 (연결 상태 + 응답시간만 측정)
-        (async () => {
-          try {
-            const dbStart = Date.now();
-            await db.execute(sql`SELECT 1`);
-            const elapsed = Date.now() - dbStart;
-            queryTimings.push({ name: "DB Ping (SELECT 1)", ms: elapsed, cached: false, query: "SELECT 1" });
-            return { status: "connected", pingMs: elapsed };
-          } catch (dbErr: any) {
-            queryTimings.push({ name: "DB Ping (SELECT 1)", ms: 0, cached: false, query: "SELECT 1" });
-            return { status: "error", pingMs: 0, error: dbErr.message };
-          }
-        })(),
+      // ★ Step 1: DB 연결 워밍업 (Cold Start 시 TCP+SSL 핸드셰이크를 여기서 1회만 수행)
+      // 이후 쿼리들은 이미 확보된 연결을 재사용하여 수십ms로 완료됨
+      let coldStartMs = 0;
+      let dbPingResult: { status: string; pingMs: number; coldStartMs?: number; error?: string } = { status: "error", pingMs: 0 };
+      try {
+        const warmupStart = Date.now();
+        await db.execute(sql`SELECT 1`);
+        coldStartMs = Date.now() - warmupStart;
+        queryTimings.push({
+          name: coldStartMs > 200 ? "DB 연결 수립 (Cold Start)" : "DB Ping (Warm)",
+          ms: coldStartMs,
+          cached: false,
+          query: coldStartMs > 200 ? "SELECT 1 (TCP+SSL 핸드셰이크 포함)" : "SELECT 1",
+        });
+
+        // 연결이 확보된 상태에서 실제 DB 지연시간 측정
+        if (coldStartMs > 200) {
+          const pingStart = Date.now();
+          await db.execute(sql`SELECT 1`);
+          const warmPing = Date.now() - pingStart;
+          queryTimings.push({ name: "DB Ping (Warm)", ms: warmPing, cached: false, query: "SELECT 1 (연결 재사용)" });
+          dbPingResult = { status: "connected", pingMs: warmPing, coldStartMs };
+        } else {
+          dbPingResult = { status: "connected", pingMs: coldStartMs };
+        }
+      } catch (dbErr: any) {
+        queryTimings.push({ name: "DB 연결 실패", ms: 0, cached: false, query: `에러: ${dbErr.message}` });
+        dbPingResult = { status: "error", pingMs: 0, error: dbErr.message };
+      }
+
+      // ★ Step 2: 연결 워밍업 후 → DB 상세 + API 체크 + 에러로그를 병렬 실행 (연결 재사용)
+      const [dbDetailResult, apiResults, errorResult] = await Promise.all([
         // DB 상세: 별도 장기 캐시 (5분) - pg_database_size, 테이블 정보는 자주 안 바뀜
         (async (): Promise<{ dbSize: string; activeConnections: number; tables: any[] }> => {
           if (dbDetailCacheHit) {
@@ -11452,10 +11469,10 @@ ${etfListStr}
               WHERE page LIKE '%error%' OR page LIKE '%500%' OR page LIKE '%404%'
               ORDER BY created_at DESC LIMIT 5
             `);
-            queryTimings.push({ name: "Error Logs", ms: Date.now() - errStart, cached: false, query: "SELECT FROM visit_logs WHERE page LIKE '%error%'" });
+            queryTimings.push({ name: "Error Logs", ms: Date.now() - errStart, cached: false, query: "SELECT FROM visit_logs WHERE page LIKE '%%error%%'" });
             return (recentErrors as any).rows || [];
-          } catch {
-            queryTimings.push({ name: "Error Logs", ms: 0, cached: false, query: "에러 발생" });
+          } catch (errLogErr: any) {
+            queryTimings.push({ name: "Error Logs", ms: 0, cached: false, query: `에러: ${errLogErr?.message || "visit_logs 테이블 조회 실패"}` });
             return [];
           }
         })(),
