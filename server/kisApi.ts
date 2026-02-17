@@ -59,8 +59,9 @@ let cachedTradeToken: { token: string; expiresAt: number } | null = null;
 // 시세조회용 토큰 (실전 서버 - 모의투자 서버는 시세 API 미지원)
 let cachedMarketToken: { token: string; expiresAt: number } | null = null;
 
-// 사용자별 토큰 캐시
+// 사용자별 토큰 캐시 (최대 50명 - 메모리 보호)
 const userTokenCache = new Map<number, { trade: { token: string; expiresAt: number } | null; market: { token: string; expiresAt: number } | null }>();
+const USER_TOKEN_CACHE_MAX_SIZE = 50;
 
 // ========== 인증 ==========
 async function getTokenFromServer(baseUrl: string, label: string, retries = 2): Promise<string> {
@@ -627,12 +628,25 @@ export interface EtfComponentResult {
   updatedAt: string;
 }
 
-// 메모리 캐시 (5분)
+// 🛡️ Map 크기 제한 헬퍼 (FIFO eviction - 가장 오래된 것부터 제거)
+function evictIfOverLimit<K, V>(map: Map<K, V>, maxSize: number): void {
+  if (map.size <= maxSize) return;
+  const excess = map.size - maxSize;
+  const keys = map.keys();
+  for (let i = 0; i < excess; i++) {
+    const k = keys.next().value;
+    if (k !== undefined) map.delete(k);
+  }
+}
+
+// 메모리 캐시 (5분, 최대 100개 ETF)
 const etfComponentCache: Map<string, { data: EtfComponentResult; expiry: number }> = new Map();
 const ETF_CACHE_TTL = 5 * 60 * 1000; // 5분
+const ETF_CACHE_MAX_SIZE = 100;
 
-// 종목명 → 종목코드 캐시 (영구 유지 - 종목코드는 잘 안 변함)
+// 종목명 → 종목코드 캐시 (최대 500개 - 메모리 보호)
 const stockCodeCache: Map<string, string> = new Map();
+const STOCK_CODE_CACHE_MAX_SIZE = 500;
 
 // 네이버 주식 자동완성 API로 종목코드 조회
 async function resolveStockCode(stockName: string): Promise<string> {
@@ -662,12 +676,14 @@ async function resolveStockCode(stockName: string): Promise<string> {
       );
       const code = exact?.code || items[0]?.code || "";
       stockCodeCache.set(stockName, code);
+      evictIfOverLimit(stockCodeCache, STOCK_CODE_CACHE_MAX_SIZE);
       return code;
     }
   } catch {
     // 검색 실패 시 빈 문자열
   }
   stockCodeCache.set(stockName, "");
+  evictIfOverLimit(stockCodeCache, STOCK_CODE_CACHE_MAX_SIZE);
   return "";
 }
 
@@ -922,8 +938,12 @@ export async function getEtfComponents(etfCode: string): Promise<EtfComponentRes
     updatedAt: new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }),
   };
 
-  // 캐시 저장
-  etfComponentCache.set(etfCode, { data: result, expiry: Date.now() + ETF_CACHE_TTL });
+  // 캐시 저장 (크기 제한 적용)
+  // 만료된 캐시 먼저 정리
+  const now = Date.now();
+  etfComponentCache.forEach((v, k) => { if (now > v.expiry) etfComponentCache.delete(k); });
+  etfComponentCache.set(etfCode, { data: result, expiry: now + ETF_CACHE_TTL });
+  evictIfOverLimit(etfComponentCache, ETF_CACHE_MAX_SIZE);
 
   return result;
 }
@@ -1239,6 +1259,20 @@ async function getUserToken(
   let cache = userTokenCache.get(userId);
   if (!cache) {
     cache = { trade: null, market: null };
+    // 크기 제한: 최대치 초과 시 만료된 토큰부터 정리
+    if (userTokenCache.size >= USER_TOKEN_CACHE_MAX_SIZE) {
+      const now = Date.now();
+      for (const [uid, uc] of userTokenCache) {
+        const tradeExpired = !uc.trade || now >= uc.trade.expiresAt;
+        const marketExpired = !uc.market || now >= uc.market.expiresAt;
+        if (tradeExpired && marketExpired) { userTokenCache.delete(uid); }
+      }
+      // 여전히 초과 시 FIFO 제거
+      if (userTokenCache.size >= USER_TOKEN_CACHE_MAX_SIZE) {
+        const k = userTokenCache.keys().next().value;
+        if (k !== undefined) userTokenCache.delete(k);
+      }
+    }
     userTokenCache.set(userId, cache);
   }
 

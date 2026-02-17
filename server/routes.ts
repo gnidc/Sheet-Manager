@@ -174,11 +174,31 @@ function requireUser(req: Request, res: Response, next: NextFunction) {
 
 // 🔒 Rate Limiting (메모리 기반 - IP별 요청 횟수 제한)
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
+const RATE_LIMIT_MAX_ENTRIES = 1000; // 메모리 보호: 최대 엔트리 수
+let rateLimitCleanupCounter = 0;
 function rateLimit(maxRequests: number, windowMs: number) {
   return (req: Request, res: Response, next: NextFunction) => {
     const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "unknown";
     const key = `${ip}:${req.path}`;
     const now = Date.now();
+
+    // 매 50번째 요청마다 만료된 엔트리 정리 (setInterval 대체)
+    if (++rateLimitCleanupCounter >= 50) {
+      rateLimitCleanupCounter = 0;
+      rateLimitMap.forEach((entry, k) => {
+        if (now > entry.resetTime) rateLimitMap.delete(k);
+      });
+      // 크기 제한: 최대치 초과 시 가장 오래된 것부터 제거
+      if (rateLimitMap.size > RATE_LIMIT_MAX_ENTRIES) {
+        const excess = rateLimitMap.size - RATE_LIMIT_MAX_ENTRIES;
+        const keys = rateLimitMap.keys();
+        for (let i = 0; i < excess; i++) {
+          const k = keys.next().value;
+          if (k) rateLimitMap.delete(k);
+        }
+      }
+    }
+
     const entry = rateLimitMap.get(key);
     
     if (!entry || now > entry.resetTime) {
@@ -196,13 +216,6 @@ function rateLimit(maxRequests: number, windowMs: number) {
     next();
   };
 }
-// 오래된 Rate Limit 엔트리 정리 (5분마다)
-setInterval(() => {
-  const now = Date.now();
-  rateLimitMap.forEach((entry, key) => {
-    if (now > entry.resetTime) rateLimitMap.delete(key);
-  });
-}, 5 * 60 * 1000);
 
 // 보안 관련 테이블 자동 생성 (누락 시)
 async function ensureSecurityTables() {
@@ -2594,32 +2607,36 @@ export async function registerRoutes(
     }
   });
 
-  // 시가급등 전략 자동 스케줄러 (3분 간격)
-  setInterval(async () => {
+  // 시가급등 전략 수동 실행 API (setInterval 제거 → 메모리 누수 방지)
+  // Vercel Serverless에서는 백그라운드 타이머가 프로세스를 유지하여 OOM을 유발
+  // 필요 시 Vercel Cron Job 또는 프론트엔드에서 수동 실행
+  app.post("/api/trading/gap-strategy/run-scheduler", requireAdmin, async (_req, res) => {
     try {
       const now = new Date();
       const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
       const day = kst.getDay();
-      // 주말 제외
-      if (day === 0 || day === 6) return;
+      if (day === 0 || day === 6) return res.json({ message: "주말은 실행하지 않습니다", executed: 0 });
       const hour = kst.getHours();
       const minute = kst.getMinutes();
       const timeCode = hour * 100 + minute;
-      // 08:50 ~ 15:30 사이에만 실행
-      if (timeCode < 850 || timeCode > 1530) return;
+      if (timeCode < 850 || timeCode > 1530) return res.json({ message: "장 운영시간이 아닙니다 (08:50~15:30)", executed: 0 });
 
       const activeStrategies = await storage.getAllActiveGapStrategies();
+      let executed = 0;
       for (const strategy of activeStrategies) {
         try {
           await gapStrategyModule.executeGapStrategy(strategy.userId);
+          executed++;
         } catch (e: any) {
           console.error(`[GapScheduler] User ${strategy.userId} 실행 오류:`, e.message);
         }
       }
+      res.json({ message: `${executed}/${activeStrategies.length}개 전략 실행 완료`, executed });
     } catch (e: any) {
       console.error("[GapScheduler] 스케줄러 오류:", e.message);
+      res.status(500).json({ message: e.message });
     }
-  }, 3 * 60 * 1000); // 3분 간격
+  });
 
   // ========== 손절/트레일링 스탑 감시 ==========
 
@@ -3066,8 +3083,9 @@ export async function registerRoutes(
     }
   });
 
-  // ========== 주요 리서치 저장/조회 (서버 메모리 기반, 모든 유저 공유) ==========
+  // ========== 주요 리서치 저장/조회 (서버 메모리 기반, 모든 유저 공유, 최대 200개) ==========
   let savedKeyResearch: Array<{ title: string; link: string; source: string; date: string; file: string }> = [];
+  const KEY_RESEARCH_MAX_SIZE = 200;
 
   // AI 분석 보고서는 DB(ai_reports 테이블)에 저장
 
@@ -3083,12 +3101,16 @@ export async function registerRoutes(
       if (!items || !Array.isArray(items)) {
         return res.status(400).json({ message: "items 배열이 필요합니다." });
       }
-      // 중복 제거 후 추가
+      // 중복 제거 후 추가 (크기 제한 적용)
       for (const item of items) {
         const exists = savedKeyResearch.some(k => k.title === item.title && k.source === item.source);
         if (!exists) {
           savedKeyResearch.push(item);
         }
+      }
+      // 최대치 초과 시 오래된 것부터 제거
+      if (savedKeyResearch.length > KEY_RESEARCH_MAX_SIZE) {
+        savedKeyResearch = savedKeyResearch.slice(-KEY_RESEARCH_MAX_SIZE);
       }
       res.json({ items: savedKeyResearch, added: items.length });
     } catch (error: any) {
@@ -7333,10 +7355,12 @@ ${newsSummary}`;
     timestamp: number;
   }
 
-  // 이전 상태를 캐싱 (서버 메모리)
+  // 이전 상태를 캐싱 (서버 메모리, 크기 제한)
   let prevArticleSnapshot: Map<number, { commentCount: number; likeItCount: number; subject: string }> = new Map();
+  const ARTICLE_SNAPSHOT_MAX_SIZE = 200; // 최대 200개 글만 추적
   let prevMemberCount: number | null = null;
   let cafeNotifications: CafeNotification[] = [];
+  const CAFE_NOTIFICATIONS_MAX_SIZE = 100; // 최대 100개 알림만 유지
   let lastNotificationCheck = 0;
   const NOTIFICATION_COOLDOWN = 60 * 1000; // 최소 1분 간격
 
@@ -9731,16 +9755,10 @@ ${etfListStr}
   // Vite/serveStatic 미들웨어가 먼저 처리한 후에 등록되어야 함
   // server/index.ts에서 별도로 처리됨
 
-  // ========== 손절 감시 백그라운드 루프 (개선판) ==========
-  // 개선 사항:
-  //  1. 네이버 bulk API로 일괄 시세 조회 (1회 요청으로 전종목 확인, KIS rate limit 회피)
-  //  2. 장중 10초 간격, 장외 시간 자동 비활성화
-  //  3. 트레일링 스탑 최고가 실시간 업데이트
-  //  4. 마지막 체크 시각/현재가 캐시 (프론트엔드에서 조회 가능)
-  const STOP_LOSS_CHECK_INTERVAL_MARKET = 10 * 1000;   // 장중 10초
-  const STOP_LOSS_CHECK_INTERVAL_IDLE = 60 * 1000;     // 장외 60초 (활성 주문 유무 확인용)
-  let stopLossLoopRunning = false;
-  // 마지막 체크 시각 & 현재가 캐시 (프론트엔드용)
+  // ========== 손절 감시 (온디맨드 방식 - 백그라운드 루프 제거) ==========
+  // Vercel Serverless에서 재귀 setTimeout은 프로세스를 유지하여 OOM을 유발
+  // → 프론트엔드에서 주기적으로 호출하거나 Vercel Cron Job으로 실행
+  // 마지막 체크 시각 & 현재가 캐시 (프론트엔드용, 요청 당 갱신)
   const stopLossLatestPrices = new Map<string, { price: number; changePercent: string; checkedAt: Date }>();
   let stopLossLastCheckedAt: Date | null = null;
 
@@ -9749,143 +9767,133 @@ ${etfListStr}
     const kstHour = (now.getUTCHours() + 9) % 24;
     const kstMinute = now.getUTCMinutes();
     const kstTime = kstHour * 100 + kstMinute;
-    // 장 운영: 09:00 ~ 15:30 (15:30 정규장 종료)
     return kstTime >= 900 && kstTime <= 1530;
   }
 
-  async function stopLossMonitorLoop() {
-    if (stopLossLoopRunning) return;
-    stopLossLoopRunning = true;
+  async function runStopLossCheck(): Promise<{ activeCount: number; triggeredCount: number; trailingUpdated: number }> {
+    const activeOrders = await storage.getActiveStopLossOrders();
+    if (activeOrders.length === 0) return { activeCount: 0, triggeredCount: 0, trailingUpdated: 0 };
 
-    try {
-      const activeOrders = await storage.getActiveStopLossOrders();
-      if (activeOrders.length === 0) return;
+    if (!isMarketOpen()) return { activeCount: activeOrders.length, triggeredCount: 0, trailingUpdated: 0 };
 
-      // 장 시간 외에는 가격 확인 스킵
-      if (!isMarketOpen()) return;
+    const stockCodes = Array.from(new Set(activeOrders.map(o => o.stockCode)));
+    const priceMap = await kisApi.fetchNaverBulkPrices(stockCodes);
 
-      // 1. 네이버 bulk API로 모든 종목의 현재가를 한번에 조회
-      const stockCodes = Array.from(new Set(activeOrders.map(o => o.stockCode)));
-      const priceMap = await kisApi.fetchNaverBulkPrices(stockCodes);
-
-      if (priceMap.size === 0) {
-        console.log("[StopLoss] Bulk price fetch returned 0 results, skipping cycle");
-        return;
-      }
-
-      stopLossLastCheckedAt = new Date();
-      // 가격 캐시 업데이트
-      for (const [code, data] of Array.from(priceMap)) {
-        stopLossLatestPrices.set(code, {
-          price: Number(data.price),
-          changePercent: data.changePercent,
-          checkedAt: stopLossLastCheckedAt,
-        });
-      }
-
-      let triggeredCount = 0;
-      let trailingUpdated = 0;
-
-      // 2. 각 감시 주문에 대해 조건 확인
-      for (const sl of activeOrders) {
-        const priceData = priceMap.get(sl.stockCode);
-        if (!priceData) continue;
-
-        const currentPrice = Number(priceData.price);
-        if (currentPrice <= 0) continue;
-
-        let currentStopPrice = Number(sl.stopPrice);
-
-        // 트레일링 스탑: 최고가 갱신 시 손절가도 상향 조정
-        if (sl.stopType === "trailing") {
-          const prevHighest = Number(sl.highestPrice || sl.buyPrice);
-          if (currentPrice > prevHighest) {
-            const newStopPrice = Math.floor(currentPrice * (1 - Number(sl.stopLossPercent) / 100));
-            await storage.updateStopLossOrder(sl.id, {
-              highestPrice: String(currentPrice),
-              stopPrice: String(newStopPrice),
-            });
-            currentStopPrice = newStopPrice;
-            trailingUpdated++;
-          }
-        }
-
-        // 손절 조건 확인: 현재가 <= 손절가
-        if (currentPrice <= currentStopPrice) {
-          console.log(`[StopLoss] ⚡ TRIGGER: ${sl.stockName}(${sl.stockCode}) 현재가=${currentPrice} <= 손절가=${currentStopPrice}`);
-
-          const userCreds = sl.userId ? await getUserCredentialsById(sl.userId) : null;
-          let orderResult;
-          const sellParams = {
-              stockCode: sl.stockCode,
-            orderType: "sell" as const,
-              quantity: sl.quantity,
-            orderMethod: "market" as const,
-          };
-          if (userCreds) {
-            if (userCreds.broker === "kiwoom" && userCreds.kiwoomCreds) {
-              orderResult = await kiwoomApi.userPlaceOrder(userCreds.userId, userCreds.kiwoomCreds, sellParams);
-            } else if (userCreds.kisCreds) {
-              orderResult = await kisApi.userPlaceOrder(userCreds.userId, userCreds.kisCreds, sellParams);
-          } else {
-              orderResult = { success: false, message: "자동매매 API 미설정" };
-            }
-          } else {
-            orderResult = await kisApi.placeOrder(sellParams);
-          }
-
-          // 주문 기록 저장
-          await storage.createTradingOrder({
-            stockCode: sl.stockCode,
-            stockName: sl.stockName || sl.stockCode,
-            orderType: "sell",
-            orderMethod: "market",
-            quantity: sl.quantity,
-            price: String(currentPrice),
-            totalAmount: String(currentPrice * sl.quantity),
-            status: orderResult.success ? "filled" : "failed",
-            kisOrderNo: orderResult.orderNo || null,
-            errorMessage: orderResult.success ? null : orderResult.message,
-            executedAt: orderResult.success ? new Date() : null,
-            userId: sl.userId,
-          });
-
-          // 감시 상태 업데이트
-          await storage.updateStopLossOrder(sl.id, {
-            status: orderResult.success ? "triggered" : "error",
-            kisOrderNo: orderResult.orderNo || null,
-            triggerPrice: String(currentPrice),
-            triggeredAt: new Date(),
-            errorMessage: orderResult.success ? null : orderResult.message,
-          });
-
-          triggeredCount++;
-          console.log(`[StopLoss] ${orderResult.success ? "✅ 매도 성공" : "❌ 매도 실패"}: ${sl.stockName} ${sl.quantity}주 @ 시장가 (발동가: ${currentPrice}원)`);
-        }
-      }
-
-      // 간결한 로그 (매 10초마다 모든 종목 상세는 불필요)
-      if (triggeredCount > 0 || trailingUpdated > 0) {
-        console.log(`[StopLoss] 감시 ${activeOrders.length}건 | 발동 ${triggeredCount}건 | 트레일링갱신 ${trailingUpdated}건`);
-      }
-    } catch (err: any) {
-      console.error("[StopLoss] Monitor error:", err.message);
-    } finally {
-      stopLossLoopRunning = false;
+    if (priceMap.size === 0) {
+      return { activeCount: activeOrders.length, triggeredCount: 0, trailingUpdated: 0 };
     }
+
+    stopLossLastCheckedAt = new Date();
+    // 가격 캐시 업데이트 (크기 제한: 최대 200 종목)
+    for (const [code, data] of Array.from(priceMap)) {
+      stopLossLatestPrices.set(code, {
+        price: Number(data.price),
+        changePercent: data.changePercent,
+        checkedAt: stopLossLastCheckedAt,
+      });
+    }
+    if (stopLossLatestPrices.size > 200) {
+      const excess = stopLossLatestPrices.size - 200;
+      const keys = stopLossLatestPrices.keys();
+      for (let i = 0; i < excess; i++) {
+        const k = keys.next().value;
+        if (k) stopLossLatestPrices.delete(k);
+      }
+    }
+
+    let triggeredCount = 0;
+    let trailingUpdated = 0;
+
+    for (const sl of activeOrders) {
+      const priceData = priceMap.get(sl.stockCode);
+      if (!priceData) continue;
+
+      const currentPrice = Number(priceData.price);
+      if (currentPrice <= 0) continue;
+
+      let currentStopPrice = Number(sl.stopPrice);
+
+      if (sl.stopType === "trailing") {
+        const prevHighest = Number(sl.highestPrice || sl.buyPrice);
+        if (currentPrice > prevHighest) {
+          const newStopPrice = Math.floor(currentPrice * (1 - Number(sl.stopLossPercent) / 100));
+          await storage.updateStopLossOrder(sl.id, {
+            highestPrice: String(currentPrice),
+            stopPrice: String(newStopPrice),
+          });
+          currentStopPrice = newStopPrice;
+          trailingUpdated++;
+        }
+      }
+
+      if (currentPrice <= currentStopPrice) {
+        console.log(`[StopLoss] ⚡ TRIGGER: ${sl.stockName}(${sl.stockCode}) 현재가=${currentPrice} <= 손절가=${currentStopPrice}`);
+
+        const userCreds = sl.userId ? await getUserCredentialsById(sl.userId) : null;
+        let orderResult;
+        const sellParams = {
+          stockCode: sl.stockCode,
+          orderType: "sell" as const,
+          quantity: sl.quantity,
+          orderMethod: "market" as const,
+        };
+        if (userCreds) {
+          if (userCreds.broker === "kiwoom" && userCreds.kiwoomCreds) {
+            orderResult = await kiwoomApi.userPlaceOrder(userCreds.userId, userCreds.kiwoomCreds, sellParams);
+          } else if (userCreds.kisCreds) {
+            orderResult = await kisApi.userPlaceOrder(userCreds.userId, userCreds.kisCreds, sellParams);
+          } else {
+            orderResult = { success: false, message: "자동매매 API 미설정" };
+          }
+        } else {
+          orderResult = await kisApi.placeOrder(sellParams);
+        }
+
+        await storage.createTradingOrder({
+          stockCode: sl.stockCode,
+          stockName: sl.stockName || sl.stockCode,
+          orderType: "sell",
+          orderMethod: "market",
+          quantity: sl.quantity,
+          price: String(currentPrice),
+          totalAmount: String(currentPrice * sl.quantity),
+          status: orderResult.success ? "filled" : "failed",
+          kisOrderNo: orderResult.orderNo || null,
+          errorMessage: orderResult.success ? null : orderResult.message,
+          executedAt: orderResult.success ? new Date() : null,
+          userId: sl.userId,
+        });
+
+        await storage.updateStopLossOrder(sl.id, {
+          status: orderResult.success ? "triggered" : "error",
+          kisOrderNo: orderResult.orderNo || null,
+          triggerPrice: String(currentPrice),
+          triggeredAt: new Date(),
+          errorMessage: orderResult.success ? null : orderResult.message,
+        });
+
+        triggeredCount++;
+        console.log(`[StopLoss] ${orderResult.success ? "✅ 매도 성공" : "❌ 매도 실패"}: ${sl.stockName} ${sl.quantity}주 @ 시장가 (발동가: ${currentPrice}원)`);
+      }
+    }
+
+    if (triggeredCount > 0 || trailingUpdated > 0) {
+      console.log(`[StopLoss] 감시 ${activeOrders.length}건 | 발동 ${triggeredCount}건 | 트레일링갱신 ${trailingUpdated}건`);
+    }
+
+    return { activeCount: activeOrders.length, triggeredCount, trailingUpdated };
   }
 
-  // 스마트 인터벌: 장중이면 10초, 장외면 60초
-  let stopLossTimer: ReturnType<typeof setTimeout> | null = null;
-  function scheduleNextStopLossCheck() {
-    const interval = isMarketOpen() ? STOP_LOSS_CHECK_INTERVAL_MARKET : STOP_LOSS_CHECK_INTERVAL_IDLE;
-    stopLossTimer = setTimeout(async () => {
-      await stopLossMonitorLoop();
-      scheduleNextStopLossCheck();
-    }, interval);
-  }
-  scheduleNextStopLossCheck();
-  console.log("[StopLoss Monitor] Background monitoring started (10s market / 60s idle)");
+  // 손절 감시 수동/Cron 실행 API
+  app.post("/api/trading/stop-loss/check", requireUser, async (_req, res) => {
+    try {
+      const result = await runStopLossCheck();
+      res.json({ ...result, lastCheckedAt: stopLossLastCheckedAt?.toISOString() });
+    } catch (err: any) {
+      console.error("[StopLoss] Check error:", err.message);
+      res.status(500).json({ message: err.message });
+    }
+  });
 
   // 손절 감시 실시간 현재가 조회 API (프론트엔드용)
   app.get("/api/trading/stop-loss/prices", requireUser, async (_req, res) => {

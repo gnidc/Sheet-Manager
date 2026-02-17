@@ -30,8 +30,9 @@ export interface UserKiwoomCredentials {
   mockTrading: boolean;
 }
 
-// 사용자별 토큰 캐시
+// 사용자별 토큰 캐시 (최대 50명 - 메모리 보호)
 const userTokenCache = new Map<number, { token: string; expiresAt: number }>();
+const USER_TOKEN_CACHE_MAX_SIZE = 50;
 
 /** 키움 액세스 토큰 발급 */
 export async function getKiwoomToken(userId: number, creds: UserKiwoomCredentials): Promise<string> {
@@ -80,6 +81,17 @@ export async function getKiwoomToken(userId: number, creds: UserKiwoomCredential
       }
     }
 
+    // 크기 제한: 만료된 토큰 먼저 정리 후 FIFO 제거
+    if (userTokenCache.size >= USER_TOKEN_CACHE_MAX_SIZE) {
+      const now = Date.now();
+      for (const [uid, uc] of userTokenCache) {
+        if (now >= uc.expiresAt) userTokenCache.delete(uid);
+      }
+      if (userTokenCache.size >= USER_TOKEN_CACHE_MAX_SIZE) {
+        const k = userTokenCache.keys().next().value;
+        if (k !== undefined) userTokenCache.delete(k);
+      }
+    }
     userTokenCache.set(userId, { token, expiresAt });
     console.log(`[Kiwoom] Token issued for user ${userId} (${creds.mockTrading ? "모의" : "실전"})`);
     return token;
