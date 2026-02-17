@@ -358,7 +358,7 @@ export async function registerRoutes(
   } catch (err: any) {
     console.error("[Security] init error:", err.message);
   }
-
+  
   // 헬스체크 엔드포인트 (가벼운 DB 연결 확인만)
   app.get("/api/health", async (req, res) => {
     try {
@@ -686,7 +686,7 @@ export async function registerRoutes(
       appKey: decrypt(config.appKey),
       appSecret: decrypt(config.appSecret),
       accountNo: decrypt(config.accountNo),
-      mockTrading: config.mockTrading ?? true,
+        mockTrading: config.mockTrading ?? true,
     };
   }
 
@@ -1328,7 +1328,7 @@ export async function registerRoutes(
         if (userCreds.broker === "kiwoom" && userCreds.kiwoomCreds) {
           console.log(`[Balance] User ${userCreds.userId} (키움) - accountNo: ${userCreds.kiwoomCreds.accountNo?.slice(0,4)}****`);
           const balance = await kiwoomApi.getUserAccountBalance(userCreds.userId, userCreds.kiwoomCreds);
-          return res.json(balance);
+        return res.json(balance);
         }
         if (userCreds.kisCreds) {
           console.log(`[Balance] User ${userCreds.userId} (KIS) - mockTrading: ${userCreds.kisCreds.mockTrading}, accountNo: ${userCreds.kisCreds.accountNo?.slice(0,4)}****`);
@@ -1411,18 +1411,18 @@ export async function registerRoutes(
       const userCreds = await getUserCredentials(req);
       let result;
       const orderParams = {
-        stockCode,
-        orderType,
-        quantity: Number(quantity),
-        price: price ? Number(price) : undefined,
-        orderMethod: orderMethod || "limit",
+          stockCode,
+          orderType,
+          quantity: Number(quantity),
+          price: price ? Number(price) : undefined,
+          orderMethod: orderMethod || "limit",
       };
       if (userCreds) {
         if (userCreds.broker === "kiwoom" && userCreds.kiwoomCreds) {
           result = await kiwoomApi.userPlaceOrder(userCreds.userId, userCreds.kiwoomCreds, orderParams);
         } else if (userCreds.kisCreds) {
           result = await kisApi.userPlaceOrder(userCreds.userId, userCreds.kisCreds, orderParams);
-        } else {
+      } else {
           return res.status(400).json({ message: "자동매매 API가 설정되지 않았습니다." });
         }
       } else {
@@ -1463,7 +1463,7 @@ export async function registerRoutes(
       if (userCreds) {
         if (userCreds.broker === "kiwoom" && userCreds.kiwoomCreds) {
           const history = await kiwoomApi.getUserOrderHistory(userCreds.userId, userCreds.kiwoomCreds, startDate, endDate);
-          return res.json(history);
+        return res.json(history);
         }
         if (userCreds.kisCreds) {
           const history = await kisApi.getUserOrderHistory(userCreds.userId, userCreds.kisCreds, startDate, endDate);
@@ -1611,18 +1611,18 @@ export async function registerRoutes(
           if (shouldExecute) {
             let orderResult;
             const ruleOrderParams = {
-              stockCode: rule.stockCode,
+                stockCode: rule.stockCode,
               orderType: orderType as "buy" | "sell",
-              quantity: rule.quantity,
-              price: currentPrice,
-              orderMethod: (rule.orderMethod as "market" | "limit") || "limit",
+                quantity: rule.quantity,
+                price: currentPrice,
+                orderMethod: (rule.orderMethod as "market" | "limit") || "limit",
             };
             if (userCreds) {
               if (userCreds.broker === "kiwoom" && userCreds.kiwoomCreds) {
                 orderResult = await kiwoomApi.userPlaceOrder(userCreds.userId, userCreds.kiwoomCreds, ruleOrderParams);
               } else if (userCreds.kisCreds) {
                 orderResult = await kisApi.userPlaceOrder(userCreds.userId, userCreds.kisCreds, ruleOrderParams);
-              } else {
+            } else {
                 orderResult = { success: false, message: "자동매매 API 미설정" };
               }
             } else {
@@ -2730,9 +2730,9 @@ export async function registerRoutes(
             const userCreds = sl.userId ? await getUserCredentialsById(sl.userId) : null;
             let orderResult;
             const sellParams = {
-              stockCode: sl.stockCode,
+                stockCode: sl.stockCode,
               orderType: "sell" as const,
-              quantity: sl.quantity,
+                quantity: sl.quantity,
               orderMethod: "market" as const,
             };
             if (userCreds) {
@@ -2740,7 +2740,7 @@ export async function registerRoutes(
                 orderResult = await kiwoomApi.userPlaceOrder(userCreds.userId, userCreds.kiwoomCreds, sellParams);
               } else if (userCreds.kisCreds) {
                 orderResult = await kisApi.userPlaceOrder(userCreds.userId, userCreds.kisCreds, sellParams);
-              } else {
+            } else {
                 orderResult = { success: false, message: "자동매매 API 미설정" };
               }
             } else {
@@ -3007,14 +3007,14 @@ export async function registerRoutes(
       const mapItem = (item: any) => {
         const link = (item.endUrl || "").replace("m.stock.naver.com", "stock.naver.com");
         return {
-          title: item.title || "",
+        title: item.title || "",
           link,
-          source: item.brokerName || "",
-          date: item.writeDate || "",
-          file: "", // stock.naver.com API에는 PDF 직접 링크 없음
-          readCount: item.readCount || "0",
-          category: item.category || item.researchCategory || "",
-          analyst: item.analyst || "",
+        source: item.brokerName || "",
+        date: item.writeDate || "",
+        file: "", // stock.naver.com API에는 PDF 직접 링크 없음
+        readCount: item.readCount || "0",
+        category: item.category || item.researchCategory || "",
+        analyst: item.analyst || "",
         };
       };
 
@@ -9864,9 +9864,9 @@ ${etfListStr}
           const userCreds = sl.userId ? await getUserCredentialsById(sl.userId) : null;
           let orderResult;
           const sellParams = {
-            stockCode: sl.stockCode,
+              stockCode: sl.stockCode,
             orderType: "sell" as const,
-            quantity: sl.quantity,
+              quantity: sl.quantity,
             orderMethod: "market" as const,
           };
           if (userCreds) {
@@ -9874,7 +9874,7 @@ ${etfListStr}
               orderResult = await kiwoomApi.userPlaceOrder(userCreds.userId, userCreds.kiwoomCreds, sellParams);
             } else if (userCreds.kisCreds) {
               orderResult = await kisApi.userPlaceOrder(userCreds.userId, userCreds.kisCreds, sellParams);
-            } else {
+          } else {
               orderResult = { success: false, message: "자동매매 API 미설정" };
             }
           } else {
@@ -10077,46 +10077,46 @@ ${etfListStr}
       // 배치 처리
       for (let i = 0; i < cleanAuthors.length; i += BATCH_SIZE) {
         const batch = cleanAuthors.slice(i, i + BATCH_SIZE);
-        await Promise.all(
+      await Promise.all(
           batch.map(async (author: string) => {
-            try {
-              const response = await axios.post(STEEM_API_URL, {
-                jsonrpc: "2.0",
-                method: "condenser_api.get_discussions_by_blog",
-                params: [{ tag: author, limit: perAuthor }],
-                id: 1,
+          try {
+            const response = await axios.post(STEEM_API_URL, {
+              jsonrpc: "2.0",
+              method: "condenser_api.get_discussions_by_blog",
+              params: [{ tag: author, limit: perAuthor }],
+              id: 1,
               }, { timeout: 10000 });
 
-              const rawResults = response.data?.result || [];
-              const posts = rawResults.map((post: any) => ({
-                author: post.author,
-                permlink: post.permlink,
-                title: post.title,
-                body: post.body?.slice(0, 300) + (post.body?.length > 300 ? "..." : ""),
-                created: post.created,
-                category: post.category,
-                tags: (() => {
-                  try {
-                    const meta = JSON.parse(post.json_metadata || "{}");
+            const rawResults = response.data?.result || [];
+            const posts = rawResults.map((post: any) => ({
+              author: post.author,
+              permlink: post.permlink,
+              title: post.title,
+              body: post.body?.slice(0, 300) + (post.body?.length > 300 ? "..." : ""),
+              created: post.created,
+              category: post.category,
+              tags: (() => {
+                try {
+                  const meta = JSON.parse(post.json_metadata || "{}");
                     return meta.tags?.slice(0, 5) || [];
-                  } catch { return []; }
-                })(),
-                net_votes: post.net_votes,
-                children: post.children,
-                pending_payout_value: post.pending_payout_value,
-                total_payout_value: post.total_payout_value,
-                curator_payout_value: post.curator_payout_value,
-                url: `https://steemit.com${post.url}`,
-                isReblog: post.author !== author,
-                // 보팅한 사용자 목록 (voter name만 전달)
-                voters: (post.active_votes || []).map((v: any) => v.voter),
-              }));
-              allPosts.push(...posts);
-            } catch (err: any) {
-              console.error(`[Steem] Failed to fetch @${author}:`, err.message);
-            }
-          })
-        );
+                } catch { return []; }
+              })(),
+              net_votes: post.net_votes,
+              children: post.children,
+              pending_payout_value: post.pending_payout_value,
+              total_payout_value: post.total_payout_value,
+              curator_payout_value: post.curator_payout_value,
+              url: `https://steemit.com${post.url}`,
+              isReblog: post.author !== author,
+              // 보팅한 사용자 목록 (voter name만 전달)
+              voters: (post.active_votes || []).map((v: any) => v.voter),
+            }));
+            allPosts.push(...posts);
+          } catch (err: any) {
+            console.error(`[Steem] Failed to fetch @${author}:`, err.message);
+          }
+        })
+      );
       }
 
       console.log(`[Steem] Total raw posts: ${allPosts.length}`);
@@ -10647,23 +10647,6 @@ ${etfListStr}
       res.json(result);
     } catch (error: any) {
       console.error("[Security Audit Error]:", error.message);
-      res.status(500).json({ message: error.message || "보안점검 실행 실패" });
-    }
-  });
-
-  // Cron 트리거 보안점검 (Vercel cron 또는 외부 트리거)
-  app.get("/api/cron/security-audit", async (req, res) => {
-    try {
-      // Vercel Cron에서 호출되는 경우 CRON_SECRET 확인
-      const cronSecret = process.env.CRON_SECRET;
-      const authHeader = req.headers.authorization;
-      if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-        return res.status(401).json({ message: "Unauthorized" });
-      }
-      const result = await performSecurityAudit("scheduled");
-      res.json({ success: true, auditId: result.id, status: result.status });
-    } catch (error: any) {
-      console.error("[Cron Security Audit Error]:", error.message);
       res.status(500).json({ message: error.message || "보안점검 실행 실패" });
     }
   });
@@ -11453,24 +11436,6 @@ ${etfListStr}
         result.recentErrors = (recentErrors as any).rows || [];
       } catch { result.recentErrors = []; }
 
-      // 7. Cron Job 상태 (보안 점검 최근 실행)
-      try {
-        const lastAudit = await db.execute(sql`
-          SELECT id, created_at, results
-          FROM security_audit_logs
-          ORDER BY created_at DESC
-          LIMIT 1
-        `);
-        const lastRow = (lastAudit as any).rows?.[0];
-        result.cronJobs = {
-          lastSecurityAudit: lastRow ? {
-            id: lastRow.id,
-            time: lastRow.created_at,
-            resultCount: lastRow.results ? JSON.parse(lastRow.results).length : 0,
-          } : null,
-        };
-      } catch { result.cronJobs = { lastSecurityAudit: null }; }
-
       res.json(result);
     } catch (error: any) {
       res.status(500).json({ message: error.message || "시스템 상태 조회 실패" });
@@ -11710,7 +11675,7 @@ ${etfListStr}
                 result = await kiwoomApi.getUserAccountBalance(userCreds.userId, userCreds.kiwoomCreds);
               } else if (userCreds.kisCreds) {
                 result = await kisApi.getUserAccountBalance(userCreds.userId, userCreds.kisCreds);
-              } else {
+            } else {
                 return { type: "error", message: "자동매매 API가 설정되지 않았습니다." };
               }
             } else {
@@ -11963,10 +11928,10 @@ ${etfListStr}
           try {
             const userCreds = await getUserCredentials(req);
             const agentOrderParams = {
-              stockCode: params.stockCode,
+                stockCode: params.stockCode,
               orderType: params.orderType as "buy" | "sell",
-              quantity: Number(params.quantity),
-              price: params.price ? Number(params.price) : undefined,
+                quantity: Number(params.quantity),
+                price: params.price ? Number(params.price) : undefined,
               orderMethod: (params.orderMethod || "limit") as "market" | "limit",
             };
             let result;
@@ -11975,7 +11940,7 @@ ${etfListStr}
                 result = await kiwoomApi.userPlaceOrder(userCreds.userId, userCreds.kiwoomCreds, agentOrderParams);
               } else if (userCreds.kisCreds) {
                 result = await kisApi.userPlaceOrder(userCreds.userId, userCreds.kisCreds, agentOrderParams);
-              } else {
+            } else {
                 result = { success: false, message: "자동매매 API 미설정" };
               }
             } else {

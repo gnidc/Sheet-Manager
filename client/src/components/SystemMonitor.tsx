@@ -8,7 +8,7 @@ import { Progress } from "@/components/ui/progress";
 import {
   RefreshCw, Server, Database, Globe, Key, Activity, Clock, HardDrive,
   Cpu, MemoryStick, CheckCircle2, XCircle, AlertTriangle, Loader2,
-  Gauge, Wifi, Shield, Calendar, Lightbulb, ArrowRight,
+  Gauge, Wifi, Lightbulb, ArrowRight,
 } from "lucide-react";
 
 interface SystemStatus {
@@ -53,9 +53,6 @@ interface SystemStatus {
     eventLoopLag: number;
   };
   recentErrors: any[];
-  cronJobs: {
-    lastSecurityAudit: { id: number; time: string; resultCount: number } | null;
-  };
 }
 
 function formatUptime(seconds: number): string {
@@ -162,19 +159,6 @@ function generateRecommendations(data: SystemStatus): Recommendation[] {
   }
   if (essentialMissing.length === 0 && hasAnyAi) {
     recs.push({ level: "good", category: "환경 변수", title: "필수 환경변수 모두 설정됨", detail: "핵심 운영에 필요한 환경변수가 정상적으로 설정되어 있습니다." });
-  }
-
-  // === Cron / 보안 점검 ===
-  if (!data.cronJobs?.lastSecurityAudit) {
-    recs.push({ level: "warning", category: "보안", title: "보안 점검 미실행", detail: "보안 점검 실행 기록이 없습니다. Dashboard > 보안점검 탭에서 수동 점검을 실행하세요." });
-  } else {
-    const lastAuditTime = new Date(data.cronJobs.lastSecurityAudit.time).getTime();
-    const hoursSince = (Date.now() - lastAuditTime) / (1000 * 60 * 60);
-    if (hoursSince > 48) {
-      recs.push({ level: "warning", category: "보안", title: `보안 점검 ${Math.floor(hoursSince)}시간 경과`, detail: "마지막 보안 점검 이후 48시간 이상 경과했습니다. 정기 점검을 실행하세요." });
-    } else {
-      recs.push({ level: "good", category: "보안", title: "보안 점검 최신 상태", detail: `마지막 점검: ${new Date(data.cronJobs.lastSecurityAudit.time).toLocaleString("ko-KR")} (${data.cronJobs.lastSecurityAudit.resultCount}건)` });
-    }
   }
 
   // === 에러 ===
@@ -540,42 +524,6 @@ export default function SystemMonitor() {
               ) : (
                 <p className="text-xs text-green-500">모든 환경 변수가 설정되어 있습니다 ✓</p>
               )}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Cron / 예약 작업 */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm flex items-center gap-2">
-            <Calendar className="w-4 h-4 text-indigo-500" />
-            예약 작업 (Cron Jobs)
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between bg-muted/30 rounded-lg p-3">
-              <div className="flex items-center gap-2">
-                <Shield className="w-3.5 h-3.5 text-indigo-400" />
-                <span className="text-xs font-medium">일일 보안 점검</span>
-                <Badge variant="outline" className="text-[10px]">매일 00:00 KST</Badge>
-              </div>
-              <div className="text-xs text-right">
-                {data.cronJobs?.lastSecurityAudit ? (
-                  <div>
-                    <span className="text-muted-foreground">마지막 실행: </span>
-                    <span className="font-medium">
-                      {new Date(data.cronJobs.lastSecurityAudit.time).toLocaleString("ko-KR")}
-                    </span>
-                    <Badge variant="secondary" className="text-[10px] ml-1">
-                      {data.cronJobs.lastSecurityAudit.resultCount}건
-                    </Badge>
-                  </div>
-                ) : (
-                  <span className="text-muted-foreground">실행 기록 없음</span>
-                )}
-              </div>
             </div>
           </div>
         </CardContent>

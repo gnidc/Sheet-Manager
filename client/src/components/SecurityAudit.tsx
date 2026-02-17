@@ -487,12 +487,12 @@ export default function SecurityAudit() {
             )}
           </div>
 
-          {/* 자동점검 안내 */}
+          {/* 수동점검 안내 */}
           <Card className="bg-blue-50/50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
             <CardContent className="py-3 px-4">
               <p className="text-xs text-blue-700 dark:text-blue-300 flex items-center gap-2">
                 <Clock className="h-3.5 w-3.5" />
-                매일 00:00 (UTC) 자동 보안점검이 Vercel Cron으로 실행됩니다. 수동 점검도 언제든 실행 가능합니다.
+                위 버튼을 클릭하여 수동 보안점검을 실행할 수 있습니다. 점검 결과는 아래에 기록됩니다.
               </p>
             </CardContent>
           </Card>
