@@ -51,37 +51,20 @@ export default function Home() {
   const [activeTab, setActiveTabRaw] = useState("home");
   const [isTabPending, startTabTransition] = useTransition();
   const setActiveTab = useCallback((tab: string) => {
-    // 이중 rAF: 첫 번째 rAF 후 페인트 → 두 번째 rAF에서 transition 시작
-    // 이렇게 하면 버튼 클릭 피드백이 먼저 렌더링된 후 무거운 컴포넌트 전환이 시작됨
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        startTabTransition(() => {
-          setActiveTabRaw(tab);
-        });
-      });
+    // useTransition만 사용: React가 자체적으로 non-blocking 처리
+    // rAF 제거로 ~32ms 불필요 지연 해소
+    startTabTransition(() => {
+      setActiveTabRaw(tab);
     });
   }, []);
-  const [sidebarCollapsed, setSidebarCollapsedRaw] = useState(false);
-  const [isSidebarPending, startSidebarTransition] = useTransition();
-  const setSidebarCollapsed = useCallback((val: boolean) => {
-    requestAnimationFrame(() => {
-      startSidebarTransition(() => {
-        setSidebarCollapsedRaw(val);
-      });
-    });
-  }, []);
-  const [darkMode, setDarkModeRaw] = useState(() => {
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [darkMode, setDarkMode] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('theme') === 'dark' || 
         (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches);
     }
     return false;
   });
-  const setDarkMode = useCallback((val: boolean) => {
-    requestAnimationFrame(() => {
-      setDarkModeRaw(val);
-    });
-  }, []);
   
   const { toast } = useToast();
   const { isAdmin, isLoggedIn } = useAuth();
