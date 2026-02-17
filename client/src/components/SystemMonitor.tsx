@@ -11,8 +11,45 @@ import {
   Gauge, Wifi, Lightbulb, ArrowRight,
 } from "lucide-react";
 
+interface QueryTiming {
+  name: string;
+  ms: number;
+  cached: boolean;
+  query?: string;
+}
+
+interface DbDebug {
+  queryTimings: QueryTiming[];
+  totalDbQueryMs: number;
+  poolStats?: {
+    totalCount: number;
+    idleCount: number;
+    waitingCount: number;
+    maxConnections: number | string;
+    idleTimeoutMs: number | string;
+    connectionTimeoutMs: number | string;
+  };
+  cacheStatus: {
+    systemStatusCache: {
+      active: boolean;
+      ttlSeconds: number;
+      remainingSeconds?: number;
+      note: string;
+    };
+    dbDetailCache: {
+      active: boolean;
+      ttlSeconds: number;
+      remainingSeconds: number;
+      note: string;
+    };
+  };
+  executionMode: string;
+  note: string;
+}
+
 interface SystemStatus {
   timestamp: string;
+  _cached?: boolean;
   server: {
     platform: string;
     nodeVersion: string;
@@ -53,6 +90,7 @@ interface SystemStatus {
     eventLoopLag: number;
   };
   recentErrors: any[];
+  dbDebug?: DbDebug;
 }
 
 function formatUptime(seconds: number): string {
@@ -436,6 +474,9 @@ export default function SystemMonitor() {
         </CardContent>
       </Card>
 
+      {/* DB 쿼리 상세 분석 (디버그) */}
+      {data.dbDebug && <DbDebugPanel dbDebug={data.dbDebug} isCached={!!data._cached} />}
+
       {/* 외부 API 상태 */}
       <Card>
         <CardHeader className="pb-3">
@@ -558,6 +599,191 @@ export default function SystemMonitor() {
       {/* 조치 권고사항 */}
       <RecommendationsPanel data={data} />
     </div>
+  );
+}
+
+// ===== DB 쿼리 상세 분석 패널 =====
+function DbDebugPanel({ dbDebug, isCached }: { dbDebug: DbDebug; isCached: boolean }) {
+  const [expanded, setExpanded] = useState(false);
+
+  // 쿼리 시간 색상 결정
+  function getTimeColor(ms: number, cached: boolean): string {
+    if (cached) return "text-blue-500";
+    if (ms > 500) return "text-red-500 font-bold";
+    if (ms > 200) return "text-amber-500";
+    if (ms > 50) return "text-yellow-600";
+    return "text-green-500";
+  }
+
+  // 바 너비 계산 (최대 쿼리 시간 기준)
+  const maxMs = Math.max(...dbDebug.queryTimings.map(q => q.ms), 1);
+
+  return (
+    <Card>
+      <CardHeader className="pb-2 cursor-pointer" onClick={() => setExpanded(!expanded)}>
+        <CardTitle className="text-sm flex items-center gap-2">
+          <Cpu className="w-4 h-4 text-indigo-500" />
+          DB 쿼리 상세 분석
+          <Badge variant="secondary" className="text-[10px] ml-1">
+            {dbDebug.queryTimings.length}개 쿼리
+          </Badge>
+          <Badge variant={dbDebug.totalDbQueryMs > 500 ? "destructive" : "outline"} className="text-[10px]">
+            합계 {dbDebug.totalDbQueryMs}ms
+          </Badge>
+          {isCached && (
+            <Badge className="text-[10px] bg-blue-500">캐시 응답</Badge>
+          )}
+          <span className="ml-auto text-xs text-muted-foreground">{expanded ? "▲ 접기" : "▼ 펼치기"}</span>
+        </CardTitle>
+      </CardHeader>
+      {expanded && (
+        <CardContent className="space-y-4">
+          {/* 쿼리 타이밍 시각화 */}
+          <div>
+            <h4 className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1">
+              <Activity className="w-3 h-3" /> 개별 쿼리 실행 시간
+            </h4>
+            <div className="space-y-1.5">
+              {dbDebug.queryTimings.map((q, idx) => (
+                <div key={idx} className="flex items-center gap-2">
+                  <div className="w-48 shrink-0">
+                    <div className="flex items-center gap-1.5">
+                      {q.cached ? (
+                        <Badge variant="secondary" className="text-[8px] px-1 py-0">캐시</Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-[8px] px-1 py-0">쿼리</Badge>
+                      )}
+                      <span className="text-xs truncate">{q.name}</span>
+                    </div>
+                  </div>
+                  <div className="flex-1 flex items-center gap-2">
+                    <div className="flex-1 bg-muted rounded-full h-3 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${
+                          q.cached ? "bg-blue-400" :
+                          q.ms > 500 ? "bg-red-400" :
+                          q.ms > 200 ? "bg-amber-400" :
+                          q.ms > 50 ? "bg-yellow-400" : "bg-green-400"
+                        }`}
+                        style={{ width: `${Math.max((q.ms / maxMs) * 100, q.cached ? 5 : 2)}%` }}
+                      />
+                    </div>
+                    <span className={`text-xs font-mono w-14 text-right ${getTimeColor(q.ms, q.cached)}`}>
+                      {q.cached ? "0ms" : `${q.ms}ms`}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {/* 쿼리 상세 */}
+            <div className="mt-3 space-y-1">
+              {dbDebug.queryTimings.map((q, idx) => (
+                <div key={idx} className="text-[10px] font-mono text-muted-foreground bg-muted/30 rounded px-2 py-1">
+                  <span className="text-foreground font-medium">{q.name}:</span>{" "}
+                  <span className="opacity-75">{q.query || "-"}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* 커넥션 풀 상태 */}
+          {dbDebug.poolStats && (
+            <div>
+              <h4 className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1">
+                <Database className="w-3 h-3" /> 커넥션 풀 상태
+              </h4>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                <div className="bg-muted/50 rounded-lg p-2.5">
+                  <span className="text-[10px] text-muted-foreground block">활성 연결</span>
+                  <span className={`text-sm font-mono font-bold ${
+                    dbDebug.poolStats.totalCount - dbDebug.poolStats.idleCount > 0 ? "text-blue-500" : "text-green-500"
+                  }`}>
+                    {dbDebug.poolStats.totalCount - dbDebug.poolStats.idleCount}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground"> / {dbDebug.poolStats.maxConnections}</span>
+                </div>
+                <div className="bg-muted/50 rounded-lg p-2.5">
+                  <span className="text-[10px] text-muted-foreground block">유휴 연결</span>
+                  <span className="text-sm font-mono font-bold text-green-500">{dbDebug.poolStats.idleCount}</span>
+                </div>
+                <div className="bg-muted/50 rounded-lg p-2.5">
+                  <span className="text-[10px] text-muted-foreground block">대기 요청</span>
+                  <span className={`text-sm font-mono font-bold ${
+                    dbDebug.poolStats.waitingCount > 0 ? "text-red-500" : "text-green-500"
+                  }`}>
+                    {dbDebug.poolStats.waitingCount}
+                  </span>
+                </div>
+                <div className="bg-muted/50 rounded-lg p-2.5">
+                  <span className="text-[10px] text-muted-foreground block">전체 연결</span>
+                  <span className="text-sm font-mono font-bold">{dbDebug.poolStats.totalCount}</span>
+                </div>
+                <div className="bg-muted/50 rounded-lg p-2.5">
+                  <span className="text-[10px] text-muted-foreground block">유휴 타임아웃</span>
+                  <span className="text-sm font-mono">{dbDebug.poolStats.idleTimeoutMs}ms</span>
+                </div>
+                <div className="bg-muted/50 rounded-lg p-2.5">
+                  <span className="text-[10px] text-muted-foreground block">연결 타임아웃</span>
+                  <span className="text-sm font-mono">{dbDebug.poolStats.connectionTimeoutMs}ms</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 캐시 상태 */}
+          <div>
+            <h4 className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1">
+              <HardDrive className="w-3 h-3" /> 캐시 상태
+            </h4>
+            <div className="space-y-1.5">
+              <div className={`flex items-center justify-between rounded-lg p-2.5 text-xs ${
+                dbDebug.cacheStatus.systemStatusCache.active ? "bg-blue-50 dark:bg-blue-950/30" : "bg-muted/50"
+              }`}>
+                <div className="flex items-center gap-2">
+                  <span className={`inline-block w-2 h-2 rounded-full ${dbDebug.cacheStatus.systemStatusCache.active ? "bg-blue-500" : "bg-gray-400"}`} />
+                  <span className="font-medium">시스템 상태 캐시</span>
+                </div>
+                <div className="flex items-center gap-3 text-muted-foreground">
+                  <span>TTL: {dbDebug.cacheStatus.systemStatusCache.ttlSeconds}초</span>
+                  {dbDebug.cacheStatus.systemStatusCache.remainingSeconds !== undefined && (
+                    <Badge variant="outline" className="text-[10px]">
+                      남은시간: {dbDebug.cacheStatus.systemStatusCache.remainingSeconds}초
+                    </Badge>
+                  )}
+                  <span className="text-[10px]">{dbDebug.cacheStatus.systemStatusCache.note}</span>
+                </div>
+              </div>
+              <div className={`flex items-center justify-between rounded-lg p-2.5 text-xs ${
+                dbDebug.cacheStatus.dbDetailCache.active ? "bg-blue-50 dark:bg-blue-950/30" : "bg-muted/50"
+              }`}>
+                <div className="flex items-center gap-2">
+                  <span className={`inline-block w-2 h-2 rounded-full ${dbDebug.cacheStatus.dbDetailCache.active ? "bg-blue-500" : "bg-gray-400"}`} />
+                  <span className="font-medium">DB 상세 캐시</span>
+                </div>
+                <div className="flex items-center gap-3 text-muted-foreground">
+                  <span>TTL: {dbDebug.cacheStatus.dbDetailCache.ttlSeconds}초</span>
+                  {dbDebug.cacheStatus.dbDetailCache.remainingSeconds > 0 && (
+                    <Badge variant="outline" className="text-[10px]">
+                      남은시간: {dbDebug.cacheStatus.dbDetailCache.remainingSeconds}초
+                    </Badge>
+                  )}
+                  <span className="text-[10px]">{dbDebug.cacheStatus.dbDetailCache.note}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 실행 모드 및 참고 */}
+          <div className="bg-muted/30 rounded-lg p-3 text-[11px] text-muted-foreground space-y-1">
+            <div className="flex items-center gap-1.5">
+              <Lightbulb className="w-3 h-3 text-yellow-500 shrink-0" />
+              <span><strong>실행 모드:</strong> {dbDebug.executionMode}</span>
+            </div>
+            <p className="ml-4.5">{dbDebug.note}</p>
+          </div>
+        </CardContent>
+      )}
+    </Card>
   );
 }
 

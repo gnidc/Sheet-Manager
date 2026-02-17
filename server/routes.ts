@@ -11327,6 +11327,23 @@ ${etfListStr}
         cached.timestamp = new Date().toISOString();
         cached.performance = { ...cached.performance, totalCheckTimeMs: Date.now() - startTime };
         cached._cached = true;
+        // 캐시 히트 시 디버그 정보 업데이트
+        if (cached.dbDebug) {
+          const cacheRemaining = Math.round((systemStatusCache.expiry - now) / 1000);
+          cached.dbDebug = {
+            ...cached.dbDebug,
+            cacheStatus: {
+              ...cached.dbDebug.cacheStatus,
+              systemStatusCache: {
+                active: true,
+                ttlSeconds: SYSTEM_STATUS_CACHE_TTL / 1000,
+                remainingSeconds: cacheRemaining,
+                note: `캐시 히트: ${cacheRemaining}초 후 갱신 예정`,
+              },
+            },
+            note: "이 응답은 캐시에서 제공됩니다. 메모리 정보만 실시간 갱신됩니다.",
+          };
+        }
         return res.json(cached);
       }
 
@@ -11359,30 +11376,42 @@ ${etfListStr}
       }
 
       // ★ 핵심: DB ping + DB 상세 + API 체크 + 에러로그를 모두 병렬로 실행
+      // 개별 쿼리 타이밍 추적 (디버그용)
+      const queryTimings: { name: string; ms: number; cached: boolean; query?: string }[] = [];
+      const dbDetailCacheHit = !!(dbDetailCache && now < dbDetailCache.expiry);
+
       const [dbPingResult, dbDetailResult, apiResults, errorResult] = await Promise.all([
         // DB ping: SELECT 1 (연결 상태 + 응답시간만 측정)
         (async () => {
           try {
             const dbStart = Date.now();
             await db.execute(sql`SELECT 1`);
-            return { status: "connected", pingMs: Date.now() - dbStart };
+            const elapsed = Date.now() - dbStart;
+            queryTimings.push({ name: "DB Ping (SELECT 1)", ms: elapsed, cached: false, query: "SELECT 1" });
+            return { status: "connected", pingMs: elapsed };
           } catch (dbErr: any) {
+            queryTimings.push({ name: "DB Ping (SELECT 1)", ms: 0, cached: false, query: "SELECT 1" });
             return { status: "error", pingMs: 0, error: dbErr.message };
           }
         })(),
         // DB 상세: 별도 장기 캐시 (5분) - pg_database_size, 테이블 정보는 자주 안 바뀜
         (async (): Promise<{ dbSize: string; activeConnections: number; tables: any[] }> => {
-          if (dbDetailCache && now < dbDetailCache.expiry) {
+          if (dbDetailCacheHit) {
             // active_connections만 실시간 조회
             try {
+              const connStart = Date.now();
               const connResult = await db.execute(sql`SELECT count(*)::int as cnt FROM pg_stat_activity WHERE state = 'active'`);
               const cnt = (connResult as any).rows?.[0]?.cnt || 0;
-              return { dbSize: dbDetailCache.dbSize, activeConnections: cnt, tables: dbDetailCache.tables };
+              queryTimings.push({ name: "Active Connections", ms: Date.now() - connStart, cached: false, query: "SELECT count(*) FROM pg_stat_activity" });
+              queryTimings.push({ name: "DB Size + Tables", ms: 0, cached: true, query: "(5분 캐시 사용)" });
+              return { dbSize: dbDetailCache!.dbSize, activeConnections: cnt, tables: dbDetailCache!.tables };
             } catch {
-              return { dbSize: dbDetailCache.dbSize, activeConnections: 0, tables: dbDetailCache.tables };
+              queryTimings.push({ name: "DB Size + Tables", ms: 0, cached: true, query: "(5분 캐시 사용, 연결 수 조회 실패)" });
+              return { dbSize: dbDetailCache!.dbSize, activeConnections: 0, tables: dbDetailCache!.tables };
             }
           }
           try {
+            const detailStart = Date.now();
             const dbInfo = await db.execute(sql`
               SELECT 
                 pg_size_pretty(pg_database_size(current_database())) as db_size,
@@ -11390,12 +11419,15 @@ ${etfListStr}
                 (SELECT json_agg(json_build_object('name', relname, 'rows', n_live_tup::int) ORDER BY n_live_tup DESC)
                 FROM (SELECT relname, n_live_tup FROM pg_stat_user_tables ORDER BY n_live_tup DESC LIMIT 10) sub) as tables
             `);
+            const detailMs = Date.now() - detailStart;
+            queryTimings.push({ name: "DB Size + Tables + Connections", ms: detailMs, cached: false, query: "pg_database_size + pg_stat_user_tables + pg_stat_activity" });
             const row = (dbInfo as any).rows?.[0];
             const dbSize = row?.db_size || "unknown";
             const tables = row?.tables || [];
             dbDetailCache = { dbSize, tables, expiry: now + DB_DETAIL_CACHE_TTL };
             return { dbSize, activeConnections: parseInt(row?.active_connections || "0"), tables };
           } catch (err: any) {
+            queryTimings.push({ name: "DB Size + Tables", ms: 0, cached: false, query: `에러: ${err.message}` });
             return { dbSize: "error", activeConnections: 0, tables: [] };
           }
         })(),
@@ -11414,15 +11446,35 @@ ${etfListStr}
         // 에러 로그
         (async () => {
           try {
+            const errStart = Date.now();
             const recentErrors = await db.execute(sql`
               SELECT page, ip, created_at FROM visit_logs 
               WHERE page LIKE '%error%' OR page LIKE '%500%' OR page LIKE '%404%'
               ORDER BY created_at DESC LIMIT 5
             `);
+            queryTimings.push({ name: "Error Logs", ms: Date.now() - errStart, cached: false, query: "SELECT FROM visit_logs WHERE page LIKE '%error%'" });
             return (recentErrors as any).rows || [];
-          } catch { return []; }
+          } catch {
+            queryTimings.push({ name: "Error Logs", ms: 0, cached: false, query: "에러 발생" });
+            return [];
+          }
         })(),
       ]);
+
+      // 커넥션 풀 상태 수집
+      let poolStats: any = null;
+      try {
+        const { getPool } = await import("./db.js");
+        const p = getPool();
+        poolStats = {
+          totalCount: p.totalCount,
+          idleCount: p.idleCount,
+          waitingCount: p.waitingCount,
+          maxConnections: (p as any).options?.max || "unknown",
+          idleTimeoutMs: (p as any).options?.idleTimeoutMillis || "unknown",
+          connectionTimeoutMs: (p as any).options?.connectionTimeoutMillis || "unknown",
+        };
+      } catch { /* ignore */ }
 
       // 4. 환경 변수 (즉시, 메모리만)
       const envKeys = [
@@ -11432,6 +11484,9 @@ ${etfListStr}
         "KIS_APP_KEY", "KIS_APP_SECRET", "KIS_ACCOUNT_NO", "KIS_MOCK_TRADING",
         "KIWOOM_APP_KEY", "KIWOOM_APP_SECRET", "KIWOOM_ACCOUNT_NO",
       ];
+
+      // 총 DB 쿼리 시간 합산
+      const totalDbQueryMs = queryTimings.reduce((sum, q) => sum + q.ms, 0);
 
       const result: any = {
         timestamp: new Date().toISOString(),
@@ -11457,6 +11512,27 @@ ${etfListStr}
           }),
         },
         recentErrors: errorResult,
+        // DB 쿼리 상세 분석 (디버그)
+        dbDebug: {
+          queryTimings,
+          totalDbQueryMs,
+          poolStats,
+          cacheStatus: {
+            systemStatusCache: {
+              active: false,
+              ttlSeconds: SYSTEM_STATUS_CACHE_TTL / 1000,
+              note: "이번 요청은 캐시 미스 (신규 조회)",
+            },
+            dbDetailCache: {
+              active: dbDetailCacheHit,
+              ttlSeconds: DB_DETAIL_CACHE_TTL / 1000,
+              remainingSeconds: dbDetailCacheHit && dbDetailCache ? Math.round((dbDetailCache.expiry - now) / 1000) : 0,
+              note: dbDetailCacheHit ? "캐시 히트: DB 크기/테이블 정보 재사용" : "캐시 미스: 전체 조회 실행",
+            },
+          },
+          executionMode: "parallel (Promise.all)",
+          note: "모든 DB 쿼리는 병렬 실행됩니다. pingMs는 SELECT 1 결과이며, 상세정보는 별도 캐시에서 제공됩니다.",
+        },
       };
 
       // 캐시 저장
