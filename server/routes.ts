@@ -286,6 +286,59 @@ async function ensureSecurityTables() {
           linked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
         )
       `);
+      // ========== 스킬 레지스트리 테이블 ==========
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS trading_skills (
+          id SERIAL PRIMARY KEY,
+          name TEXT NOT NULL,
+          skill_code TEXT NOT NULL UNIQUE,
+          category TEXT NOT NULL,
+          description TEXT,
+          icon TEXT,
+          params_schema TEXT,
+          default_params TEXT,
+          is_builtin BOOLEAN DEFAULT true,
+          is_enabled BOOLEAN DEFAULT true,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+        )
+      `);
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS user_skill_instances (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER NOT NULL,
+          skill_id INTEGER NOT NULL,
+          label TEXT,
+          stock_code TEXT,
+          stock_name TEXT,
+          params TEXT,
+          quantity INTEGER DEFAULT 0,
+          order_method TEXT DEFAULT 'limit',
+          is_active BOOLEAN DEFAULT true,
+          priority INTEGER DEFAULT 0,
+          status TEXT DEFAULT 'active',
+          last_checked_at TIMESTAMP,
+          triggered_at TIMESTAMP,
+          error_message TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+        )
+      `);
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS skill_execution_logs (
+          id SERIAL PRIMARY KEY,
+          instance_id INTEGER NOT NULL,
+          user_id INTEGER NOT NULL,
+          skill_code TEXT NOT NULL,
+          stock_code TEXT,
+          stock_name TEXT,
+          action TEXT NOT NULL,
+          detail TEXT,
+          current_price NUMERIC,
+          indicator_values TEXT,
+          order_result TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+        )
+      `);
       console.log("[Security] 보안 테이블 및 멀티 API 테이블 확인/생성 완료");
     });
   } catch (error: any) {
@@ -1628,6 +1681,794 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("Failed to execute auto-trade rules:", error);
       res.status(500).json({ message: error.message || "자동매매 실행 실패" });
+    }
+  });
+
+  // ========== 자동매매 스킬 레지스트리 ==========
+
+  // 빌트인 스킬 시드 데이터
+  const BUILTIN_SKILLS = [
+    // 매수 스킬 (Entry)
+    {
+      name: "목표가 매수",
+      skillCode: "buy_below",
+      category: "entry",
+      description: "현재가가 설정한 목표가 이하로 떨어지면 자동 매수합니다.",
+      icon: "🎯",
+      paramsSchema: JSON.stringify([
+        { key: "targetPrice", label: "목표가", type: "number", required: true, unit: "원" }
+      ]),
+      defaultParams: JSON.stringify({ targetPrice: 0 }),
+      isBuiltin: true, isEnabled: true,
+    },
+    {
+      name: "골든크로스 매수",
+      skillCode: "golden_cross",
+      category: "entry",
+      description: "단기 이동평균선(MA5)이 장기 이동평균선(MA20)을 상향 돌파할 때 매수합니다.",
+      icon: "✨",
+      paramsSchema: JSON.stringify([
+        { key: "shortMa", label: "단기 MA", type: "number", default: 5 },
+        { key: "longMa", label: "장기 MA", type: "number", default: 20 }
+      ]),
+      defaultParams: JSON.stringify({ shortMa: 5, longMa: 20 }),
+      isBuiltin: true, isEnabled: true,
+    },
+    {
+      name: "RSI 과매도 매수",
+      skillCode: "rsi_oversold",
+      category: "entry",
+      description: "RSI가 설정 임계치(기본 30) 이하일 때 매수 시그널을 발생합니다.",
+      icon: "📉",
+      paramsSchema: JSON.stringify([
+        { key: "period", label: "RSI 기간", type: "number", default: 14 },
+        { key: "threshold", label: "매수 임계치", type: "number", default: 30 }
+      ]),
+      defaultParams: JSON.stringify({ period: 14, threshold: 30 }),
+      isBuiltin: true, isEnabled: true,
+    },
+    {
+      name: "볼린저밴드 하단 매수",
+      skillCode: "bb_lower_buy",
+      category: "entry",
+      description: "현재가가 볼린저밴드 하한선 아래로 떨어질 때 매수합니다.",
+      icon: "📊",
+      paramsSchema: JSON.stringify([
+        { key: "period", label: "기간", type: "number", default: 20 },
+        { key: "stddev", label: "표준편차 배수", type: "number", default: 2 }
+      ]),
+      defaultParams: JSON.stringify({ period: 20, stddev: 2 }),
+      isBuiltin: true, isEnabled: true,
+    },
+    {
+      name: "거래량 급증 매수",
+      skillCode: "volume_surge_buy",
+      category: "entry",
+      description: "거래량이 평균 대비 급증하면서 양봉일 때 매수합니다.",
+      icon: "📈",
+      paramsSchema: JSON.stringify([
+        { key: "volumeMultiplier", label: "거래량 배수", type: "number", default: 2.5 },
+        { key: "avgPeriod", label: "평균 기간", type: "number", default: 20 }
+      ]),
+      defaultParams: JSON.stringify({ volumeMultiplier: 2.5, avgPeriod: 20 }),
+      isBuiltin: true, isEnabled: true,
+    },
+    {
+      name: "MACD 골든크로스 매수",
+      skillCode: "macd_golden_cross",
+      category: "entry",
+      description: "MACD 라인이 시그널 라인을 상향 돌파할 때 매수합니다.",
+      icon: "🔀",
+      paramsSchema: JSON.stringify([
+        { key: "fastPeriod", label: "빠른 EMA", type: "number", default: 12 },
+        { key: "slowPeriod", label: "느린 EMA", type: "number", default: 26 },
+        { key: "signalPeriod", label: "시그널", type: "number", default: 9 }
+      ]),
+      defaultParams: JSON.stringify({ fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 }),
+      isBuiltin: true, isEnabled: true,
+    },
+    // 매도 스킬 (Exit)
+    {
+      name: "목표가 매도",
+      skillCode: "sell_above",
+      category: "exit",
+      description: "현재가가 설정한 목표가 이상으로 올라가면 자동 매도합니다.",
+      icon: "🎯",
+      paramsSchema: JSON.stringify([
+        { key: "targetPrice", label: "목표가", type: "number", required: true, unit: "원" }
+      ]),
+      defaultParams: JSON.stringify({ targetPrice: 0 }),
+      isBuiltin: true, isEnabled: true,
+    },
+    {
+      name: "손절 매도",
+      skillCode: "stop_loss_sell",
+      category: "exit",
+      description: "매수가 대비 설정한 비율만큼 하락하면 자동 손절 매도합니다.",
+      icon: "🛑",
+      paramsSchema: JSON.stringify([
+        { key: "stopPercent", label: "손절 비율(%)", type: "number", default: 5 },
+        { key: "buyPrice", label: "매수가", type: "number", required: true }
+      ]),
+      defaultParams: JSON.stringify({ stopPercent: 5, buyPrice: 0 }),
+      isBuiltin: true, isEnabled: true,
+    },
+    {
+      name: "트레일링 스탑",
+      skillCode: "trailing_stop_sell",
+      category: "exit",
+      description: "최고가 대비 설정 비율만큼 하락하면 매도합니다. 수익을 보호하면서 상승 추세를 추종합니다.",
+      icon: "📏",
+      paramsSchema: JSON.stringify([
+        { key: "trailPercent", label: "트레일링 비율(%)", type: "number", default: 3 }
+      ]),
+      defaultParams: JSON.stringify({ trailPercent: 3 }),
+      isBuiltin: true, isEnabled: true,
+    },
+    {
+      name: "목표수익률 매도",
+      skillCode: "profit_target_sell",
+      category: "exit",
+      description: "매수가 대비 목표 수익률에 도달하면 자동 매도합니다.",
+      icon: "💰",
+      paramsSchema: JSON.stringify([
+        { key: "profitPercent", label: "목표 수익률(%)", type: "number", default: 10 },
+        { key: "buyPrice", label: "매수가", type: "number", required: true }
+      ]),
+      defaultParams: JSON.stringify({ profitPercent: 10, buyPrice: 0 }),
+      isBuiltin: true, isEnabled: true,
+    },
+    {
+      name: "RSI 과매수 매도",
+      skillCode: "rsi_overbought_sell",
+      category: "exit",
+      description: "RSI가 설정 임계치(기본 70) 이상일 때 매도 시그널을 발생합니다.",
+      icon: "📈",
+      paramsSchema: JSON.stringify([
+        { key: "period", label: "RSI 기간", type: "number", default: 14 },
+        { key: "threshold", label: "매도 임계치", type: "number", default: 70 }
+      ]),
+      defaultParams: JSON.stringify({ period: 14, threshold: 70 }),
+      isBuiltin: true, isEnabled: true,
+    },
+    {
+      name: "데드크로스 매도",
+      skillCode: "dead_cross_sell",
+      category: "exit",
+      description: "단기 이동평균선(MA5)이 장기 이동평균선(MA20)을 하향 돌파할 때 매도합니다.",
+      icon: "💀",
+      paramsSchema: JSON.stringify([
+        { key: "shortMa", label: "단기 MA", type: "number", default: 5 },
+        { key: "longMa", label: "장기 MA", type: "number", default: 20 }
+      ]),
+      defaultParams: JSON.stringify({ shortMa: 5, longMa: 20 }),
+      isBuiltin: true, isEnabled: true,
+    },
+    // 리스크 관리 스킬 (Risk)
+    {
+      name: "포지션 비율 제한",
+      skillCode: "position_limit",
+      category: "risk",
+      description: "전체 운용잔고 대비 개별 종목의 최대 비율을 제한합니다.",
+      icon: "🛡️",
+      paramsSchema: JSON.stringify([
+        { key: "maxPercent", label: "최대 비율(%)", type: "number", default: 20 }
+      ]),
+      defaultParams: JSON.stringify({ maxPercent: 20 }),
+      isBuiltin: true, isEnabled: true,
+    },
+    {
+      name: "일일 손실 한도",
+      skillCode: "daily_loss_limit",
+      category: "risk",
+      description: "하루 누적 손실이 설정 한도를 초과하면 추가 매매를 중지합니다.",
+      icon: "⚠️",
+      paramsSchema: JSON.stringify([
+        { key: "maxLossAmount", label: "최대 손실 금액", type: "number", default: 500000, unit: "원" },
+        { key: "maxLossPercent", label: "최대 손실 비율(%)", type: "number", default: 2 }
+      ]),
+      defaultParams: JSON.stringify({ maxLossAmount: 500000, maxLossPercent: 2 }),
+      isBuiltin: true, isEnabled: true,
+    },
+    {
+      name: "분산투자 규칙",
+      skillCode: "diversification",
+      category: "risk",
+      description: "동시에 보유할 수 있는 최대 종목 수를 제한하여 리스크를 분산합니다.",
+      icon: "🎲",
+      paramsSchema: JSON.stringify([
+        { key: "maxStocks", label: "최대 보유 종목 수", type: "number", default: 5 }
+      ]),
+      defaultParams: JSON.stringify({ maxStocks: 5 }),
+      isBuiltin: true, isEnabled: true,
+    },
+  ];
+
+  // 빌트인 스킬 시드 (서버 시작 시 upsert)
+  (async () => {
+    try {
+      for (const skill of BUILTIN_SKILLS) {
+        await storage.upsertTradingSkill(skill as any);
+      }
+      console.log(`[Skills] ${BUILTIN_SKILLS.length}개 빌트인 스킬 시드 완료`);
+    } catch (err: any) {
+      console.error("[Skills] 빌트인 스킬 시드 실패:", err.message);
+    }
+  })();
+
+  // 스킬 목록 조회 (모든 로그인 사용자)
+  app.get("/api/trading/skills", requireUser, async (req, res) => {
+    try {
+      const skills = await storage.getTradingSkills();
+      res.json(skills);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "스킬 목록 조회 실패" });
+    }
+  });
+
+  // 사용자 스킬 인스턴스 목록
+  app.get("/api/trading/skill-instances", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      if (!userId) return res.status(400).json({ message: "로그인 필요" });
+      const instances = await storage.getUserSkillInstances(userId);
+      // 각 인스턴스에 스킬 정보 조인
+      const skills = await storage.getTradingSkills();
+      const skillMap = new Map(skills.map(s => [s.id, s]));
+      const enriched = instances.map(inst => ({
+        ...inst,
+        skill: skillMap.get(inst.skillId) || null,
+      }));
+      res.json(enriched);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "스킬 인스턴스 조회 실패" });
+    }
+  });
+
+  // 스킬 인스턴스 추가
+  app.post("/api/trading/skill-instances", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      if (!userId) return res.status(400).json({ message: "로그인 필요" });
+
+      const { skillId, label, stockCode, stockName, params, quantity, orderMethod, priority } = req.body;
+      if (!skillId) return res.status(400).json({ message: "스킬 ID는 필수입니다" });
+
+      // 스킬 존재 확인
+      const skills = await storage.getTradingSkills();
+      const skill = skills.find(s => s.id === skillId);
+      if (!skill) return res.status(404).json({ message: "스킬을 찾을 수 없습니다" });
+
+      // 종목 기반 스킬인 경우 종목코드 필수 (risk 카테고리 제외)
+      if (skill.category !== "risk" && !stockCode) {
+        return res.status(400).json({ message: "종목코드는 필수입니다 (리스크 관리 스킬 제외)" });
+      }
+
+      // 동일 스킬+종목 중복 체크
+      const existing = await storage.getUserSkillInstances(userId);
+      const duplicate = existing.find(
+        e => e.skillId === skillId && e.stockCode === stockCode && e.status === "active"
+      );
+      if (duplicate) {
+        return res.status(400).json({ message: "동일한 스킬이 이미 해당 종목에 등록되어 있습니다" });
+      }
+
+      // 최대 20개 제한
+      if (existing.length >= 20) {
+        return res.status(400).json({ message: "최대 20개까지 등록할 수 있습니다" });
+      }
+
+      const instance = await storage.createUserSkillInstance({
+        userId,
+        skillId,
+        label: label || `${skill.name} - ${stockName || "전체"}`,
+        stockCode: stockCode || null,
+        stockName: stockName || null,
+        params: params ? JSON.stringify(params) : skill.defaultParams,
+        quantity: quantity || 0,
+        orderMethod: orderMethod || "limit",
+        isActive: true,
+        priority: priority || 0,
+        status: "active",
+      });
+
+      res.json({ success: true, message: "스킬이 등록되었습니다", instance });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "스킬 등록 실패" });
+    }
+  });
+
+  // 스킬 인스턴스 수정
+  app.put("/api/trading/skill-instances/:id", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      if (!userId) return res.status(400).json({ message: "로그인 필요" });
+      const id = parseInt(req.params.id);
+      const { label, params, quantity, orderMethod, priority } = req.body;
+
+      const updates: any = {};
+      if (label !== undefined) updates.label = label;
+      if (params !== undefined) updates.params = JSON.stringify(params);
+      if (quantity !== undefined) updates.quantity = quantity;
+      if (orderMethod !== undefined) updates.orderMethod = orderMethod;
+      if (priority !== undefined) updates.priority = priority;
+
+      const updated = await storage.updateUserSkillInstance(id, userId, updates);
+      if (!updated) return res.status(404).json({ message: "스킬 인스턴스를 찾을 수 없습니다" });
+      res.json({ success: true, message: "수정되었습니다", instance: updated });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "스킬 수정 실패" });
+    }
+  });
+
+  // 스킬 인스턴스 활성화/비활성화 토글
+  app.post("/api/trading/skill-instances/:id/toggle", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      if (!userId) return res.status(400).json({ message: "로그인 필요" });
+      const id = parseInt(req.params.id);
+      const inst = await storage.getUserSkillInstance(id);
+      if (!inst || inst.userId !== userId) return res.status(404).json({ message: "스킬을 찾을 수 없습니다" });
+
+      const updated = await storage.updateUserSkillInstance(id, userId, {
+        isActive: !inst.isActive,
+        status: !inst.isActive ? "active" : "paused",
+      });
+      res.json({ success: true, isActive: updated?.isActive });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "토글 실패" });
+    }
+  });
+
+  // 스킬 인스턴스 삭제
+  app.delete("/api/trading/skill-instances/:id", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      if (!userId) return res.status(400).json({ message: "로그인 필요" });
+      const id = parseInt(req.params.id);
+      await storage.deleteUserSkillInstance(id, userId);
+      res.json({ success: true, message: "삭제되었습니다" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "삭제 실패" });
+    }
+  });
+
+  // 스킬 실행 로그 조회
+  app.get("/api/trading/skill-logs", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      if (!userId) return res.status(400).json({ message: "로그인 필요" });
+      const instanceId = parseInt(req.query.instanceId as string);
+      const limit = parseInt(req.query.limit as string) || 50;
+
+      if (instanceId) {
+        const logs = await storage.getSkillExecutionLogsByInstance(instanceId, limit);
+        return res.json(logs);
+      }
+      const logs = await storage.getSkillExecutionLogs(userId, limit);
+      res.json(logs);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "로그 조회 실패" });
+    }
+  });
+
+  // ========== 스킬 실행 엔진 ==========
+
+  // 기술적 지표 계산 헬퍼
+  function calculateSMA(prices: number[], period: number): number | null {
+    if (prices.length < period) return null;
+    const slice = prices.slice(0, period);
+    return slice.reduce((s, v) => s + v, 0) / period;
+  }
+
+  function calculateEMA(prices: number[], period: number): number | null {
+    if (prices.length < period) return null;
+    const k = 2 / (period + 1);
+    let ema = prices.slice(0, period).reduce((s, v) => s + v, 0) / period;
+    for (let i = period; i < prices.length; i++) {
+      ema = prices[i] * k + ema * (1 - k);
+    }
+    return ema;
+  }
+
+  function calculateRSI(prices: number[], period: number = 14): number | null {
+    if (prices.length < period + 1) return null;
+    // prices는 최신→과거 순서
+    const reversedPrices = [...prices].reverse();
+    let gains = 0, losses = 0;
+    for (let i = 1; i <= period; i++) {
+      const diff = reversedPrices[i] - reversedPrices[i - 1];
+      if (diff > 0) gains += diff;
+      else losses += Math.abs(diff);
+    }
+    const avgGain = gains / period;
+    const avgLoss = losses / period;
+    if (avgLoss === 0) return 100;
+    const rs = avgGain / avgLoss;
+    return 100 - (100 / (1 + rs));
+  }
+
+  function calculateBollingerBands(prices: number[], period: number = 20, stddevMultiplier: number = 2): { upper: number; middle: number; lower: number } | null {
+    if (prices.length < period) return null;
+    const slice = prices.slice(0, period);
+    const mean = slice.reduce((s, v) => s + v, 0) / period;
+    const variance = slice.reduce((s, v) => s + (v - mean) ** 2, 0) / period;
+    const stddev = Math.sqrt(variance);
+    return { upper: mean + stddevMultiplier * stddev, middle: mean, lower: mean - stddevMultiplier * stddev };
+  }
+
+  function calculateMACD(prices: number[], fast: number = 12, slow: number = 26, signal: number = 9): { macd: number; signalLine: number; histogram: number } | null {
+    if (prices.length < slow + signal) return null;
+    const reversedPrices = [...prices].reverse();
+    // Calculate EMA from oldest to newest
+    const calcEMAForward = (data: number[], period: number): number[] => {
+      const k = 2 / (period + 1);
+      const result: number[] = [];
+      let ema = data.slice(0, period).reduce((s, v) => s + v, 0) / period;
+      for (let i = 0; i < period; i++) result.push(ema);
+      for (let i = period; i < data.length; i++) {
+        ema = data[i] * k + ema * (1 - k);
+        result.push(ema);
+      }
+      return result;
+    };
+    const fastEma = calcEMAForward(reversedPrices, fast);
+    const slowEma = calcEMAForward(reversedPrices, slow);
+    const macdLine = fastEma.map((f, i) => f - (slowEma[i] || 0));
+    const signalEma = calcEMAForward(macdLine.slice(slow - 1), signal);
+    const lastMacd = macdLine[macdLine.length - 1];
+    const lastSignal = signalEma[signalEma.length - 1];
+    return { macd: lastMacd, signalLine: lastSignal, histogram: lastMacd - lastSignal };
+  }
+
+  // 가격 히스토리 조회 (네이버 금융 스크래핑)
+  async function fetchPriceHistory(stockCode: string, days: number = 60): Promise<{ close: number; volume: number; date: string }[]> {
+    try {
+      const pageCount = Math.ceil(days / 10);
+      const results: { close: number; volume: number; date: string }[] = [];
+      const iconv = await import("iconv-lite");
+
+      for (let page = 1; page <= pageCount && results.length < days; page++) {
+        const url = `https://finance.naver.com/item/sise_day.naver?code=${stockCode}&page=${page}`;
+        const resp = await axios.get(url, {
+          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+          responseType: "arraybuffer",
+          timeout: 8000,
+        });
+        const html = iconv.default.decode(Buffer.from(resp.data), "euc-kr");
+        const $ = cheerio.load(html);
+        $("table.type2 tr").each((_i, row) => {
+          const tds = $(row).find("td");
+          if (tds.length < 7) return;
+          const date = $(tds[0]).text().trim();
+          const close = parseInt($(tds[1]).text().trim().replace(/,/g, ""));
+          const volume = parseInt($(tds[6]).text().trim().replace(/,/g, ""));
+          if (date && !isNaN(close) && close > 0) {
+            results.push({ close, volume, date });
+          }
+        });
+        await new Promise(r => setTimeout(r, 150));
+      }
+      return results;
+    } catch (err: any) {
+      console.error(`[Skills] 가격 히스토리 조회 실패 (${stockCode}):`, err.message);
+      return [];
+    }
+  }
+
+  // 스킬 조건 체크 함수
+  async function checkSkillCondition(
+    instance: any,
+    skill: any,
+    priceHistory: { close: number; volume: number; date: string }[]
+  ): Promise<{ triggered: boolean; orderType?: "buy" | "sell"; detail: string; indicators?: any }> {
+    const params = instance.params ? JSON.parse(instance.params) : {};
+    const closes = priceHistory.map(p => p.close);
+    const volumes = priceHistory.map(p => p.volume);
+    const currentPrice = closes[0] || 0;
+
+    if (!currentPrice || closes.length < 5) {
+      return { triggered: false, detail: `가격 데이터 부족 (${closes.length}일)` };
+    }
+
+    switch (skill.skillCode) {
+      case "buy_below": {
+        const target = parseFloat(params.targetPrice) || 0;
+        const triggered = currentPrice <= target && target > 0;
+        return { triggered, orderType: "buy", detail: `현재가 ${currentPrice.toLocaleString()}원 ${triggered ? "≤" : ">"} 목표가 ${target.toLocaleString()}원`, indicators: { currentPrice, targetPrice: target } };
+      }
+      case "sell_above": {
+        const target = parseFloat(params.targetPrice) || 0;
+        const triggered = currentPrice >= target && target > 0;
+        return { triggered, orderType: "sell", detail: `현재가 ${currentPrice.toLocaleString()}원 ${triggered ? "≥" : "<"} 목표가 ${target.toLocaleString()}원`, indicators: { currentPrice, targetPrice: target } };
+      }
+      case "golden_cross": {
+        const shortPeriod = params.shortMa || 5;
+        const longPeriod = params.longMa || 20;
+        const shortMa = calculateSMA(closes, shortPeriod);
+        const longMa = calculateSMA(closes, longPeriod);
+        const prevShortMa = calculateSMA(closes.slice(1), shortPeriod);
+        const prevLongMa = calculateSMA(closes.slice(1), longPeriod);
+        if (!shortMa || !longMa || !prevShortMa || !prevLongMa) {
+          return { triggered: false, detail: "이동평균 계산에 필요한 데이터 부족" };
+        }
+        const triggered = prevShortMa <= prevLongMa && shortMa > longMa;
+        return { triggered, orderType: "buy", detail: `MA${shortPeriod}(${shortMa.toFixed(0)}) ${triggered ? "↗ 돌파" : shortMa > longMa ? ">" : "<"} MA${longPeriod}(${longMa.toFixed(0)})`, indicators: { shortMa, longMa, prevShortMa, prevLongMa } };
+      }
+      case "dead_cross_sell": {
+        const shortPeriod = params.shortMa || 5;
+        const longPeriod = params.longMa || 20;
+        const shortMa = calculateSMA(closes, shortPeriod);
+        const longMa = calculateSMA(closes, longPeriod);
+        const prevShortMa = calculateSMA(closes.slice(1), shortPeriod);
+        const prevLongMa = calculateSMA(closes.slice(1), longPeriod);
+        if (!shortMa || !longMa || !prevShortMa || !prevLongMa) {
+          return { triggered: false, detail: "이동평균 계산에 필요한 데이터 부족" };
+        }
+        const triggered = prevShortMa >= prevLongMa && shortMa < longMa;
+        return { triggered, orderType: "sell", detail: `MA${shortPeriod}(${shortMa.toFixed(0)}) ${triggered ? "↘ 하향돌파" : shortMa < longMa ? "<" : ">"} MA${longPeriod}(${longMa.toFixed(0)})`, indicators: { shortMa, longMa } };
+      }
+      case "rsi_oversold": {
+        const period = params.period || 14;
+        const threshold = params.threshold || 30;
+        const rsi = calculateRSI(closes, period);
+        if (rsi === null) return { triggered: false, detail: "RSI 계산에 필요한 데이터 부족" };
+        const triggered = rsi <= threshold;
+        return { triggered, orderType: "buy", detail: `RSI(${period}) = ${rsi.toFixed(1)} ${triggered ? "≤" : ">"} ${threshold}`, indicators: { rsi } };
+      }
+      case "rsi_overbought_sell": {
+        const period = params.period || 14;
+        const threshold = params.threshold || 70;
+        const rsi = calculateRSI(closes, period);
+        if (rsi === null) return { triggered: false, detail: "RSI 계산에 필요한 데이터 부족" };
+        const triggered = rsi >= threshold;
+        return { triggered, orderType: "sell", detail: `RSI(${period}) = ${rsi.toFixed(1)} ${triggered ? "≥" : "<"} ${threshold}`, indicators: { rsi } };
+      }
+      case "bb_lower_buy": {
+        const period = params.period || 20;
+        const stddev = params.stddev || 2;
+        const bb = calculateBollingerBands(closes, period, stddev);
+        if (!bb) return { triggered: false, detail: "볼린저밴드 계산에 필요한 데이터 부족" };
+        const triggered = currentPrice <= bb.lower;
+        return { triggered, orderType: "buy", detail: `현재가 ${currentPrice.toLocaleString()} ${triggered ? "≤" : ">"} 하한선 ${bb.lower.toFixed(0)}`, indicators: { ...bb, currentPrice } };
+      }
+      case "volume_surge_buy": {
+        const multiplier = params.volumeMultiplier || 2.5;
+        const avgPeriod = params.avgPeriod || 20;
+        if (volumes.length < avgPeriod + 1) return { triggered: false, detail: "거래량 데이터 부족" };
+        const todayVolume = volumes[0];
+        const avgVolume = volumes.slice(1, avgPeriod + 1).reduce((s, v) => s + v, 0) / avgPeriod;
+        const isPositive = closes[0] > closes[1]; // 양봉 여부
+        const triggered = todayVolume >= avgVolume * multiplier && isPositive;
+        return { triggered, orderType: "buy", detail: `거래량 ${(todayVolume / avgVolume).toFixed(1)}배 (${triggered ? "급증+양봉" : "미충족"})`, indicators: { todayVolume, avgVolume, multiplier: todayVolume / avgVolume } };
+      }
+      case "macd_golden_cross": {
+        const fast = params.fastPeriod || 12;
+        const slow = params.slowPeriod || 26;
+        const sig = params.signalPeriod || 9;
+        const macd = calculateMACD(closes, fast, slow, sig);
+        if (!macd) return { triggered: false, detail: "MACD 계산에 필요한 데이터 부족" };
+        const prevCloses = closes.slice(1);
+        const prevMacd = calculateMACD(prevCloses, fast, slow, sig);
+        const triggered = prevMacd ? (prevMacd.macd <= prevMacd.signalLine && macd.macd > macd.signalLine) : false;
+        return { triggered, orderType: "buy", detail: `MACD(${macd.macd.toFixed(2)}) ${triggered ? "↗ 시그널 돌파" : macd.macd > macd.signalLine ? "> Signal" : "< Signal"}`, indicators: macd };
+      }
+      case "stop_loss_sell": {
+        const stopPercent = params.stopPercent || 5;
+        const buyPrice = parseFloat(params.buyPrice) || 0;
+        if (!buyPrice) return { triggered: false, detail: "매수가 미설정" };
+        const stopPrice = buyPrice * (1 - stopPercent / 100);
+        const triggered = currentPrice <= stopPrice;
+        return { triggered, orderType: "sell", detail: `현재가 ${currentPrice.toLocaleString()} ${triggered ? "≤" : ">"} 손절가 ${stopPrice.toFixed(0)} (-${stopPercent}%)`, indicators: { currentPrice, buyPrice, stopPrice } };
+      }
+      case "trailing_stop_sell": {
+        const trailPercent = params.trailPercent || 3;
+        const highestPrice = Math.max(...closes.slice(0, 5)); // 최근 5일 최고가
+        const trailPrice = highestPrice * (1 - trailPercent / 100);
+        const triggered = currentPrice <= trailPrice;
+        return { triggered, orderType: "sell", detail: `현재가 ${currentPrice.toLocaleString()} ${triggered ? "≤" : ">"} 트레일링 ${trailPrice.toFixed(0)} (최고가 ${highestPrice.toLocaleString()} -${trailPercent}%)`, indicators: { currentPrice, highestPrice, trailPrice } };
+      }
+      case "profit_target_sell": {
+        const profitPercent = params.profitPercent || 10;
+        const buyPrice = parseFloat(params.buyPrice) || 0;
+        if (!buyPrice) return { triggered: false, detail: "매수가 미설정" };
+        const targetPrice = buyPrice * (1 + profitPercent / 100);
+        const triggered = currentPrice >= targetPrice;
+        return { triggered, orderType: "sell", detail: `현재가 ${currentPrice.toLocaleString()} ${triggered ? "≥" : "<"} 목표가 ${targetPrice.toFixed(0)} (+${profitPercent}%)`, indicators: { currentPrice, buyPrice, targetPrice } };
+      }
+      default:
+        return { triggered: false, detail: `알 수 없는 스킬: ${skill.skillCode}` };
+    }
+  }
+
+  // 수동 스킬 실행 (조건 체크)
+  app.post("/api/trading/skill-instances/:id/check", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      if (!userId) return res.status(400).json({ message: "로그인 필요" });
+      const id = parseInt(req.params.id);
+      const inst = await storage.getUserSkillInstance(id);
+      if (!inst || inst.userId !== userId) return res.status(404).json({ message: "스킬을 찾을 수 없습니다" });
+
+      const skills = await storage.getTradingSkills();
+      const skill = skills.find(s => s.id === inst.skillId);
+      if (!skill) return res.status(404).json({ message: "스킬 정의를 찾을 수 없습니다" });
+
+      // risk 카테고리 스킬은 조건 체크 없음
+      if (skill.category === "risk") {
+        return res.json({ triggered: false, detail: "리스크 관리 스킬은 매매 실행 시 자동으로 적용됩니다" });
+      }
+
+      if (!inst.stockCode) return res.status(400).json({ message: "종목코드가 설정되지 않았습니다" });
+
+      const priceHistory = await fetchPriceHistory(inst.stockCode, 60);
+      const result = await checkSkillCondition(inst, skill, priceHistory);
+
+      // 로그 기록
+      await storage.createSkillExecutionLog({
+        instanceId: inst.id,
+        userId,
+        skillCode: skill.skillCode,
+        stockCode: inst.stockCode,
+        stockName: inst.stockName,
+        action: "check",
+        detail: result.detail,
+        currentPrice: priceHistory[0]?.close?.toString() || null,
+        indicatorValues: result.indicators ? JSON.stringify(result.indicators) : null,
+      });
+
+      // 상태 업데이트
+      await storage.updateUserSkillInstance(id, userId, {
+        lastCheckedAt: new Date(),
+        ...(result.triggered ? { status: "triggered", triggeredAt: new Date() } : {}),
+      });
+
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "스킬 체크 실패" });
+    }
+  });
+
+  // 스킬 실행 (주문 발동)
+  app.post("/api/trading/skill-instances/:id/execute", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      if (!userId) return res.status(400).json({ message: "로그인 필요" });
+      const id = parseInt(req.params.id);
+      const inst = await storage.getUserSkillInstance(id);
+      if (!inst || inst.userId !== userId) return res.status(404).json({ message: "스킬을 찾을 수 없습니다" });
+
+      const skills = await storage.getTradingSkills();
+      const skill = skills.find(s => s.id === inst.skillId);
+      if (!skill) return res.status(404).json({ message: "스킬 정의를 찾을 수 없습니다" });
+
+      if (!inst.stockCode) return res.status(400).json({ message: "종목코드가 설정되지 않았습니다" });
+      if (!inst.quantity || inst.quantity <= 0) return res.status(400).json({ message: "주문 수량이 설정되지 않았습니다" });
+
+      // 조건 체크
+      const priceHistory = await fetchPriceHistory(inst.stockCode, 60);
+      const checkResult = await checkSkillCondition(inst, skill, priceHistory);
+
+      if (!checkResult.triggered) {
+        return res.json({ success: false, message: "조건 미충족", detail: checkResult.detail });
+      }
+
+      // 주문 실행
+      const userCreds = await getUserCredentials(req);
+      const orderParams = {
+        stockCode: inst.stockCode,
+        orderType: checkResult.orderType as "buy" | "sell",
+        quantity: inst.quantity,
+        price: priceHistory[0]?.close || 0,
+        orderMethod: (inst.orderMethod as "market" | "limit") || "limit",
+      };
+
+      let orderResult;
+      if (userCreds) {
+        if (userCreds.broker === "kiwoom" && userCreds.kiwoomCreds) {
+          orderResult = await kiwoomApi.userPlaceOrder(userCreds.userId, userCreds.kiwoomCreds, orderParams);
+        } else if (userCreds.kisCreds) {
+          orderResult = await kisApi.userPlaceOrder(userCreds.userId, userCreds.kisCreds, orderParams);
+        } else {
+          orderResult = { success: false, message: "자동매매 API 미설정" };
+        }
+      } else {
+        orderResult = await kisApi.placeOrder(orderParams);
+      }
+
+      // 주문 기록 저장
+      await storage.createTradingOrder({
+        stockCode: inst.stockCode,
+        stockName: inst.stockName,
+        orderType: checkResult.orderType!,
+        orderMethod: inst.orderMethod || "limit",
+        quantity: inst.quantity,
+        price: String(priceHistory[0]?.close || 0),
+        totalAmount: String((priceHistory[0]?.close || 0) * inst.quantity),
+        status: orderResult.success ? "filled" : "failed",
+        kisOrderNo: orderResult.orderNo || null,
+        autoTradeRuleId: null,
+        errorMessage: orderResult.success ? null : orderResult.message,
+        executedAt: orderResult.success ? new Date() : null,
+        userId,
+      });
+
+      // 실행 로그
+      await storage.createSkillExecutionLog({
+        instanceId: inst.id,
+        userId,
+        skillCode: skill.skillCode,
+        stockCode: inst.stockCode,
+        stockName: inst.stockName,
+        action: "order",
+        detail: `${checkResult.orderType === "buy" ? "매수" : "매도"} ${inst.quantity}주 @ ${priceHistory[0]?.close?.toLocaleString()}원 - ${orderResult.success ? "성공" : "실패"}`,
+        currentPrice: String(priceHistory[0]?.close || 0),
+        indicatorValues: checkResult.indicators ? JSON.stringify(checkResult.indicators) : null,
+        orderResult: JSON.stringify(orderResult),
+      });
+
+      // 스킬 상태 업데이트
+      if (orderResult.success) {
+        await storage.updateUserSkillInstance(id, userId, {
+          status: "completed",
+          isActive: false,
+          triggeredAt: new Date(),
+        });
+      }
+
+      res.json({
+        success: orderResult.success,
+        message: orderResult.success ? "주문 성공" : `주문 실패: ${orderResult.message}`,
+        detail: checkResult.detail,
+        orderResult,
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "스킬 실행 실패" });
+    }
+  });
+
+  // 전체 활성 스킬 일괄 체크 (수동)
+  app.post("/api/trading/skills/check-all", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      if (!userId) return res.status(400).json({ message: "로그인 필요" });
+
+      const instances = await storage.getActiveUserSkillInstances(userId);
+      const skills = await storage.getTradingSkills();
+      const skillMap = new Map(skills.map(s => [s.id, s]));
+
+      const results: Array<{ instanceId: number; label: string; skillName: string; triggered: boolean; detail: string }> = [];
+
+      for (const inst of instances) {
+        const skill = skillMap.get(inst.skillId);
+        if (!skill || skill.category === "risk" || !inst.stockCode) continue;
+
+        try {
+          const priceHistory = await fetchPriceHistory(inst.stockCode, 60);
+          const check = await checkSkillCondition(inst, skill, priceHistory);
+          results.push({
+            instanceId: inst.id,
+            label: inst.label || "",
+            skillName: skill.name,
+            triggered: check.triggered,
+            detail: check.detail,
+          });
+
+          await storage.updateUserSkillInstance(inst.id, userId, {
+            lastCheckedAt: new Date(),
+            ...(check.triggered ? { status: "triggered", triggeredAt: new Date() } : {}),
+          });
+
+          // Rate limit
+          await new Promise(r => setTimeout(r, 200));
+        } catch (e: any) {
+          results.push({ instanceId: inst.id, label: inst.label || "", skillName: skill.name, triggered: false, detail: `오류: ${e.message}` });
+        }
+      }
+
+      res.json({ total: results.length, triggered: results.filter(r => r.triggered).length, results });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "일괄 체크 실패" });
     }
   });
 

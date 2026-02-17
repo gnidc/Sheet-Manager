@@ -550,6 +550,79 @@ const securityRemediations = pgTable("security_remediations", {
   executedBy: text("executed_by"),
   executedAt: timestamp("executed_at").default(sql`CURRENT_TIMESTAMP`).notNull()
 });
+const tradingSkills = pgTable("trading_skills", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  // 스킬 이름 (예: "골든크로스 매수")
+  skillCode: text("skill_code").notNull().unique(),
+  // 고유 코드 (예: "golden_cross")
+  category: text("category").notNull(),
+  // "entry" | "exit" | "signal" | "risk"
+  description: text("description"),
+  // 스킬 설명
+  icon: text("icon"),
+  // 이모지 아이콘
+  paramsSchema: text("params_schema"),
+  // JSON: 파라미터 정의 스키마
+  defaultParams: text("default_params"),
+  // JSON: 기본 파라미터 값
+  isBuiltin: boolean("is_builtin").default(true),
+  // 시스템 기본 제공 여부
+  isEnabled: boolean("is_enabled").default(true),
+  // 전역 활성화 여부
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+});
+const userSkillInstances = pgTable("user_skill_instances", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  skillId: integer("skill_id").notNull(),
+  // references trading_skills
+  label: text("label"),
+  // 사용자 별칭 (예: "삼성전자 골든크로스")
+  stockCode: text("stock_code"),
+  // 종목코드 (null이면 전체 대상)
+  stockName: text("stock_name"),
+  // 종목명
+  params: text("params"),
+  // JSON: 사용자 설정 파라미터
+  quantity: integer("quantity").default(0),
+  // 주문 수량
+  orderMethod: text("order_method").default("limit"),
+  // "market" | "limit"
+  isActive: boolean("is_active").default(true),
+  // 활성화 여부
+  priority: integer("priority").default(0),
+  // 실행 우선순위 (낮을수록 우선)
+  status: text("status").default("active"),
+  // "active" | "triggered" | "paused" | "completed" | "error"
+  lastCheckedAt: timestamp("last_checked_at"),
+  // 마지막 조건 체크 시간
+  triggeredAt: timestamp("triggered_at"),
+  // 발동 시간
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+});
+const skillExecutionLogs = pgTable("skill_execution_logs", {
+  id: serial("id").primaryKey(),
+  instanceId: integer("instance_id").notNull(),
+  // references user_skill_instances
+  userId: integer("user_id").notNull(),
+  skillCode: text("skill_code").notNull(),
+  stockCode: text("stock_code"),
+  stockName: text("stock_name"),
+  action: text("action").notNull(),
+  // "check" | "trigger" | "order" | "error"
+  detail: text("detail"),
+  // 실행 상세 설명
+  currentPrice: numeric("current_price"),
+  // 체크 시점 현재가
+  indicatorValues: text("indicator_values"),
+  // JSON: 지표 값들 (rsi, ma, macd 등)
+  orderResult: text("order_result"),
+  // JSON: 주문 결과
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+});
 export {
   aiPrompts,
   aiReports,
@@ -587,6 +660,7 @@ export {
   securityAuditLogs,
   securityDrillResults,
   securityRemediations,
+  skillExecutionLogs,
   steemPosts,
   stockAiAnalyses,
   stockComments,
@@ -595,8 +669,10 @@ export {
   strategyReports,
   tenbaggerStocks,
   tradingOrders,
+  tradingSkills,
   userAiConfigs,
   userLinkedAccounts,
+  userSkillInstances,
   userTradingConfigs,
   users,
   visitLogs,

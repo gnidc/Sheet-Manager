@@ -96,6 +96,15 @@ import {
   userLinkedAccounts,
   type UserLinkedAccount,
   type InsertUserLinkedAccount,
+  tradingSkills,
+  type TradingSkill,
+  type InsertTradingSkill,
+  userSkillInstances,
+  type UserSkillInstance,
+  type InsertUserSkillInstance,
+  skillExecutionLogs,
+  type SkillExecutionLog,
+  type InsertSkillExecutionLog,
 } from "../shared/schema.js";
 import { eq, and, or, desc, isNull, inArray, sql } from "drizzle-orm";
 
@@ -2229,6 +2238,145 @@ export class DatabaseStorage implements IStorage {
       });
     }
     return await db.select().from(userTradingConfigs);
+  }
+
+  // ========== Trading Skills Registry ==========
+
+  async getTradingSkills(): Promise<TradingSkill[]> {
+    const query = async (dbConn: any) =>
+      await dbConn.select().from(tradingSkills).orderBy(tradingSkills.category, tradingSkills.name);
+    if (process.env.VERCEL) return await executeWithClient(query);
+    return await query(db);
+  }
+
+  async getTradingSkillByCode(skillCode: string): Promise<TradingSkill | undefined> {
+    const query = async (dbConn: any) => {
+      const rows = await dbConn.select().from(tradingSkills).where(eq(tradingSkills.skillCode, skillCode));
+      return rows[0];
+    };
+    if (process.env.VERCEL) return await executeWithClient(query);
+    return await query(db);
+  }
+
+  async createTradingSkill(data: InsertTradingSkill): Promise<TradingSkill> {
+    const query = async (dbConn: any) => {
+      const rows = await dbConn.insert(tradingSkills).values(data).returning();
+      return rows[0];
+    };
+    if (process.env.VERCEL) return await executeWithClient(query);
+    return await query(db);
+  }
+
+  async upsertTradingSkill(data: InsertTradingSkill): Promise<TradingSkill> {
+    const existing = await this.getTradingSkillByCode(data.skillCode);
+    if (existing) {
+      const query = async (dbConn: any) => {
+        const rows = await dbConn.update(tradingSkills)
+          .set({ name: data.name, category: data.category, description: data.description, icon: data.icon, paramsSchema: data.paramsSchema, defaultParams: data.defaultParams, isBuiltin: data.isBuiltin, isEnabled: data.isEnabled })
+          .where(eq(tradingSkills.id, existing.id))
+          .returning();
+        return rows[0];
+      };
+      if (process.env.VERCEL) return await executeWithClient(query);
+      return await query(db);
+    }
+    return await this.createTradingSkill(data);
+  }
+
+  // ========== User Skill Instances ==========
+
+  async getUserSkillInstances(userId: number): Promise<UserSkillInstance[]> {
+    const query = async (dbConn: any) =>
+      await dbConn.select().from(userSkillInstances)
+        .where(eq(userSkillInstances.userId, userId))
+        .orderBy(userSkillInstances.priority, desc(userSkillInstances.createdAt));
+    if (process.env.VERCEL) return await executeWithClient(query);
+    return await query(db);
+  }
+
+  async getUserSkillInstance(id: number): Promise<UserSkillInstance | undefined> {
+    const query = async (dbConn: any) => {
+      const rows = await dbConn.select().from(userSkillInstances).where(eq(userSkillInstances.id, id));
+      return rows[0];
+    };
+    if (process.env.VERCEL) return await executeWithClient(query);
+    return await query(db);
+  }
+
+  async getActiveUserSkillInstances(userId?: number): Promise<UserSkillInstance[]> {
+    const query = async (dbConn: any) => {
+      if (userId) {
+        return await dbConn.select().from(userSkillInstances)
+          .where(and(eq(userSkillInstances.userId, userId), eq(userSkillInstances.isActive, true), eq(userSkillInstances.status, "active")))
+          .orderBy(userSkillInstances.priority);
+      }
+      return await dbConn.select().from(userSkillInstances)
+        .where(and(eq(userSkillInstances.isActive, true), eq(userSkillInstances.status, "active")))
+        .orderBy(userSkillInstances.priority);
+    };
+    if (process.env.VERCEL) return await executeWithClient(query);
+    return await query(db);
+  }
+
+  async createUserSkillInstance(data: InsertUserSkillInstance): Promise<UserSkillInstance> {
+    const query = async (dbConn: any) => {
+      const rows = await dbConn.insert(userSkillInstances).values(data).returning();
+      return rows[0];
+    };
+    if (process.env.VERCEL) return await executeWithClient(query);
+    return await query(db);
+  }
+
+  async updateUserSkillInstance(id: number, userId: number, updates: Partial<UserSkillInstance>): Promise<UserSkillInstance | undefined> {
+    const query = async (dbConn: any) => {
+      const rows = await dbConn.update(userSkillInstances)
+        .set({ ...updates, updatedAt: new Date() })
+        .where(and(eq(userSkillInstances.id, id), eq(userSkillInstances.userId, userId)))
+        .returning();
+      return rows[0];
+    };
+    if (process.env.VERCEL) return await executeWithClient(query);
+    return await query(db);
+  }
+
+  async deleteUserSkillInstance(id: number, userId: number): Promise<void> {
+    const query = async (dbConn: any) => {
+      await dbConn.delete(userSkillInstances)
+        .where(and(eq(userSkillInstances.id, id), eq(userSkillInstances.userId, userId)));
+    };
+    if (process.env.VERCEL) { await executeWithClient(query); return; }
+    await query(db);
+  }
+
+  // ========== Skill Execution Logs ==========
+
+  async createSkillExecutionLog(data: InsertSkillExecutionLog): Promise<SkillExecutionLog> {
+    const query = async (dbConn: any) => {
+      const rows = await dbConn.insert(skillExecutionLogs).values(data).returning();
+      return rows[0];
+    };
+    if (process.env.VERCEL) return await executeWithClient(query);
+    return await query(db);
+  }
+
+  async getSkillExecutionLogs(userId: number, limit: number = 50): Promise<SkillExecutionLog[]> {
+    const query = async (dbConn: any) =>
+      await dbConn.select().from(skillExecutionLogs)
+        .where(eq(skillExecutionLogs.userId, userId))
+        .orderBy(desc(skillExecutionLogs.createdAt))
+        .limit(limit);
+    if (process.env.VERCEL) return await executeWithClient(query);
+    return await query(db);
+  }
+
+  async getSkillExecutionLogsByInstance(instanceId: number, limit: number = 20): Promise<SkillExecutionLog[]> {
+    const query = async (dbConn: any) =>
+      await dbConn.select().from(skillExecutionLogs)
+        .where(eq(skillExecutionLogs.instanceId, instanceId))
+        .orderBy(desc(skillExecutionLogs.createdAt))
+        .limit(limit);
+    if (process.env.VERCEL) return await executeWithClient(query);
+    return await query(db);
   }
 }
 

@@ -86,7 +86,10 @@ import {
   ArrowLeft, TrendingUp, Wallet, BarChart3, Plus, Trash2, Play, Pause,
   RefreshCw, Loader2, AlertTriangle, CheckCircle2, XCircle, Search,
   ArrowUpRight, ArrowDownRight, Zap, Clock, Settings, ShieldCheck, ShieldAlert, Rocket,
+  Sparkles, Eye, Power, ChevronDown, ChevronUp, Activity,
 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
 import GapStrategyPanel from "@/components/GapStrategyPanel";
 
 // ========== Types ==========
@@ -282,7 +285,7 @@ export default function Trading() {
           isAdmin ? <AdminSetupGuide status={status} /> : <UserSetupGuide onComplete={() => { refetchConfig(); refetchStatus(); }} />
         ) : (
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-8">
-            <TabsList className="grid w-full grid-cols-6 max-w-4xl mx-auto">
+            <TabsList className="grid w-full grid-cols-7 max-w-5xl mx-auto">
               <TabsTrigger value="account" className="gap-1 text-xs sm:text-sm">
                 <Wallet className="h-4 w-4" />
                 계좌
@@ -298,6 +301,10 @@ export default function Trading() {
               <TabsTrigger value="auto" className="gap-1 text-xs sm:text-sm">
                 <Zap className="h-4 w-4" />
                 자동매매
+              </TabsTrigger>
+              <TabsTrigger value="skills" className="gap-1 text-xs sm:text-sm">
+                <Sparkles className="h-4 w-4" />
+                스킬
               </TabsTrigger>
               <TabsTrigger value="gap-strategy" className="gap-1 text-xs sm:text-sm">
                 <Rocket className="h-4 w-4" />
@@ -323,6 +330,9 @@ export default function Trading() {
             </TabsContent>
             <TabsContent value="auto">
               <AutoTradeSection />
+            </TabsContent>
+            <TabsContent value="skills">
+              <SkillsSection />
             </TabsContent>
             <TabsContent value="gap-strategy">
               <GapStrategyPanel />
@@ -2479,6 +2489,499 @@ function OrderHistorySection() {
         </Card>
       )}
     </div>
+  );
+}
+
+// ========== Skills Section ==========
+interface TradingSkillDef {
+  id: number;
+  name: string;
+  skillCode: string;
+  category: string;
+  description: string;
+  icon: string;
+  paramsSchema: string;
+  defaultParams: string;
+  isBuiltin: boolean;
+  isEnabled: boolean;
+}
+
+interface SkillInstance {
+  id: number;
+  userId: number;
+  skillId: number;
+  label: string;
+  stockCode: string | null;
+  stockName: string | null;
+  params: string | null;
+  quantity: number;
+  orderMethod: string;
+  isActive: boolean;
+  priority: number;
+  status: string;
+  lastCheckedAt: string | null;
+  triggeredAt: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  skill: TradingSkillDef | null;
+}
+
+const CATEGORY_LABELS: Record<string, { label: string; color: string; icon: string }> = {
+  entry: { label: "매수", color: "text-red-500 bg-red-50 dark:bg-red-950/30", icon: "🟢" },
+  exit: { label: "매도", color: "text-blue-500 bg-blue-50 dark:bg-blue-950/30", icon: "🔴" },
+  risk: { label: "리스크", color: "text-amber-500 bg-amber-50 dark:bg-amber-950/30", icon: "🛡️" },
+};
+
+const STATUS_LABELS: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+  active: { label: "활성", variant: "default" },
+  paused: { label: "일시정지", variant: "secondary" },
+  triggered: { label: "발동", variant: "destructive" },
+  completed: { label: "완료", variant: "outline" },
+  error: { label: "오류", variant: "destructive" },
+};
+
+function SkillsSection() {
+  const { toast } = useToast();
+  const [showAddDialog, setShowAddDialog] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<string>("all");
+  const [checkingAll, setCheckingAll] = useState(false);
+  const [expandedInstance, setExpandedInstance] = useState<number | null>(null);
+
+  const { data: skills = [] } = useQuery<TradingSkillDef[]>({
+    queryKey: ["/api/trading/skills"],
+  });
+
+  const { data: instances = [], refetch: refetchInstances } = useQuery<SkillInstance[]>({
+    queryKey: ["/api/trading/skill-instances"],
+  });
+
+  const toggleMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiRequest("POST", `/api/trading/skill-instances/${id}/toggle`);
+      return res.json();
+    },
+    onSuccess: () => { refetchInstances(); },
+    onError: (e: Error) => { toast({ title: "토글 실패", description: e.message, variant: "destructive" }); },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiRequest("DELETE", `/api/trading/skill-instances/${id}`);
+      return res.json();
+    },
+    onSuccess: () => { toast({ title: "삭제 완료" }); refetchInstances(); },
+    onError: (e: Error) => { toast({ title: "삭제 실패", description: e.message, variant: "destructive" }); },
+  });
+
+  const checkMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiRequest("POST", `/api/trading/skill-instances/${id}/check`);
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast({
+        title: data.triggered ? "🚨 조건 발동!" : "조건 미충족",
+        description: data.detail,
+        variant: data.triggered ? "destructive" : "default",
+      });
+      refetchInstances();
+    },
+    onError: (e: Error) => { toast({ title: "체크 실패", description: e.message, variant: "destructive" }); },
+  });
+
+  const checkAllMutation = useMutation({
+    mutationFn: async () => {
+      setCheckingAll(true);
+      const res = await apiRequest("POST", "/api/trading/skills/check-all");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      setCheckingAll(false);
+      toast({
+        title: `스킬 체크 완료`,
+        description: `${data.total}개 중 ${data.triggered}개 조건 발동`,
+        variant: data.triggered > 0 ? "destructive" : "default",
+      });
+      refetchInstances();
+    },
+    onError: (e: Error) => {
+      setCheckingAll(false);
+      toast({ title: "일괄 체크 실패", description: e.message, variant: "destructive" });
+    },
+  });
+
+  const executeMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiRequest("POST", `/api/trading/skill-instances/${id}/execute`);
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast({
+        title: data.success ? "✅ 주문 성공" : "주문 실패",
+        description: data.detail || data.message,
+        variant: data.success ? "default" : "destructive",
+      });
+      refetchInstances();
+    },
+    onError: (e: Error) => { toast({ title: "실행 실패", description: e.message, variant: "destructive" }); },
+  });
+
+  const filteredInstances = selectedCategory === "all"
+    ? instances
+    : instances.filter(i => i.skill?.category === selectedCategory);
+
+  const activeCount = instances.filter(i => i.isActive && i.status === "active").length;
+  const triggeredCount = instances.filter(i => i.status === "triggered").length;
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Sparkles className="w-5 h-5 text-purple-500" />
+                스킬 레지스트리
+              </CardTitle>
+              <CardDescription className="mt-1">
+                기술적 분석 기반 매매 스킬을 등록하고, 조건 충족 시 자동으로 주문을 실행합니다
+              </CardDescription>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm"
+                onClick={() => checkAllMutation.mutate()}
+                disabled={checkingAll || activeCount === 0}
+                className="text-xs gap-1"
+              >
+                {checkingAll ? <Loader2 className="w-3 h-3 animate-spin" /> : <Activity className="w-3 h-3" />}
+                전체 체크
+              </Button>
+              <Button size="sm" onClick={() => setShowAddDialog(true)} className="text-xs gap-1">
+                <Plus className="w-3 h-3" />
+                스킬 추가
+              </Button>
+            </div>
+          </div>
+          <div className="flex gap-2 mt-3">
+            <Badge variant="secondary" className="text-xs">등록 {instances.length}/20</Badge>
+            <Badge variant="default" className="text-xs">활성 {activeCount}</Badge>
+            {triggeredCount > 0 && <Badge variant="destructive" className="text-xs">발동 {triggeredCount}</Badge>}
+          </div>
+        </CardHeader>
+      </Card>
+
+      <div className="flex gap-2">
+        <Button variant={selectedCategory === "all" ? "default" : "outline"} size="sm" className="text-xs" onClick={() => setSelectedCategory("all")}>전체</Button>
+        <Button variant={selectedCategory === "entry" ? "default" : "outline"} size="sm" className="text-xs" onClick={() => setSelectedCategory("entry")}>🟢 매수</Button>
+        <Button variant={selectedCategory === "exit" ? "default" : "outline"} size="sm" className="text-xs" onClick={() => setSelectedCategory("exit")}>🔴 매도</Button>
+        <Button variant={selectedCategory === "risk" ? "default" : "outline"} size="sm" className="text-xs" onClick={() => setSelectedCategory("risk")}>🛡️ 리스크</Button>
+      </div>
+
+      {filteredInstances.length === 0 ? (
+        <Card>
+          <CardContent className="py-12 text-center">
+            <Sparkles className="w-12 h-12 mx-auto text-muted-foreground/30 mb-3" />
+            <p className="text-sm text-muted-foreground">등록된 스킬이 없습니다</p>
+            <p className="text-xs text-muted-foreground mt-1">상단의 "스킬 추가" 버튼으로 매매 스킬을 등록하세요</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {filteredInstances.map(inst => {
+            const cat = CATEGORY_LABELS[inst.skill?.category || "entry"];
+            const statusInfo = STATUS_LABELS[inst.status] || STATUS_LABELS.active;
+            const isExpanded = expandedInstance === inst.id;
+            const instParams = inst.params ? JSON.parse(inst.params) : {};
+
+            return (
+              <Card key={inst.id} className={`transition-all ${inst.status === "triggered" ? "border-red-300 dark:border-red-700 shadow-sm" : ""}`}>
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-lg shrink-0 ${cat.color}`}>
+                        {inst.skill?.icon || "⚡"}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-sm truncate">{inst.label}</span>
+                          <Badge variant={statusInfo.variant} className="text-[10px] px-1.5 py-0 shrink-0">{statusInfo.label}</Badge>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                          <span className={cat.color.split(" ")[0]}>{cat.icon} {cat.label}</span>
+                          {inst.stockName && <span>· {inst.stockName}({inst.stockCode})</span>}
+                          {inst.quantity > 0 && <span>· {inst.quantity}주</span>}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {inst.skill?.category !== "risk" && (
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="조건 체크"
+                          onClick={() => checkMutation.mutate(inst.id)}
+                          disabled={checkMutation.isPending}
+                        >
+                          {checkMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Eye className="w-3.5 h-3.5" />}
+                        </Button>
+                      )}
+                      {inst.status === "triggered" && (
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-green-600" title="주문 실행"
+                          onClick={() => executeMutation.mutate(inst.id)}
+                          disabled={executeMutation.isPending}
+                        >
+                          <Play className="w-3.5 h-3.5" />
+                        </Button>
+                      )}
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title={inst.isActive ? "비활성화" : "활성화"}
+                        onClick={() => toggleMutation.mutate(inst.id)}
+                      >
+                        <Power className={`w-3.5 h-3.5 ${inst.isActive ? "text-green-500" : "text-muted-foreground"}`} />
+                      </Button>
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="상세"
+                        onClick={() => setExpandedInstance(isExpanded ? null : inst.id)}
+                      >
+                        {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                      </Button>
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-red-400 hover:text-red-600" title="삭제"
+                        onClick={() => { if (confirm("이 스킬을 삭제하시겠습니까?")) deleteMutation.mutate(inst.id); }}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  {isExpanded && (
+                    <div className="mt-3 pt-3 border-t space-y-2">
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div><span className="text-muted-foreground">스킬: </span><span className="font-medium">{inst.skill?.name}</span></div>
+                        <div><span className="text-muted-foreground">주문방식: </span><span className="font-medium">{inst.orderMethod === "market" ? "시장가" : "지정가"}</span></div>
+                        <div><span className="text-muted-foreground">우선순위: </span><span className="font-medium">{inst.priority}</span></div>
+                        <div><span className="text-muted-foreground">등록일: </span><span>{new Date(inst.createdAt).toLocaleDateString("ko-KR")}</span></div>
+                        {inst.lastCheckedAt && (
+                          <div><span className="text-muted-foreground">마지막 체크: </span><span>{new Date(inst.lastCheckedAt).toLocaleString("ko-KR")}</span></div>
+                        )}
+                        {inst.triggeredAt && (
+                          <div><span className="text-muted-foreground">발동 시간: </span><span className="text-red-500">{new Date(inst.triggeredAt).toLocaleString("ko-KR")}</span></div>
+                        )}
+                      </div>
+                      {Object.keys(instParams).length > 0 && (
+                        <div className="bg-muted/50 rounded-lg p-2">
+                          <p className="text-[10px] text-muted-foreground mb-1 font-medium">파라미터</p>
+                          <div className="grid grid-cols-2 gap-1 text-xs">
+                            {Object.entries(instParams).map(([key, val]) => (
+                              <div key={key}><span className="text-muted-foreground">{key}: </span><span className="font-mono">{String(val)}</span></div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {inst.skill?.description && (
+                        <p className="text-xs text-muted-foreground italic">{inst.skill.description}</p>
+                      )}
+                      {inst.errorMessage && (
+                        <p className="text-xs text-red-500">⚠️ {inst.errorMessage}</p>
+                      )}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      {showAddDialog && (
+        <AddSkillDialog skills={skills} open={showAddDialog} onClose={() => setShowAddDialog(false)} onSuccess={() => { refetchInstances(); setShowAddDialog(false); }} />
+      )}
+    </div>
+  );
+}
+
+function AddSkillDialog({ skills, open, onClose, onSuccess }: {
+  skills: TradingSkillDef[];
+  open: boolean;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const { toast } = useToast();
+  const [step, setStep] = useState<"select" | "configure">("select");
+  const [selectedSkill, setSelectedSkill] = useState<TradingSkillDef | null>(null);
+  const [filterCat, setFilterCat] = useState("all");
+  const [label, setLabel] = useState("");
+  const [stockCode, setStockCode] = useState("");
+  const [stockName, setStockName] = useState("");
+  const [quantity, setQuantity] = useState(0);
+  const [orderMethod, setOrderMethod] = useState("limit");
+  const [skillParams, setSkillParams] = useState<Record<string, any>>({});
+  const [stockSearch, setStockSearch] = useState("");
+
+  const filteredSkills = filterCat === "all" ? skills.filter(s => s.isEnabled) : skills.filter(s => s.isEnabled && s.category === filterCat);
+
+  const filteredStocks = stockSearch.trim()
+    ? POPULAR_STOCKS.filter(s => s.name.includes(stockSearch) || s.code.includes(stockSearch)).slice(0, 8)
+    : [];
+
+  const selectSkill = (skill: TradingSkillDef) => {
+    setSelectedSkill(skill);
+    setSkillParams(skill.defaultParams ? JSON.parse(skill.defaultParams) : {});
+    setStep("configure");
+  };
+
+  const mutation = useMutation({
+    mutationFn: async (data: any) => {
+      const res = await apiRequest("POST", "/api/trading/skill-instances", data);
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast({ title: "스킬 등록 완료", description: data.message });
+      onSuccess();
+    },
+    onError: (e: Error) => {
+      toast({ title: "등록 실패", description: e.message, variant: "destructive" });
+    },
+  });
+
+  const handleSubmit = () => {
+    if (!selectedSkill) return;
+    mutation.mutate({
+      skillId: selectedSkill.id,
+      label: label || `${selectedSkill.name} - ${stockName || "전체"}`,
+      stockCode: stockCode || undefined,
+      stockName: stockName || undefined,
+      quantity,
+      orderMethod,
+      params: skillParams,
+      priority: 0,
+    });
+  };
+
+  const paramsSchema: Array<{ key: string; label: string; type: string; default?: any; required?: boolean; unit?: string }> = selectedSkill?.paramsSchema ? JSON.parse(selectedSkill.paramsSchema) : [];
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="sm:max-w-[540px] max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-purple-500" />
+            {step === "select" ? "스킬 선택" : `${selectedSkill?.icon} ${selectedSkill?.name} 설정`}
+          </DialogTitle>
+          <DialogDescription className="text-xs">
+            {step === "select" ? "등록할 매매 스킬을 선택하세요" : "스킬 파라미터와 적용 종목을 설정하세요"}
+          </DialogDescription>
+        </DialogHeader>
+
+        {step === "select" ? (
+          <div className="space-y-3">
+            <div className="flex gap-1.5">
+              <Button variant={filterCat === "all" ? "default" : "outline"} size="sm" className="text-[11px] h-7" onClick={() => setFilterCat("all")}>전체</Button>
+              <Button variant={filterCat === "entry" ? "default" : "outline"} size="sm" className="text-[11px] h-7" onClick={() => setFilterCat("entry")}>🟢 매수</Button>
+              <Button variant={filterCat === "exit" ? "default" : "outline"} size="sm" className="text-[11px] h-7" onClick={() => setFilterCat("exit")}>🔴 매도</Button>
+              <Button variant={filterCat === "risk" ? "default" : "outline"} size="sm" className="text-[11px] h-7" onClick={() => setFilterCat("risk")}>🛡️ 리스크</Button>
+            </div>
+            <div className="grid grid-cols-2 gap-2 max-h-[50vh] overflow-y-auto">
+              {filteredSkills.map(skill => {
+                const cat = CATEGORY_LABELS[skill.category];
+                return (
+                  <button key={skill.id} onClick={() => selectSkill(skill)}
+                    className="text-left p-3 border rounded-lg hover:border-primary hover:bg-muted/30 transition-all"
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-lg">{skill.icon}</span>
+                      <span className="font-medium text-sm">{skill.name}</span>
+                    </div>
+                    <Badge variant="outline" className={`text-[9px] px-1 py-0 ${cat?.color?.split(" ")[0] || ""}`}>{cat?.label || skill.category}</Badge>
+                    <p className="text-[11px] text-muted-foreground mt-1.5 line-clamp-2">{skill.description}</p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <Button variant="ghost" size="sm" className="text-xs gap-1 -ml-2" onClick={() => setStep("select")}>
+              <ArrowLeft className="w-3 h-3" /> 스킬 다시 선택
+            </Button>
+
+            {selectedSkill?.category !== "risk" && (
+              <div className="space-y-1.5">
+                <Label className="text-xs">종목 <span className="text-red-500">*</span></Label>
+                <Input value={stockSearch} onChange={(e) => setStockSearch(e.target.value)} placeholder="종목명 또는 종목코드 검색..." className="text-sm h-9" />
+                {filteredStocks.length > 0 && (
+                  <div className="border rounded-md max-h-36 overflow-y-auto">
+                    {filteredStocks.map(s => (
+                      <button key={s.code} onClick={() => { setStockCode(s.code); setStockName(s.name); setStockSearch(`${s.name} (${s.code})`); }}
+                        className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted/50 flex justify-between"
+                      >
+                        <span className="font-medium">{s.name}</span>
+                        <span className="text-muted-foreground">{s.code} · {s.market}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {stockCode && <p className="text-[11px] text-green-600">✓ {stockName} ({stockCode}) 선택됨</p>}
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <Label className="text-xs">별칭</Label>
+              <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={`예: ${selectedSkill?.name} - ${stockName || "삼성전자"}`} className="text-sm h-9" />
+            </div>
+
+            {paramsSchema.length > 0 && (
+              <div className="space-y-2">
+                <Label className="text-xs font-medium">파라미터 설정</Label>
+                <div className="bg-muted/30 rounded-lg p-3 space-y-2">
+                  {paramsSchema.map(p => (
+                    <div key={p.key} className="flex items-center gap-2">
+                      <Label className="text-xs w-28 shrink-0">{p.label} {p.required && <span className="text-red-500">*</span>}</Label>
+                      <Input
+                        type="number"
+                        value={skillParams[p.key] ?? p.default ?? ""}
+                        onChange={(e) => setSkillParams({ ...skillParams, [p.key]: parseFloat(e.target.value) || 0 })}
+                        className="text-sm h-8 font-mono"
+                      />
+                      {p.unit && <span className="text-xs text-muted-foreground shrink-0">{p.unit}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {selectedSkill?.category !== "risk" && (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">주문 수량 (주)</Label>
+                  <Input type="number" value={quantity || ""} onChange={(e) => setQuantity(parseInt(e.target.value) || 0)} placeholder="0" className="text-sm h-9 font-mono" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">주문 방식</Label>
+                  <Select value={orderMethod} onValueChange={setOrderMethod}>
+                    <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="limit">지정가</SelectItem>
+                      <SelectItem value="market">시장가</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-start gap-2 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
+              <AlertTriangle className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
+              <div className="text-[11px] text-blue-600 dark:text-blue-400 space-y-0.5">
+                <p>스킬은 "조건 체크" 시에만 실행됩니다.</p>
+                <p>조건 발동 후 "실행" 버튼을 눌러야 실제 주문이 진행됩니다.</p>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={onClose} className="text-xs">취소</Button>
+              <Button onClick={handleSubmit} disabled={mutation.isPending} className="text-xs gap-1">
+                {mutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                스킬 등록
+              </Button>
+            </DialogFooter>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 
