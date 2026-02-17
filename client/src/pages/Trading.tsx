@@ -106,6 +106,7 @@ interface TradingStatus {
 interface TradingConfig {
   configured: boolean;
   isAdmin?: boolean;
+  broker?: string; // "kis" | "kiwoom"
   appKey?: string;
   accountNo?: string;
   accountProductCd?: string;
@@ -253,10 +254,16 @@ export default function Trading() {
               </div>
             </div>
             
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
               {/* 설정 버튼 (일반 유저가 이미 설정한 경우 설정 관리) */}
               {!isAdmin && tradingConfig?.configured && (
                 <UserConfigManageButton config={tradingConfig} onConfigChanged={() => { refetchConfig(); refetchStatus(); }} />
+              )}
+              {/* 활성 증권사 표시 */}
+              {status?.tradingConfigured && (
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0.5 hidden sm:flex">
+                  {status.broker === "kiwoom" ? "🏦 키움" : "🏦 KIS"}
+                </Badge>
               )}
               {/* 연결 상태 표시 */}
               {statusLoading ? (
@@ -349,71 +356,110 @@ export default function Trading() {
 
 // ========== Admin Setup Guide (환경변수 기반) ==========
 function AdminSetupGuide({ status }: { status?: TradingStatus | null }) {
+  const broker = status?.broker || "kis";
+  const isKiwoom = broker === "kiwoom";
+
   return (
     <Card className="max-w-2xl mx-auto">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Settings className="w-5 h-5" />
-          KIS API 설정 필요 (관리자)
+          {isKiwoom ? "키움증권 API 설정 필요 (관리자)" : "KIS API 설정 필요 (관리자)"}
         </CardTitle>
         <CardDescription>
-          관리자 계정은 서버 환경 변수로 KIS API를 설정합니다.
+          {isKiwoom
+            ? "관리자 계정은 API 관리에서 키움증권 API를 등록하거나 서버 환경 변수로 설정합니다."
+            : "관리자 계정은 서버 환경 변수로 KIS API를 설정합니다."}
+          <br />
+          <span className="text-[10px] text-amber-600">💡 API 관리에서 활성화된 증권사에 따라 자동으로 전환됩니다.</span>
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="bg-muted/50 rounded-lg p-4 space-y-3">
-          <h4 className="font-semibold text-sm">필수 환경 변수:</h4>
-          <div className="space-y-2 text-sm font-mono">
-            <div className="flex items-center gap-2">
-              {status?.configured ? (
-                <CheckCircle2 className="w-4 h-4 text-green-500" />
-              ) : (
-                <XCircle className="w-4 h-4 text-red-500" />
-              )}
-              <span>KIS_APP_KEY</span>
-              <span className="text-muted-foreground">- 앱 키</span>
+        {isKiwoom ? (
+          <>
+            <div className="bg-muted/50 rounded-lg p-4 space-y-3">
+              <h4 className="font-semibold text-sm">필수 환경 변수 (키움증권):</h4>
+              <div className="space-y-2 text-sm font-mono">
+                <div className="flex items-center gap-2">
+                  {status?.configured ? <CheckCircle2 className="w-4 h-4 text-green-500" /> : <XCircle className="w-4 h-4 text-red-500" />}
+                  <span>KIWOOM_APP_KEY</span>
+                  <span className="text-muted-foreground">- 앱 키</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {status?.configured ? <CheckCircle2 className="w-4 h-4 text-green-500" /> : <XCircle className="w-4 h-4 text-red-500" />}
+                  <span>KIWOOM_APP_SECRET</span>
+                  <span className="text-muted-foreground">- 시크릿 키</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <XCircle className="w-4 h-4 text-red-500" />
+                  <span>KIWOOM_ACCOUNT_NO</span>
+                  <span className="text-muted-foreground">- 계좌번호</span>
+                </div>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              {status?.configured ? (
-                <CheckCircle2 className="w-4 h-4 text-green-500" />
-              ) : (
-                <XCircle className="w-4 h-4 text-red-500" />
-              )}
-              <span>KIS_APP_SECRET</span>
-              <span className="text-muted-foreground">- 앱 시크릿</span>
+            <div className="flex items-start gap-2 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
+              <AlertTriangle className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
+              <div className="text-[11px] text-blue-600 dark:text-blue-400 space-y-0.5">
+                <p>키움증권 REST API는 현재 <strong>모의투자 전용</strong>입니다.</p>
+                <p>모의투자 도메인: mockapi.kiwoom.com</p>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <XCircle className="w-4 h-4 text-red-500" />
-              <span>KIS_ACCOUNT_NO</span>
-              <span className="text-muted-foreground">- 계좌번호 앞 8자리</span>
+            <div className="text-sm text-muted-foreground">
+              <p>
+                키움증권 오픈API: {" "}
+                <a href="https://openapi.kiwoom.com" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                  openapi.kiwoom.com
+                </a>
+              </p>
             </div>
-          </div>
-        </div>
-
-        <div className="bg-muted/50 rounded-lg p-4 space-y-3">
-          <h4 className="font-semibold text-sm">선택 환경 변수:</h4>
-          <div className="space-y-2 text-sm font-mono">
-            <div className="flex items-center gap-2">
-              <span className="w-4 h-4 rounded-full bg-muted-foreground/30 flex items-center justify-center text-[10px]">?</span>
-              <span>KIS_ACCOUNT_PRODUCT_CD</span>
-              <span className="text-muted-foreground">- 계좌상품코드 (기본: 01)</span>
+          </>
+        ) : (
+          <>
+            <div className="bg-muted/50 rounded-lg p-4 space-y-3">
+              <h4 className="font-semibold text-sm">필수 환경 변수 (한국투자증권):</h4>
+              <div className="space-y-2 text-sm font-mono">
+                <div className="flex items-center gap-2">
+                  {status?.configured ? <CheckCircle2 className="w-4 h-4 text-green-500" /> : <XCircle className="w-4 h-4 text-red-500" />}
+                  <span>KIS_APP_KEY</span>
+                  <span className="text-muted-foreground">- 앱 키</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {status?.configured ? <CheckCircle2 className="w-4 h-4 text-green-500" /> : <XCircle className="w-4 h-4 text-red-500" />}
+                  <span>KIS_APP_SECRET</span>
+                  <span className="text-muted-foreground">- 앱 시크릿</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <XCircle className="w-4 h-4 text-red-500" />
+                  <span>KIS_ACCOUNT_NO</span>
+                  <span className="text-muted-foreground">- 계좌번호 앞 8자리</span>
+                </div>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="w-4 h-4 rounded-full bg-muted-foreground/30 flex items-center justify-center text-[10px]">?</span>
-              <span>KIS_MOCK_TRADING=true</span>
-              <span className="text-muted-foreground">- 모의투자 모드</span>
+            <div className="bg-muted/50 rounded-lg p-4 space-y-3">
+              <h4 className="font-semibold text-sm">선택 환경 변수:</h4>
+              <div className="space-y-2 text-sm font-mono">
+                <div className="flex items-center gap-2">
+                  <span className="w-4 h-4 rounded-full bg-muted-foreground/30 flex items-center justify-center text-[10px]">?</span>
+                  <span>KIS_ACCOUNT_PRODUCT_CD</span>
+                  <span className="text-muted-foreground">- 계좌상품코드 (기본: 01)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-4 h-4 rounded-full bg-muted-foreground/30 flex items-center justify-center text-[10px]">?</span>
+                  <span>KIS_MOCK_TRADING=true</span>
+                  <span className="text-muted-foreground">- 모의투자 모드</span>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-
-        <div className="text-sm text-muted-foreground">
-          <p>
-            한국투자증권 개발자센터: {" "}
-            <a href="https://apiportal.koreainvestment.com" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
-              apiportal.koreainvestment.com
-            </a>
-          </p>
-        </div>
+            <div className="text-sm text-muted-foreground">
+              <p>
+                한국투자증권 개발자센터: {" "}
+                <a href="https://apiportal.koreainvestment.com" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                  apiportal.koreainvestment.com
+                </a>
+              </p>
+            </div>
+          </>
+        )}
       </CardContent>
     </Card>
   );
@@ -422,176 +468,48 @@ function AdminSetupGuide({ status }: { status?: TradingStatus | null }) {
 // ========== User Setup Guide (폼 입력 기반) ==========
 function UserSetupGuide({ onComplete }: { onComplete: () => void }) {
   const { toast } = useToast();
-  const [appKey, setAppKey] = useState("");
-  const [appSecret, setAppSecret] = useState("");
-  const [accountNo, setAccountNo] = useState("");
-  const [accountProductCd, setAccountProductCd] = useState("01");
-  const [mockTrading, setMockTrading] = useState(true);
-  const [showSecret, setShowSecret] = useState(false);
-
-  const saveMutation = useMutation({
-    mutationFn: async (data: any) => {
-      const res = await apiRequest("POST", "/api/trading/config", data);
-      return res.json();
-    },
-    onSuccess: (data) => {
-      toast({ title: "설정 완료", description: data.message || "KIS API 인증 정보가 등록되었습니다" });
-      queryClient.invalidateQueries({ queryKey: ["/api/trading/status"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/trading/config"] });
-      onComplete();
-    },
-    onError: (error: Error) => {
-      toast({ title: "설정 실패", description: error.message, variant: "destructive" });
-    },
-  });
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!appKey || !appSecret || !accountNo) {
-      toast({ title: "입력 오류", description: "필수 항목을 모두 입력하세요", variant: "destructive" });
-      return;
-    }
-    saveMutation.mutate({ appKey, appSecret, accountNo, accountProductCd, mockTrading });
-  };
 
   return (
     <Card className="max-w-2xl mx-auto">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <ShieldCheck className="w-5 h-5 text-primary" />
-          KIS API 인증 정보 등록
+          자동매매 API 등록
         </CardTitle>
         <CardDescription>
-          자동매매를 이용하려면 한국투자증권 API 인증 정보를 등록하세요.
+          자동매매를 이용하려면 먼저 <strong>API 관리</strong>에서 증권사 API를 등록하세요.
           <br />
-          등록 시 서버에서 실제 토큰 발급을 시도하여 유효성을 검증합니다.
+          한국투자증권(KIS) 또는 키움증권(REST) API 중 하나를 선택하여 등록할 수 있으며, 동시에 1개의 API만 활성화됩니다.
         </CardDescription>
       </CardHeader>
-      <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-5">
-          {/* App Key */}
-          <div className="space-y-2">
-            <Label htmlFor="user-app-key" className="text-sm font-medium">
-              앱 키 (App Key) <span className="text-destructive">*</span>
-            </Label>
-            <Input
-              id="user-app-key"
-              value={appKey}
-              onChange={(e) => setAppKey(e.target.value)}
-              placeholder="PSxxxxxxxxxxxxxxx"
-              className="font-mono text-sm"
-            />
-          </div>
+      <CardContent className="space-y-4">
+        <div className="bg-muted/50 rounded-lg p-4 space-y-3">
+          <h4 className="font-semibold text-sm">📋 등록 절차</h4>
+          <ol className="space-y-2 text-sm list-decimal list-inside text-muted-foreground">
+            <li><strong className="text-foreground">API 관리</strong> 메뉴로 이동</li>
+            <li><strong className="text-foreground">자동매매 API</strong> 탭에서 "추가" 클릭</li>
+            <li>증권사(KIS/키움) 선택 후 인증 정보 입력</li>
+            <li>등록 후 <strong className="text-foreground">"활성화"</strong> 버튼으로 사용할 API 전환</li>
+          </ol>
+        </div>
 
-          {/* App Secret */}
-          <div className="space-y-2">
-            <Label htmlFor="user-app-secret" className="text-sm font-medium">
-              앱 시크릿 (App Secret) <span className="text-destructive">*</span>
-            </Label>
-            <div className="relative">
-              <Input
-                id="user-app-secret"
-                type={showSecret ? "text" : "password"}
-                value={appSecret}
-                onChange={(e) => setAppSecret(e.target.value)}
-                placeholder="앱 시크릿 입력"
-                className="font-mono text-sm pr-20"
-              />
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="absolute right-1 top-1/2 -translate-y-1/2 h-7 text-xs"
-                onClick={() => setShowSecret(!showSecret)}
-              >
-                {showSecret ? "숨기기" : "보기"}
-              </Button>
-            </div>
+        <div className="flex items-start gap-2 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-3">
+          <AlertTriangle className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
+          <div className="text-[11px] text-amber-600 dark:text-amber-400 space-y-0.5">
+            <p>동시에 <strong>1개의 증권사 API만</strong> 활성 상태로 운영됩니다.</p>
+            <p>활성화된 API에 따라 잔고 조회, 주문 등 모든 기능이 해당 증권사로 연결됩니다.</p>
           </div>
+        </div>
 
-          {/* Account No */}
-          <div className="space-y-2">
-            <Label htmlFor="user-account-no" className="text-sm font-medium">
-              계좌번호 (앞 8자리) <span className="text-destructive">*</span>
-            </Label>
-            <Input
-              id="user-account-no"
-              value={accountNo}
-              onChange={(e) => setAccountNo(e.target.value.replace(/\D/g, "").slice(0, 8))}
-              placeholder="12345678"
-              maxLength={8}
-              className="font-mono text-sm"
-            />
-          </div>
-
-          {/* Account Product Cd */}
-          <div className="space-y-2">
-            <Label htmlFor="user-product-cd" className="text-sm font-medium">
-              계좌상품코드 (뒤 2자리)
-            </Label>
-            <Input
-              id="user-product-cd"
-              value={accountProductCd}
-              onChange={(e) => setAccountProductCd(e.target.value.replace(/\D/g, "").slice(0, 2))}
-              placeholder="01"
-              maxLength={2}
-              className="font-mono text-sm w-24"
-            />
-          </div>
-
-          {/* Mock Trading Toggle */}
-          <div className="flex items-center justify-between bg-muted/50 p-4 rounded-lg">
-            <div>
-              <Label htmlFor="user-mock-trading" className="text-sm font-medium cursor-pointer">
-                모의투자 모드
-              </Label>
-              <p className="text-xs text-muted-foreground mt-1">
-                처음 사용 시 반드시 모의투자로 테스트하세요
-              </p>
-            </div>
-            <Switch
-              id="user-mock-trading"
-              checked={mockTrading}
-              onCheckedChange={setMockTrading}
-            />
-          </div>
-
-          {/* Warning */}
-          <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
-            <div className="flex gap-2">
-              <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
-              <div className="text-sm">
-                <p className="font-semibold text-amber-700 dark:text-amber-400">주의사항</p>
-                <ul className="text-amber-600 dark:text-amber-500 mt-1 space-y-1 list-disc pl-4">
-                  <li>실전투자 모드에서는 <strong>실제 주문이 체결</strong>됩니다.</li>
-                  <li>인증 정보는 암호화되어 서버에 저장됩니다.</li>
-                  <li>한국투자증권 개발자센터에서 API 키를 발급받으세요.</li>
-                </ul>
-              </div>
-            </div>
-          </div>
-
-          {/* Submit */}
-          <Button type="submit" className="w-full" disabled={saveMutation.isPending}>
-            {saveMutation.isPending ? (
-              <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                인증 검증 중...
-              </>
-            ) : (
-              <>
-                <ShieldCheck className="w-4 h-4 mr-2" />
-                인증 정보 등록 및 검증
-              </>
-            )}
-          </Button>
-
-          <div className="text-center text-sm text-muted-foreground">
-            <a href="https://apiportal.koreainvestment.com" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
-              한국투자증권 개발자센터 →
-            </a>
-          </div>
-        </form>
+        <div className="flex gap-3 text-[11px] text-muted-foreground justify-center">
+          <a href="https://apiportal.koreainvestment.com" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+            🏦 한국투자증권 API 포탈
+          </a>
+          <span>|</span>
+          <a href="https://openapi.kiwoom.com" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+            🏦 키움증권 오픈API
+          </a>
+        </div>
       </CardContent>
     </Card>
   );
@@ -601,6 +519,7 @@ function UserSetupGuide({ onComplete }: { onComplete: () => void }) {
 function UserConfigManageButton({ config, onConfigChanged }: { config: TradingConfig; onConfigChanged: () => void }) {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
+  const brokerName = config.broker === "kiwoom" ? "키움증권" : "한국투자증권(KIS)";
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
@@ -608,7 +527,7 @@ function UserConfigManageButton({ config, onConfigChanged }: { config: TradingCo
       return res.json();
     },
     onSuccess: () => {
-      toast({ title: "설정 삭제", description: "KIS API 인증 정보가 삭제되었습니다" });
+      toast({ title: "설정 삭제", description: `${brokerName} API 인증 정보가 삭제되었습니다` });
       queryClient.invalidateQueries({ queryKey: ["/api/trading/status"] });
       queryClient.invalidateQueries({ queryKey: ["/api/trading/config"] });
       setOpen(false);
@@ -631,14 +550,20 @@ function UserConfigManageButton({ config, onConfigChanged }: { config: TradingCo
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Settings className="w-5 h-5" />
-            KIS API 설정 관리
+            {brokerName} API 설정 관리
           </DialogTitle>
           <DialogDescription>
-            현재 등록된 인증 정보를 확인하거나 삭제할 수 있습니다.
+            현재 활성화된 {brokerName} 인증 정보를 확인하거나 삭제할 수 있습니다.
+            <br />
+            <span className="text-[10px] text-amber-600">API 관리에서 다른 증권사로 전환할 수 있습니다.</span>
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <div className="bg-muted/50 rounded-lg p-4 space-y-3 text-sm">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">증권사</span>
+              <Badge variant="secondary" className="text-[10px]">{brokerName}</Badge>
+            </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">앱 키</span>
               <span className="font-mono">{config.appKey}</span>
@@ -647,10 +572,12 @@ function UserConfigManageButton({ config, onConfigChanged }: { config: TradingCo
               <span className="text-muted-foreground">계좌번호</span>
               <span className="font-mono">{config.accountNo}</span>
             </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">상품코드</span>
-              <span className="font-mono">{config.accountProductCd}</span>
-            </div>
+            {config.broker !== "kiwoom" && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">상품코드</span>
+                <span className="font-mono">{config.accountProductCd}</span>
+              </div>
+            )}
             <div className="flex justify-between">
               <span className="text-muted-foreground">모드</span>
               <StatusBadge variant={config.mockTrading ? "default" : "destructive"}>
@@ -1369,7 +1296,7 @@ function OrderSection({ initialCode, initialName, initialOrderType, initialHoldi
                             "{searchTerm.trim()}" 종목코드로 직접 조회
                           </div>
                           <div className="text-xs text-muted-foreground">
-                            KIS API에서 실시간 조회합니다 (Enter 키)
+                            증권사 API에서 실시간 조회합니다 (Enter 키)
                           </div>
                         </div>
                       </div>

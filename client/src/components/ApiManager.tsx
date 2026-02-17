@@ -166,6 +166,18 @@ function TradingApiSection() {
             <CardDescription className="text-xs mt-1">
               한국투자증권(KIS) / 키움증권 API를 최대 5개까지 등록하고 전환할 수 있습니다
             </CardDescription>
+            <div className="flex items-center gap-1.5 mt-1.5">
+              <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-amber-300 text-amber-600">
+                <AlertTriangle className="w-2.5 h-2.5 mr-0.5" />
+                동시에 1개 API만 활성 가능
+              </Badge>
+              {configs.filter(c => c.isActive).length > 0 && (
+                <Badge variant="secondary" className="text-[9px] px-1.5 py-0">
+                  현재 활성: {configs.find(c => c.isActive)?.label || "시스템"}
+                  ({configs.find(c => c.isActive)?.broker === "kiwoom" ? "키움" : "KIS"})
+                </Badge>
+              )}
+            </div>
           </div>
           <Button size="sm" onClick={() => setShowAdd(true)} className="gap-1 text-xs" disabled={configs.length >= 5}>
             <Plus className="w-3 h-3" /> 추가
