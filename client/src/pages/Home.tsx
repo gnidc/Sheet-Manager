@@ -1837,6 +1837,11 @@ function HomeEmbed({ onNavigate }: { onNavigate: (tab: string) => void }) {
             <Loader2 className="w-6 h-6 animate-spin text-primary mx-auto mb-2" />
             <p className="text-xs text-muted-foreground">로그인 확인 중...</p>
           </div>
+        ) : !isLoggedIn ? (
+          <div className="mt-4 py-8 text-center border rounded-lg bg-muted/20">
+            <Newspaper className="w-8 h-8 mx-auto text-muted-foreground/40 mb-2" />
+            <p className="text-sm text-muted-foreground">먼저 구글계정 로그인을 하시면 주요 뉴스를 로딩합니다...</p>
+          </div>
         ) : (
           <div className="mt-4">
             <Suspense fallback={<div className="py-10 text-center"><Loader2 className="w-6 h-6 animate-spin text-primary mx-auto" /></div>}>
