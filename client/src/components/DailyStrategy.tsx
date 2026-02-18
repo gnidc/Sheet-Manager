@@ -874,11 +874,17 @@ export default function DailyStrategy({ period = "daily" }: DailyStrategyProps) 
   const [promptHistory, setPromptHistory] = useState<SavedPromptItem[]>(() => getPromptHistory(period, userId));
   const [viewingReport, setViewingReport] = useState<SavedReport | null>(null);
   const [viewingAnalysis, setViewingAnalysis] = useState<SavedAnalysis | null>(null);
+  const [reportTitle, setReportTitle] = useState(`${periodLabel} 시장 보고서`);
 
   // ===== 팝업 폰트 크기 State =====
   const DEFAULT_FONT_SIZE = 14;
   const [reportFontSize, setReportFontSize] = useState(DEFAULT_FONT_SIZE);
   const [analysisFontSize, setAnalysisFontSize] = useState(DEFAULT_FONT_SIZE);
+
+  // period 변경 시 제목 기본값 리셋
+  useEffect(() => {
+    setReportTitle(`${periodLabel} 시장 보고서`);
+  }, [period, periodLabel]);
 
   // ===== 서버에서 보고서/분석 목록 로딩 + localStorage → DB 마이그레이션 =====
   useEffect(() => {
@@ -1153,6 +1159,7 @@ export default function DailyStrategy({ period = "daily" }: DailyStrategyProps) 
   // Save report when new data arrives (서버 + localStorage)
   useEffect(() => {
     if (report && !isFetching && isLoggedIn) {
+      const currentTitle = reportTitle.trim() || `${periodLabel} 시장 보고서`;
       // 서버에 저장
       fetch("/api/strategy-reports", {
         method: "POST",
@@ -1160,7 +1167,7 @@ export default function DailyStrategy({ period = "daily" }: DailyStrategyProps) 
         credentials: "include",
         body: JSON.stringify({
           period,
-          title: `${periodLabel} 시장 보고서`,
+          title: currentTitle,
           periodLabel,
           report,
           isShared: false,
@@ -1186,7 +1193,7 @@ export default function DailyStrategy({ period = "daily" }: DailyStrategyProps) 
             const newSaved: SavedReport = {
               id: Date.now().toString(),
               userId: userId || 0,
-              title: `${periodLabel} 시장 보고서`,
+              title: currentTitle,
               createdAt: new Date().toLocaleString("ko-KR"),
               periodLabel,
               report,
@@ -1202,7 +1209,7 @@ export default function DailyStrategy({ period = "daily" }: DailyStrategyProps) 
           const newSaved: SavedReport = {
             id: Date.now().toString(),
             userId: userId || 0,
-            title: `${periodLabel} 시장 보고서`,
+            title: currentTitle,
             createdAt: new Date().toLocaleString("ko-KR"),
             periodLabel,
             report,
@@ -1586,6 +1593,16 @@ export default function DailyStrategy({ period = "daily" }: DailyStrategyProps) 
                 <RefreshCw className="w-3 h-3 mr-1" />
                 기본 프롬프트
               </Button>
+              <div className="flex items-center gap-1.5 border rounded-md px-2 py-1 bg-background">
+                <FileText className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                <input
+                  type="text"
+                  value={reportTitle}
+                  onChange={(e) => setReportTitle(e.target.value)}
+                  placeholder="보고서 제목"
+                  className="w-[160px] h-6 text-xs bg-transparent border-none outline-none placeholder:text-muted-foreground/50"
+                />
+              </div>
               <Button onClick={handleGenerate} disabled={isFetching || isLoading || (!isAdmin && period !== "daily")} variant="outline" className="h-8 gap-1.5 px-3 text-xs">
                 {isFetching || isLoading ? (
                   <><Loader2 className="w-3.5 h-3.5 animate-spin" /> 시장 데이터</>
