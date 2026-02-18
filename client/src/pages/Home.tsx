@@ -1598,7 +1598,7 @@ function NoticeBoard() {
 }
 
 function HomeEmbed({ onNavigate }: { onNavigate: (tab: string) => void }) {
-  const { isAdmin } = useAuth();
+  const { isAdmin, isLoggedIn, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
   const [page, setPage] = useState(1);
   const [selectedMenuId, setSelectedMenuId] = useState("0"); // "0" = 전체
@@ -1825,18 +1825,25 @@ function HomeEmbed({ onNavigate }: { onNavigate: (tab: string) => void }) {
     writeMutation.mutate({ subject: writeSubject, content: writeContent, menuId: writeMenuId });
   };
 
-  // 일반 유저: 공개 카페 글 목록 + 주요뉴스
+  // 일반 유저: 공개 카페 글 목록 + 주요뉴스 (로그인 확인 후 뉴스 로딩)
   if (!isAdmin) {
     return (
       <>
         <NoticeBoard />
         <QuickLinks onNavigate={onNavigate} />
         <PublicCafeView />
-        <div className="mt-4">
-          <Suspense fallback={<div className="py-10 text-center"><Loader2 className="w-6 h-6 animate-spin text-primary mx-auto" /></div>}>
-            <MarketNews />
-          </Suspense>
-        </div>
+        {authLoading ? (
+          <div className="mt-4 py-10 text-center">
+            <Loader2 className="w-6 h-6 animate-spin text-primary mx-auto mb-2" />
+            <p className="text-xs text-muted-foreground">로그인 확인 중...</p>
+          </div>
+        ) : (
+          <div className="mt-4">
+            <Suspense fallback={<div className="py-10 text-center"><Loader2 className="w-6 h-6 animate-spin text-primary mx-auto" /></div>}>
+              <MarketNews />
+            </Suspense>
+          </div>
+        )}
       </>
     );
   }
@@ -2270,12 +2277,19 @@ function HomeEmbed({ onNavigate }: { onNavigate: (tab: string) => void }) {
         )}
         </div>
 
-      {/* 주요뉴스 */}
-      <div className="mt-4">
-        <Suspense fallback={<div className="py-10 text-center"><Loader2 className="w-6 h-6 animate-spin text-primary mx-auto" /></div>}>
-          <MarketNews />
-        </Suspense>
-      </div>
+      {/* 주요뉴스 (로그인 확인 후 로딩) */}
+      {authLoading ? (
+        <div className="mt-4 py-10 text-center">
+          <Loader2 className="w-6 h-6 animate-spin text-primary mx-auto mb-2" />
+          <p className="text-xs text-muted-foreground">로그인 확인 중...</p>
+        </div>
+      ) : (
+        <div className="mt-4">
+          <Suspense fallback={<div className="py-10 text-center"><Loader2 className="w-6 h-6 animate-spin text-primary mx-auto" /></div>}>
+            <MarketNews />
+          </Suspense>
+        </div>
+      )}
 
       {/* 글 본문 미리보기 모달 */}
       <Dialog open={!!previewArticleId} onOpenChange={(open) => !open && setPreviewArticleId(null)}>
