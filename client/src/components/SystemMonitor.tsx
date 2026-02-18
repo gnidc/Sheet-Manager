@@ -47,6 +47,29 @@ interface DbDebug {
   note: string;
 }
 
+interface MemoryBreakdownItem {
+  name: string;
+  sizeBytes: number;
+  sizeFormatted: string;
+  percent: string;
+  category: string;
+}
+
+interface MemoryBreakdown {
+  items: MemoryBreakdownItem[];
+  totalRss: number;
+  totalRssFormatted: string;
+  heapStats: {
+    totalHeapSize: string;
+    usedHeapSize: string;
+    heapSizeLimit: string;
+    mallocedMemory: string;
+    peakMallocedMemory: string;
+    numberOfNativeContexts: number;
+    numberOfDetachedContexts: number;
+  };
+}
+
 interface SystemStatus {
   timestamp: string;
   _cached?: boolean;
@@ -65,6 +88,7 @@ interface SystemStatus {
       heapUsedFormatted: string;
       heapUsagePercent: string;
     };
+    memoryBreakdown?: MemoryBreakdown;
     cpuUsage: { user: number; system: number };
     isVercel: boolean;
     vercelRegion: string;
@@ -434,6 +458,11 @@ export default function SystemMonitor() {
               </div>
             </div>
           </div>
+
+          {/* 프로세스별 메모리 사용률 (Top 10) */}
+          {data.server.memoryBreakdown && (
+            <MemoryBreakdownPanel breakdown={data.server.memoryBreakdown} />
+          )}
         </CardContent>
       </Card>
 
@@ -609,6 +638,104 @@ export default function SystemMonitor() {
 
       {/* 조치 권고사항 */}
       <RecommendationsPanel data={data} />
+    </div>
+  );
+}
+
+// ===== 프로세스별 메모리 사용률 (Top 10) 패널 =====
+function MemoryBreakdownPanel({ breakdown }: { breakdown: MemoryBreakdown }) {
+  const [expanded, setExpanded] = useState(false);
+
+  // 색상 배열 (막대 그래프용)
+  const barColors = [
+    "bg-blue-500", "bg-purple-500", "bg-orange-500", "bg-emerald-500", "bg-red-500",
+    "bg-cyan-500", "bg-yellow-500", "bg-pink-500", "bg-indigo-500", "bg-lime-500",
+  ];
+
+  const maxSize = breakdown.items.length > 0 ? breakdown.items[0].sizeBytes : 1;
+
+  return (
+    <div className="mt-4 border rounded-lg">
+      <button
+        className="w-full flex items-center justify-between px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-muted/50 rounded-t-lg transition-colors"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <span className="flex items-center gap-1.5">
+          <Activity className="w-3 h-3 text-purple-500" />
+          프로세스별 메모리 사용률 (Top 10)
+          <Badge variant="outline" className="text-[9px] px-1 ml-1">
+            RSS {breakdown.totalRssFormatted}
+          </Badge>
+        </span>
+        <span className="text-[10px]">{expanded ? "▲ 접기" : "▼ 펼치기"}</span>
+      </button>
+      {expanded && (
+        <div className="px-3 pb-3 space-y-3">
+          {/* 메모리 영역별 막대 그래프 */}
+          <div className="space-y-1.5">
+            {breakdown.items.map((item, idx) => {
+              const pct = (item.sizeBytes / breakdown.totalRss) * 100;
+              const barWidth = (item.sizeBytes / maxSize) * 100;
+              return (
+                <div key={idx} className="group">
+                  <div className="flex items-center justify-between text-[11px] mb-0.5">
+                    <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                      <span className={`inline-block w-2 h-2 rounded-sm flex-shrink-0 ${barColors[idx % barColors.length]}`} />
+                      <span className="truncate font-medium">{item.name}</span>
+                      <Badge variant="outline" className="text-[8px] px-1 flex-shrink-0 opacity-60">
+                        {item.category}
+                      </Badge>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                      <span className="font-mono text-muted-foreground">{item.sizeFormatted}</span>
+                      <span className={`font-mono font-medium w-12 text-right ${pct > 30 ? "text-red-500" : pct > 15 ? "text-yellow-500" : "text-green-600"}`}>
+                        {item.percent}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${barColors[idx % barColors.length]} opacity-70`}
+                      style={{ width: `${Math.max(barWidth, 1)}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* V8 힙 통계 요약 */}
+          <div className="border-t pt-2 mt-2">
+            <h5 className="text-[10px] font-medium text-muted-foreground mb-1.5 flex items-center gap-1">
+              <Cpu className="w-3 h-3" /> V8 엔진 통계
+            </h5>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[10px]">
+              <div className="bg-muted/50 rounded p-1.5">
+                <span className="text-muted-foreground">Heap 한도</span>
+                <p className="font-mono font-medium">{breakdown.heapStats.heapSizeLimit}</p>
+              </div>
+              <div className="bg-muted/50 rounded p-1.5">
+                <span className="text-muted-foreground">Malloc 메모리</span>
+                <p className="font-mono font-medium">{breakdown.heapStats.mallocedMemory}</p>
+              </div>
+              <div className="bg-muted/50 rounded p-1.5">
+                <span className="text-muted-foreground">Peak Malloc</span>
+                <p className="font-mono font-medium">{breakdown.heapStats.peakMallocedMemory}</p>
+              </div>
+              <div className="bg-muted/50 rounded p-1.5">
+                <span className="text-muted-foreground">Native Context</span>
+                <p className="font-mono font-medium">{breakdown.heapStats.numberOfNativeContexts}개</p>
+              </div>
+            </div>
+            {breakdown.heapStats.numberOfDetachedContexts > 0 && (
+              <p className="text-[10px] text-yellow-500 mt-1 flex items-center gap-1">
+                <AlertTriangle className="w-3 h-3" />
+                Detached Context {breakdown.heapStats.numberOfDetachedContexts}개 감지 (메모리 누수 가능성)
+              </p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

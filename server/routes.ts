@@ -11320,10 +11320,91 @@ ${etfListStr}
         };
       }
 
+      // V8 힙 스페이스별 메모리 분석
+      function getMemoryBreakdown() {
+        const v8 = require("v8");
+        const m = process.memoryUsage();
+        const heapSpaces: { name: string; size: number; used: number; available: number; physicalSize: number }[] = v8.getHeapSpaceStatistics();
+        
+        // 프로세스별 메모리 분류 (Top 10)
+        const breakdown: { name: string; sizeBytes: number; sizeFormatted: string; percent: string; category: string }[] = [];
+        
+        // V8 힙 스페이스별 메모리
+        for (const space of heapSpaces) {
+          if (space.space_used_size > 0) {
+            breakdown.push({
+              name: space.space_name.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase()),
+              sizeBytes: space.space_used_size,
+              sizeFormatted: `${(space.space_used_size / 1024 / 1024).toFixed(2)} MB`,
+              percent: `${((space.space_used_size / m.rss) * 100).toFixed(1)}%`,
+              category: "V8 Heap",
+            });
+          }
+        }
+        
+        // V8 Heap 외 메모리 영역
+        const totalHeapUsed = heapSpaces.reduce((sum: number, s: any) => sum + s.space_used_size, 0);
+        
+        // External (C++ 바인딩 메모리)
+        if (m.external > 0) {
+          breakdown.push({
+            name: "External (C++ Bindings)",
+            sizeBytes: m.external,
+            sizeFormatted: `${(m.external / 1024 / 1024).toFixed(2)} MB`,
+            percent: `${((m.external / m.rss) * 100).toFixed(1)}%`,
+            category: "Non-Heap",
+          });
+        }
+        
+        // ArrayBuffers
+        if (m.arrayBuffers > 0) {
+          breakdown.push({
+            name: "ArrayBuffers",
+            sizeBytes: m.arrayBuffers,
+            sizeFormatted: `${(m.arrayBuffers / 1024 / 1024).toFixed(2)} MB`,
+            percent: `${((m.arrayBuffers / m.rss) * 100).toFixed(1)}%`,
+            category: "Non-Heap",
+          });
+        }
+        
+        // RSS 중 힙 외 영역 (네이티브 코드, 스택, OS 할당 등)
+        const nonHeap = m.rss - m.heapTotal - m.external;
+        if (nonHeap > 0) {
+          breakdown.push({
+            name: "Native Code + Stack + OS",
+            sizeBytes: nonHeap,
+            sizeFormatted: `${(nonHeap / 1024 / 1024).toFixed(2)} MB`,
+            percent: `${((nonHeap / m.rss) * 100).toFixed(1)}%`,
+            category: "Non-Heap",
+          });
+        }
+        
+        // V8 힙 통계
+        const heapStats = v8.getHeapStatistics();
+        
+        // 크기 순으로 정렬 후 Top 10
+        breakdown.sort((a, b) => b.sizeBytes - a.sizeBytes);
+        
+        return {
+          items: breakdown.slice(0, 10),
+          totalRss: m.rss,
+          totalRssFormatted: `${(m.rss / 1024 / 1024).toFixed(1)} MB`,
+          heapStats: {
+            totalHeapSize: `${(heapStats.total_heap_size / 1024 / 1024).toFixed(1)} MB`,
+            usedHeapSize: `${(heapStats.used_heap_size / 1024 / 1024).toFixed(1)} MB`,
+            heapSizeLimit: `${(heapStats.heap_size_limit / 1024 / 1024).toFixed(0)} MB`,
+            mallocedMemory: `${(heapStats.malloced_memory / 1024 / 1024).toFixed(2)} MB`,
+            peakMallocedMemory: `${(heapStats.peak_malloced_memory / 1024 / 1024).toFixed(2)} MB`,
+            numberOfNativeContexts: heapStats.number_of_native_contexts,
+            numberOfDetachedContexts: heapStats.number_of_detached_contexts,
+          },
+        };
+      }
+
       // 캐시 히트 시 즉시 반환 (메모리 정보만 실시간 갱신)
       if (systemStatusCache && now < systemStatusCache.expiry) {
         const cached = { ...systemStatusCache.data };
-        cached.server = { ...cached.server, uptime: process.uptime(), memory: getMemoryInfo() };
+        cached.server = { ...cached.server, uptime: process.uptime(), memory: getMemoryInfo(), memoryBreakdown: getMemoryBreakdown() };
         cached.timestamp = new Date().toISOString();
         cached.performance = { ...cached.performance, totalCheckTimeMs: Date.now() - startTime };
         cached._cached = true;
@@ -11357,6 +11438,7 @@ ${etfListStr}
         uptime: process.uptime(),
         pid: process.pid,
         memory: getMemoryInfo(),
+        memoryBreakdown: getMemoryBreakdown(),
         cpuUsage: process.cpuUsage(),
         isVercel: !!process.env.VERCEL,
         vercelRegion: process.env.VERCEL_REGION || "unknown",
