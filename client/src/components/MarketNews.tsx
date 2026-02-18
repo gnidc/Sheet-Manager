@@ -1,7 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { StatusBadge } from "@/components/StatusBadge";
 import {
   Loader2,
   RefreshCw,
@@ -9,7 +8,6 @@ import {
   ExternalLink,
   Clock,
   AlertCircle,
-  TrendingUp,
   Flame,
 } from "lucide-react";
 
@@ -51,21 +49,21 @@ export default function MarketNews() {
 
   if (isLoading && !data) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 gap-4">
-        <Loader2 className="w-10 h-10 animate-spin text-primary" />
-        <p className="text-muted-foreground">네이버 금융 주요뉴스를 가져오고 있습니다...</p>
+      <div className="flex flex-col items-center justify-center py-16 gap-3">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        <p className="text-sm text-muted-foreground">주요뉴스를 가져오고 있습니다...</p>
       </div>
     );
   }
 
   if (error && !data) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 gap-4">
-        <AlertCircle className="w-10 h-10 text-destructive" />
-        <p className="text-muted-foreground">
+      <div className="flex flex-col items-center justify-center py-16 gap-3">
+        <AlertCircle className="w-8 h-8 text-destructive" />
+        <p className="text-sm text-muted-foreground">
           {error?.message || "뉴스를 불러올 수 없습니다."}
         </p>
-        <Button variant="outline" onClick={() => refetch()}>
+        <Button variant="outline" size="sm" onClick={() => refetch()}>
           재시도
         </Button>
       </div>
@@ -73,47 +71,38 @@ export default function MarketNews() {
   }
 
   return (
-    <div className="space-y-6">
+    <Card className="overflow-hidden">
       {/* 헤더 */}
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Flame className="w-5 h-5 text-orange-500" />
-              주요뉴스 (많이 본 뉴스)
-            </CardTitle>
-            <div className="flex items-center gap-3">
-              {data?.updatedAt && (
-                <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                  <Clock className="w-3 h-3" />
-                  <span>{data.updatedAt} 기준</span>
-                </div>
-              )}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => refetch()}
-                disabled={isFetching}
-                className="gap-2"
-              >
-                {isFetching ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="w-4 h-4" />
-                )}
-                새로고침
-              </Button>
-            </div>
-          </div>
-          <p className="text-xs text-muted-foreground mt-1">
-            네이버 금융 많이 본 뉴스에서 중요도 순으로 정렬하여 보여드립니다
-          </p>
-        </CardHeader>
-      </Card>
+      <div className="flex items-center justify-between px-4 py-2.5 bg-muted/30 border-b">
+        <div className="flex items-center gap-2">
+          <Flame className="w-4 h-4 text-orange-500" />
+          <h3 className="font-semibold text-sm">주요뉴스</h3>
+          <span className="text-[11px] text-muted-foreground">(많이 본 뉴스)</span>
+          {isFetching && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
+        </div>
+        <div className="flex items-center gap-2">
+          {data?.updatedAt && (
+            <span className="text-[11px] text-muted-foreground hidden sm:flex items-center gap-1">
+              <Clock className="w-3 h-3" />
+              {data.updatedAt}
+            </span>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="h-7 px-2 text-xs gap-1"
+          >
+            {isFetching ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+            새로고침
+          </Button>
+        </div>
+      </div>
 
       {/* 뉴스 리스트 */}
       {data?.news && data.news.length > 0 ? (
-        <div className="space-y-3">
+        <div className="divide-y">
           {data.news.map((item, index) => {
             const isTop3 = index < 3;
             const isTop5 = index < 5;
@@ -124,64 +113,56 @@ export default function MarketNews() {
                 href={item.link}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="block group"
+                className="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/40 transition-colors group"
               >
-                <Card className={`overflow-hidden transition-all duration-200 hover:shadow-md hover:border-primary/30 ${isTop3 ? "border-l-4 border-l-orange-500" : isTop5 ? "border-l-4 border-l-primary/50" : ""}`}>
-                  <CardContent className="p-4">
-                    <div className="flex items-start gap-4">
-                      {/* 순위 번호 */}
-                      <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
-                        isTop3
-                          ? "bg-orange-500 text-white"
-                          : isTop5
-                          ? "bg-primary/80 text-primary-foreground"
-                          : "bg-muted text-muted-foreground"
-                      }`}>
-                        {index + 1}
-                      </div>
+                {/* 순위 */}
+                <span className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold ${
+                  isTop3
+                    ? "bg-orange-500 text-white"
+                    : isTop5
+                    ? "bg-primary/70 text-primary-foreground"
+                    : "bg-muted text-muted-foreground"
+                }`}>
+                  {index + 1}
+                </span>
 
-                      {/* 본문 */}
-                      <div className="flex-1 min-w-0 space-y-2">
-                        <h3 className={`font-semibold leading-snug group-hover:text-primary transition-colors line-clamp-2 ${
-                          isTop3 ? "text-base" : "text-sm"
-                        }`}>
-                          {item.title}
-                        </h3>
+                {/* 제목 + 메타 */}
+                <div className="flex-1 min-w-0">
+                  <p className={`truncate group-hover:text-primary transition-colors ${
+                    isTop3 ? "text-sm font-semibold" : "text-sm font-medium"
+                  }`}>
+                    {item.title}
+                  </p>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    {item.source && (
+                      <span className="text-[11px] text-muted-foreground">{item.source}</span>
+                    )}
+                    {item.source && item.time && <span className="text-muted-foreground/40 text-[10px]">·</span>}
+                    {item.time && (
+                      <span className="text-[11px] text-muted-foreground">{item.time}</span>
+                    )}
+                  </div>
+                </div>
 
-                        <div className="flex items-center gap-2 flex-wrap">
-                          {item.source && (
-                            <span className="text-xs text-muted-foreground font-medium">{item.source}</span>
-                          )}
-                          {item.time && (
-                            <span className="text-xs text-muted-foreground">
-                              <Clock className="w-3 h-3 inline mr-0.5" />
-                              {item.time}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      <ExternalLink className="w-4 h-4 text-muted-foreground flex-shrink-0 mt-1 opacity-0 group-hover:opacity-100 transition-opacity" />
-                    </div>
-                  </CardContent>
-                </Card>
+                <ExternalLink className="w-3.5 h-3.5 text-muted-foreground/30 flex-shrink-0 group-hover:text-primary/60 transition-colors" />
               </a>
             );
           })}
         </div>
       ) : (
-        <Card>
-          <CardContent className="py-12 text-center">
-            <Newspaper className="w-12 h-12 mx-auto text-muted-foreground/30 mb-4" />
-            <h3 className="text-lg font-semibold">뉴스가 없습니다</h3>
-            <p className="text-sm text-muted-foreground mt-1">잠시 후 다시 시도해주세요.</p>
-          </CardContent>
-        </Card>
+        <CardContent className="py-12 text-center">
+          <Newspaper className="w-10 h-10 mx-auto text-muted-foreground/20 mb-3" />
+          <p className="text-sm font-medium text-muted-foreground">뉴스가 없습니다</p>
+          <p className="text-xs text-muted-foreground mt-1">잠시 후 다시 시도해주세요.</p>
+        </CardContent>
       )}
 
-      <p className="text-xs text-muted-foreground text-center py-2">
-        데이터 출처: 네이버 금융 (많이 본 뉴스) | 실제 투자 판단은 직접 확인 후 결정해주세요
-      </p>
-    </div>
+      {/* 푸터 */}
+      <div className="px-4 py-1.5 border-t bg-muted/20">
+        <p className="text-[10px] text-muted-foreground text-center">
+          출처: 네이버 금융 (많이 본 뉴스) · 실제 투자 판단은 직접 확인 후 결정해주세요
+        </p>
+      </div>
+    </Card>
   );
 }
