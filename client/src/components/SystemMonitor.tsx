@@ -67,7 +67,7 @@ interface MemoryBreakdown {
     peakMallocedMemory: string;
     numberOfNativeContexts: number;
     numberOfDetachedContexts: number;
-  };
+  } | null;
 }
 
 interface SystemStatus {
@@ -771,7 +771,8 @@ function MemoryBreakdownPanel({ breakdown }: { breakdown: MemoryBreakdown }) {
     "bg-cyan-500", "bg-yellow-500", "bg-pink-500", "bg-indigo-500", "bg-lime-500",
   ];
 
-  const maxSize = breakdown.items.length > 0 ? breakdown.items[0].sizeBytes : 1;
+  const items = breakdown.items || [];
+  const maxSize = items.length > 0 ? items[0].sizeBytes : 1;
 
   return (
     <div className="mt-4 border rounded-lg">
@@ -792,7 +793,7 @@ function MemoryBreakdownPanel({ breakdown }: { breakdown: MemoryBreakdown }) {
         <div className="px-3 pb-3 space-y-3">
           {/* 메모리 영역별 막대 그래프 */}
           <div className="space-y-1.5">
-            {breakdown.items.map((item, idx) => {
+            {items.map((item, idx) => {
               const pct = (item.sizeBytes / breakdown.totalRss) * 100;
               const barWidth = (item.sizeBytes / maxSize) * 100;
               return (
@@ -824,35 +825,44 @@ function MemoryBreakdownPanel({ breakdown }: { breakdown: MemoryBreakdown }) {
           </div>
 
           {/* V8 힙 통계 요약 */}
-          <div className="border-t pt-2 mt-2">
-            <h5 className="text-[10px] font-medium text-muted-foreground mb-1.5 flex items-center gap-1">
-              <Cpu className="w-3 h-3" /> V8 엔진 통계
-            </h5>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[10px]">
-              <div className="bg-muted/50 rounded p-1.5">
-                <span className="text-muted-foreground">Heap 한도</span>
-                <p className="font-mono font-medium">{breakdown.heapStats.heapSizeLimit}</p>
+          {breakdown.heapStats ? (
+            <div className="border-t pt-2 mt-2">
+              <h5 className="text-[10px] font-medium text-muted-foreground mb-1.5 flex items-center gap-1">
+                <Cpu className="w-3 h-3" /> V8 엔진 통계
+              </h5>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[10px]">
+                <div className="bg-muted/50 rounded p-1.5">
+                  <span className="text-muted-foreground">Heap 한도</span>
+                  <p className="font-mono font-medium">{breakdown.heapStats.heapSizeLimit}</p>
+                </div>
+                <div className="bg-muted/50 rounded p-1.5">
+                  <span className="text-muted-foreground">Malloc 메모리</span>
+                  <p className="font-mono font-medium">{breakdown.heapStats.mallocedMemory}</p>
+                </div>
+                <div className="bg-muted/50 rounded p-1.5">
+                  <span className="text-muted-foreground">Peak Malloc</span>
+                  <p className="font-mono font-medium">{breakdown.heapStats.peakMallocedMemory}</p>
+                </div>
+                <div className="bg-muted/50 rounded p-1.5">
+                  <span className="text-muted-foreground">Native Context</span>
+                  <p className="font-mono font-medium">{breakdown.heapStats.numberOfNativeContexts}개</p>
+                </div>
               </div>
-              <div className="bg-muted/50 rounded p-1.5">
-                <span className="text-muted-foreground">Malloc 메모리</span>
-                <p className="font-mono font-medium">{breakdown.heapStats.mallocedMemory}</p>
-              </div>
-              <div className="bg-muted/50 rounded p-1.5">
-                <span className="text-muted-foreground">Peak Malloc</span>
-                <p className="font-mono font-medium">{breakdown.heapStats.peakMallocedMemory}</p>
-              </div>
-              <div className="bg-muted/50 rounded p-1.5">
-                <span className="text-muted-foreground">Native Context</span>
-                <p className="font-mono font-medium">{breakdown.heapStats.numberOfNativeContexts}개</p>
-              </div>
+              {breakdown.heapStats.numberOfDetachedContexts > 0 && (
+                <p className="text-[10px] text-yellow-500 mt-1 flex items-center gap-1">
+                  <AlertTriangle className="w-3 h-3" />
+                  Detached Context {breakdown.heapStats.numberOfDetachedContexts}개 감지 (메모리 누수 가능성)
+                </p>
+              )}
             </div>
-            {breakdown.heapStats.numberOfDetachedContexts > 0 && (
-              <p className="text-[10px] text-yellow-500 mt-1 flex items-center gap-1">
-                <AlertTriangle className="w-3 h-3" />
-                Detached Context {breakdown.heapStats.numberOfDetachedContexts}개 감지 (메모리 누수 가능성)
+          ) : (
+            <div className="border-t pt-2 mt-2">
+              <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+                <AlertTriangle className="w-3 h-3 text-yellow-500" />
+                V8 상세 통계를 사용할 수 없는 환경입니다 (ESM/Serverless)
               </p>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       )}
     </div>
