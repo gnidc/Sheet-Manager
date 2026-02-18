@@ -7055,14 +7055,16 @@ ${newsSummary}`;
   // ===== 공개 카페 글 목록 (인증 불필요 - 일반 유저용) =====
   // 최신 3개 글만 가져옴 (공지글 수집 로직 제거 - 성능 최적화)
   // 서버 사이드 캐시: 2분 TTL (네이버 API 반복 호출 방지)
-  let publicArticlesCache: { data: any; expiry: number } | null = null;
+  let publicArticlesCache: { data: any; expiry: number; key?: string } | null = null;
   const PUBLIC_ARTICLES_CACHE_TTL = 2 * 60 * 1000; // 2분
 
   app.get("/api/cafe/public-articles", async (req, res) => {
     try {
+      const perPage = Math.min(Math.max(parseInt(req.query.perPage as string) || 5, 1), 10);
       // 캐시 히트: 2분 이내 동일 요청 시 즉시 반환
+      const cacheKey = `public-${perPage}`;
       const now = Date.now();
-      if (publicArticlesCache && now < publicArticlesCache.expiry) {
+      if (publicArticlesCache && publicArticlesCache.key === cacheKey && now < publicArticlesCache.expiry) {
         return res.json(publicArticlesCache.data);
       }
 
@@ -7073,7 +7075,7 @@ ${newsSummary}`;
             "search.clubid": CAFE_ID,
             "search.boardtype": "L",
             "search.page": 1,
-            "search.perPage": 3,
+            "search.perPage": perPage,
           },
           headers: CAFE_HEADERS,
           timeout: 10000,
@@ -7094,7 +7096,7 @@ ${newsSummary}`;
       }));
 
       const responseData = { latestArticles };
-      publicArticlesCache = { data: responseData, expiry: now + PUBLIC_ARTICLES_CACHE_TTL };
+      publicArticlesCache = { data: responseData, expiry: now + PUBLIC_ARTICLES_CACHE_TTL, key: cacheKey };
 
       return res.json(responseData);
     } catch (error: any) {

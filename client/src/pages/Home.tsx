@@ -1091,24 +1091,26 @@ function MarketsView({ type }: { type: "domestic" | "global" | "etc" | "calendar
   );
 }
 
-// ===== 일반 유저용 공개 카페 글 목록 (검색 포함) =====
+// ===== 일반 유저용 공개 카페 글 목록 (버튼 클릭 시 로딩) =====
 function PublicCafeView() {
+  const [showArticles, setShowArticles] = useState(false);
   const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchMode, setIsSearchMode] = useState(false);
   const [searchPage, setSearchPage] = useState(1);
 
-  const { data, isLoading } = useQuery<{
+  const { data, isLoading, isFetching } = useQuery<{
     latestArticles: CafeArticle[];
   }>({
-    queryKey: ["/api/cafe/public-articles"],
+    queryKey: ["/api/cafe/public-articles", { perPage: 5 }],
     queryFn: async () => {
-      const res = await fetch("/api/cafe/public-articles");
+      const res = await fetch("/api/cafe/public-articles?perPage=5");
       if (!res.ok) throw new Error("카페 글 목록을 불러올 수 없습니다.");
       return res.json();
     },
-    staleTime: 5 * 60 * 1000, // 5분 (서버 캐시 2분과 조합하여 불필요한 재요청 방지)
-    gcTime: 10 * 60 * 1000, // 10분간 가비지컬렉션 방지
+    enabled: showArticles, // 버튼 클릭 시에만 로딩
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
   });
 
   // 검색 쿼리
@@ -1127,7 +1129,6 @@ function PublicCafeView() {
     staleTime: 60 * 1000,
   });
 
-  // 서버에서 최신 3개만 가져오므로 추가 필터링 불필요
   const latestArticles = data?.latestArticles || [];
   const searchArticles = searchData?.articles || [];
   const searchTotalArticles = searchData?.totalArticles || 0;
@@ -1159,27 +1160,34 @@ function PublicCafeView() {
     setSearchPage(1);
   };
 
-  if (isLoading) {
-    return (
-      <div className="py-20 text-center">
-          <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-2" />
-          <p className="text-sm text-muted-foreground">카페 글 목록 로딩 중...</p>
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-6">
-      {/* 헤더 */}
-      <div className="overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3 border-b bg-muted/30">
+    <div className="space-y-4">
+      {/* 카페 최신글 버튼 */}
+      <div className="overflow-hidden rounded-lg border">
+        <div className="flex items-center justify-between px-4 py-2.5 bg-muted/30">
           <div className="flex items-center gap-2">
             <img
               src="https://ssl.pstatic.net/static/cafe/cafe_pc/default/cafe_logo_img.png"
               alt="카페"
               className="w-5 h-5"
             />
-            <h3 className="font-semibold text-sm">Life Fitness 카페</h3>
+            <Button
+              variant={showArticles ? "default" : "outline"}
+              size="sm"
+              className="gap-1.5 text-xs h-7"
+              onClick={() => setShowArticles(!showArticles)}
+              disabled={isLoading}
+            >
+              {isLoading ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : (
+                <Newspaper className="w-3 h-3" />
+              )}
+              카페 최신글(5개)
+              {showArticles && !isLoading && <span className="text-[10px] opacity-60">▲</span>}
+              {!showArticles && <span className="text-[10px] opacity-60">▼</span>}
+            </Button>
+            {isFetching && showArticles && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
           </div>
           <Button
             variant="outline"
@@ -1192,183 +1200,185 @@ function PublicCafeView() {
           </Button>
         </div>
 
-        {/* 검색바 */}
-        <div className="px-4 py-2 border-b bg-muted/10">
-          <div className="flex gap-2">
-            <div className="relative flex-1">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-              <Input
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-                placeholder="카페 글 검색..."
-                className="h-8 pl-8 text-sm"
-              />
-              {searchInput && (
-                <button
-                  onClick={clearSearch}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-            <Button size="sm" onClick={handleSearch} disabled={!searchInput.trim()} className="h-8 text-xs gap-1">
-              <Search className="w-3 h-3" />
-              검색
-            </Button>
-          </div>
-        </div>
-
-        {/* 검색 모드 */}
-        {isSearchMode && (
+        {/* 펼쳐진 상태: 검색바 + 글 목록 */}
+        {showArticles && (
           <>
-            <div className="px-4 py-2 border-b bg-primary/5">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">
-                  "{searchQuery}" 검색결과: {searchTotalArticles}건
-                  {isSearching && <Loader2 className="w-3 h-3 animate-spin inline ml-1" />}
-                </span>
-                <Button variant="ghost" size="sm" onClick={clearSearch} className="h-6 text-xs gap-1">
-                  <X className="w-3 h-3" />
-                  검색 해제
+            {/* 검색바 */}
+            <div className="px-4 py-2 border-t bg-muted/10">
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                  <Input
+                    value={searchInput}
+                    onChange={(e) => setSearchInput(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                    placeholder="카페 글 검색..."
+                    className="h-8 pl-8 text-sm"
+                  />
+                  {searchInput && (
+                    <button
+                      onClick={clearSearch}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+                <Button size="sm" onClick={handleSearch} disabled={!searchInput.trim()} className="h-8 text-xs gap-1">
+                  <Search className="w-3 h-3" />
+                  검색
                 </Button>
               </div>
             </div>
-            <div className="divide-y">
-              {isSearching ? (
-                <div className="py-12 text-center">
-                  <Loader2 className="w-6 h-6 animate-spin text-primary mx-auto mb-2" />
-                  <p className="text-xs text-muted-foreground">검색 중...</p>
-                </div>
-              ) : searchArticles.length === 0 ? (
-                <div className="py-12 text-center text-muted-foreground text-sm">
-                  검색 결과가 없습니다.
-                </div>
-              ) : (
-                searchArticles.map((article) => (
-                  <a
-                    key={article.articleId}
-                    href={`${CAFE_URL}/${article.articleId}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/30 transition-colors group"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium truncate group-hover:text-primary transition-colors">
-                          {article.subject}
-                        </span>
-                        {article.commentCount > 0 && (
-                          <span className="text-xs text-primary font-bold flex-shrink-0">[{article.commentCount}]</span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-0.5">
-                        <span className="text-blue-500/70 font-medium">{article.menuName}</span>
-                        <span className="opacity-40">|</span>
-                        <span>{article.writerNickname}</span>
-                        <span className="opacity-40">|</span>
-                        <span>👁 {article.readCount}</span>
-                        {article.likeItCount > 0 && (
-                          <>
-                            <span className="opacity-40">|</span>
-                            <span>❤️ {article.likeItCount}</span>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                    <span className="text-xs text-muted-foreground flex-shrink-0 tabular-nums">
-                      {formatDate(article.writeDateTimestamp)}
+
+            {/* 검색 모드 */}
+            {isSearchMode && (
+              <>
+                <div className="px-4 py-2 border-t bg-primary/5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">
+                      "{searchQuery}" 검색결과: {searchTotalArticles}건
+                      {isSearching && <Loader2 className="w-3 h-3 animate-spin inline ml-1" />}
                     </span>
-                  </a>
-                ))
-              )}
-            </div>
-            {/* 검색 페이지네이션 */}
-            {searchTotalPages > 1 && (
-              <div className="flex items-center justify-center gap-1 py-3 border-t bg-muted/20">
-                <Button variant="ghost" size="sm" disabled={searchPage <= 1} onClick={() => setSearchPage(1)} className="h-8 w-8 p-0 text-xs">«</Button>
-                <Button variant="ghost" size="sm" disabled={searchPage <= 1} onClick={() => setSearchPage((p) => Math.max(1, p - 1))} className="h-8 w-8 p-0 text-xs">
-                  <ChevronLeft className="w-4 h-4" />
-                </Button>
-                {Array.from({ length: Math.min(5, searchTotalPages) }, (_, i) => {
-                  const startPage = Math.max(1, Math.min(searchPage - 2, searchTotalPages - 4));
-                  const p = startPage + i;
-                  if (p > searchTotalPages) return null;
-                  return (
-                    <Button key={p} variant={p === searchPage ? "default" : "ghost"} size="sm" onClick={() => setSearchPage(p)} className="h-8 w-8 p-0 text-xs">{p}</Button>
-                  );
-                })}
-                <Button variant="ghost" size="sm" disabled={searchPage >= searchTotalPages} onClick={() => setSearchPage((p) => Math.min(searchTotalPages, p + 1))} className="h-8 w-8 p-0 text-xs">
-                  <ChevronRight className="w-4 h-4" />
-                </Button>
-                <Button variant="ghost" size="sm" disabled={searchPage >= searchTotalPages} onClick={() => setSearchPage(searchTotalPages)} className="h-8 w-8 p-0 text-xs">»</Button>
-              </div>
+                    <Button variant="ghost" size="sm" onClick={clearSearch} className="h-6 text-xs gap-1">
+                      <X className="w-3 h-3" />
+                      검색 해제
+                    </Button>
+                  </div>
+                </div>
+                <div className="divide-y">
+                  {isSearching ? (
+                    <div className="py-12 text-center">
+                      <Loader2 className="w-6 h-6 animate-spin text-primary mx-auto mb-2" />
+                      <p className="text-xs text-muted-foreground">검색 중...</p>
+                    </div>
+                  ) : searchArticles.length === 0 ? (
+                    <div className="py-12 text-center text-muted-foreground text-sm">
+                      검색 결과가 없습니다.
+                    </div>
+                  ) : (
+                    searchArticles.map((article) => (
+                      <a
+                        key={article.articleId}
+                        href={`${CAFE_URL}/${article.articleId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/30 transition-colors group"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium truncate group-hover:text-primary transition-colors">
+                              {article.subject}
+                            </span>
+                            {article.commentCount > 0 && (
+                              <span className="text-xs text-primary font-bold flex-shrink-0">[{article.commentCount}]</span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-0.5">
+                            <span className="text-blue-500/70 font-medium">{article.menuName}</span>
+                            <span className="opacity-40">|</span>
+                            <span>{article.writerNickname}</span>
+                            <span className="opacity-40">|</span>
+                            <span>👁 {article.readCount}</span>
+                            {article.likeItCount > 0 && (
+                              <>
+                                <span className="opacity-40">|</span>
+                                <span>❤️ {article.likeItCount}</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        <span className="text-xs text-muted-foreground flex-shrink-0 tabular-nums">
+                          {formatDate(article.writeDateTimestamp)}
+                        </span>
+                      </a>
+                    ))
+                  )}
+                </div>
+                {/* 검색 페이지네이션 */}
+                {searchTotalPages > 1 && (
+                  <div className="flex items-center justify-center gap-1 py-3 border-t bg-muted/20">
+                    <Button variant="ghost" size="sm" disabled={searchPage <= 1} onClick={() => setSearchPage(1)} className="h-8 w-8 p-0 text-xs">«</Button>
+                    <Button variant="ghost" size="sm" disabled={searchPage <= 1} onClick={() => setSearchPage((p) => Math.max(1, p - 1))} className="h-8 w-8 p-0 text-xs">
+                      <ChevronLeft className="w-4 h-4" />
+                    </Button>
+                    {Array.from({ length: Math.min(5, searchTotalPages) }, (_, i) => {
+                      const startPage = Math.max(1, Math.min(searchPage - 2, searchTotalPages - 4));
+                      const p = startPage + i;
+                      if (p > searchTotalPages) return null;
+                      return (
+                        <Button key={p} variant={p === searchPage ? "default" : "ghost"} size="sm" onClick={() => setSearchPage(p)} className="h-8 w-8 p-0 text-xs">{p}</Button>
+                      );
+                    })}
+                    <Button variant="ghost" size="sm" disabled={searchPage >= searchTotalPages} onClick={() => setSearchPage((p) => Math.min(searchTotalPages, p + 1))} className="h-8 w-8 p-0 text-xs">
+                      <ChevronRight className="w-4 h-4" />
+                    </Button>
+                    <Button variant="ghost" size="sm" disabled={searchPage >= searchTotalPages} onClick={() => setSearchPage(searchTotalPages)} className="h-8 w-8 p-0 text-xs">»</Button>
+                  </div>
+                )}
+              </>
             )}
-          </>
-        )}
 
-        {/* 최신 3개 글 (검색 모드가 아닐 때만) */}
-        {!isSearchMode && (
-          <>
-            <div className="px-4 pt-3 pb-1">
-              <h4 className="text-sm font-semibold flex items-center gap-1.5 mb-2">
-                <FileText className="w-4 h-4 text-primary" />
-                최신글 <span className="text-xs text-muted-foreground font-normal">({latestArticles.length}건)</span>
-              </h4>
-            </div>
-            {latestArticles.length === 0 ? (
-              <CardContent className="py-8 text-center text-muted-foreground">
-                <p className="text-sm">글 목록을 불러올 수 없습니다.</p>
-              </CardContent>
-            ) : (
-              <div className="divide-y">
-                {latestArticles.map((article) => (
-                  <a
-                    key={article.articleId}
-                    href={`${CAFE_URL}/${article.articleId}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/30 transition-colors group"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium truncate group-hover:text-primary transition-colors">
-                          {article.subject}
-                        </span>
-                        {article.newArticle && (
-                          <span className="text-[10px] px-1 py-0 rounded bg-red-500 text-white font-bold flex-shrink-0">N</span>
-                        )}
-                        {article.commentCount > 0 && (
-                          <span className="text-xs text-primary font-bold flex-shrink-0">[{article.commentCount}]</span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-0.5">
-                        <span className="text-blue-500/70 font-medium">{article.menuName}</span>
-                        <span className="opacity-40">|</span>
-                        <span>{article.writerNickname}</span>
-                        <span className="opacity-40">|</span>
-                        <span>👁 {article.readCount}</span>
-                        {article.likeItCount > 0 && (
-                          <>
+            {/* 최신 5개 글 (검색 모드가 아닐 때만) */}
+            {!isSearchMode && (
+              <>
+                {isLoading ? (
+                  <div className="py-8 text-center">
+                    <Loader2 className="w-6 h-6 animate-spin text-primary mx-auto mb-2" />
+                    <p className="text-xs text-muted-foreground">카페 글 로딩 중...</p>
+                  </div>
+                ) : latestArticles.length === 0 ? (
+                  <CardContent className="py-8 text-center text-muted-foreground">
+                    <p className="text-sm">글 목록을 불러올 수 없습니다.</p>
+                  </CardContent>
+                ) : (
+                  <div className="divide-y">
+                    {latestArticles.map((article) => (
+                      <a
+                        key={article.articleId}
+                        href={`${CAFE_URL}/${article.articleId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/30 transition-colors group"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium truncate group-hover:text-primary transition-colors">
+                              {article.subject}
+                            </span>
+                            {article.newArticle && (
+                              <span className="text-[10px] px-1 py-0 rounded bg-red-500 text-white font-bold flex-shrink-0">N</span>
+                            )}
+                            {article.commentCount > 0 && (
+                              <span className="text-xs text-primary font-bold flex-shrink-0">[{article.commentCount}]</span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-0.5">
+                            <span className="text-blue-500/70 font-medium">{article.menuName}</span>
                             <span className="opacity-40">|</span>
-                            <span>❤️ {article.likeItCount}</span>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                    <span className="text-xs text-muted-foreground flex-shrink-0 tabular-nums">
-                      {formatDate(article.writeDateTimestamp)}
-                    </span>
-                  </a>
-                ))}
-              </div>
+                            <span>{article.writerNickname}</span>
+                            <span className="opacity-40">|</span>
+                            <span>👁 {article.readCount}</span>
+                            {article.likeItCount > 0 && (
+                              <>
+                                <span className="opacity-40">|</span>
+                                <span>❤️ {article.likeItCount}</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        <span className="text-xs text-muted-foreground flex-shrink-0 tabular-nums">
+                          {formatDate(article.writeDateTimestamp)}
+                        </span>
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </>
         )}
       </div>
-
-      {/* 전체 공지글은 일반계정에서 표시하지 않음 */}
     </div>
   );
 }
@@ -1675,22 +1685,23 @@ function HomeEmbed({ onNavigate }: { onNavigate: (tab: string) => void }) {
     },
   });
 
-  // 최신 3개 글만 조회 (성능 최적화)
+  // 최신 5개 글 조회 (버튼 클릭 시에만)
+  const [showCafeArticles, setShowCafeArticles] = useState(false);
   const { data, isLoading, isFetching } = useQuery<{
     articles: CafeArticle[];
     page: number;
     perPage: number;
     totalArticles: number;
   }>({
-    queryKey: ["/api/cafe/articles", 1],
+    queryKey: ["/api/cafe/articles", 1, 5],
     queryFn: async () => {
-      const params = new URLSearchParams({ page: "1", perPage: "3" });
+      const params = new URLSearchParams({ page: "1", perPage: "5" });
       const res = await fetch(`/api/cafe/articles?${params}`, { credentials: "include" });
       if (!res.ok) throw new Error("카페 글 목록을 불러올 수 없습니다.");
       return res.json();
     },
-    enabled: isAdmin && !isSearchMode,
-    staleTime: 5 * 60 * 1000, // 5분 (서버 캐시 2분과 조합)
+    enabled: isAdmin && showCafeArticles && !isSearchMode,
+    staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
   });
 
@@ -1814,13 +1825,18 @@ function HomeEmbed({ onNavigate }: { onNavigate: (tab: string) => void }) {
     writeMutation.mutate({ subject: writeSubject, content: writeContent, menuId: writeMenuId });
   };
 
-  // 일반 유저: 공개 카페 글 목록 (최신 10개 + 전체 공지글)
+  // 일반 유저: 공개 카페 글 목록 + 주요뉴스
   if (!isAdmin) {
     return (
       <>
         <NoticeBoard />
         <QuickLinks onNavigate={onNavigate} />
         <PublicCafeView />
+        <div className="mt-4">
+          <Suspense fallback={<div className="py-10 text-center"><Loader2 className="w-6 h-6 animate-spin text-primary mx-auto" /></div>}>
+            <MarketNews />
+          </Suspense>
+        </div>
       </>
     );
   }
@@ -1864,32 +1880,35 @@ function HomeEmbed({ onNavigate }: { onNavigate: (tab: string) => void }) {
     if (isSearchMode) clearSearch();
   };
 
-  if (isLoading && !isSearchMode) {
-  return (
-      <div className="py-20 text-center">
-          <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-2" />
-          <p className="text-sm text-muted-foreground">카페 글 목록 로딩 중...</p>
-      </div>
-    );
-  }
-
   return (
     <>
       <NoticeBoard />
       <QuickLinks onNavigate={onNavigate} />
-      <div className="overflow-hidden">
+      <div className="overflow-hidden rounded-lg border mb-4">
         {/* 헤더 */}
-        <div className="flex items-center justify-between px-4 py-3 border-b bg-muted/30">
+        <div className="flex items-center justify-between px-4 py-2.5 bg-muted/30">
           <div className="flex items-center gap-2">
             <img
               src="https://ssl.pstatic.net/static/cafe/cafe_pc/default/cafe_logo_img.png"
               alt="카페"
               className="w-5 h-5"
             />
-            <h3 className="font-semibold text-sm">Life Fitness</h3>
-            {!isSearchMode && (
-              <span className="text-xs text-muted-foreground">({totalArticles}건)</span>
-            )}
+            <Button
+              variant={showCafeArticles ? "default" : "outline"}
+              size="sm"
+              className="gap-1.5 text-xs h-7"
+              onClick={() => setShowCafeArticles(!showCafeArticles)}
+              disabled={isLoading}
+            >
+              {isLoading ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : (
+                <Newspaper className="w-3 h-3" />
+              )}
+              카페 최신글(5개)
+              {showCafeArticles && !isLoading && <span className="text-[10px] opacity-60">▲</span>}
+              {!showCafeArticles && <span className="text-[10px] opacity-60">▼</span>}
+            </Button>
             {isSearchMode && searchQuery && (
               <span className="text-xs text-primary font-medium">"{searchQuery}" 검색결과</span>
             )}
@@ -1978,9 +1997,12 @@ function HomeEmbed({ onNavigate }: { onNavigate: (tab: string) => void }) {
           </div>
           </div>
 
+        {/* 펼쳐진 상태: 알림, 검색바, 글 목록 */}
+        {showCafeArticles && (
+          <>
         {/* 알림 패널 */}
         {showNotifications && (
-          <div className="border-b bg-amber-50/50 dark:bg-amber-950/20">
+          <div className="border-t bg-amber-50/50 dark:bg-amber-950/20">
             <div className="px-4 py-2 flex items-center justify-between">
               <h4 className="text-sm font-semibold flex items-center gap-1.5">
                 <BellRing className="w-4 h-4 text-amber-600" />
@@ -2244,7 +2266,16 @@ function HomeEmbed({ onNavigate }: { onNavigate: (tab: string) => void }) {
             )}
           </>
         )}
+          </>
+        )}
         </div>
+
+      {/* 주요뉴스 */}
+      <div className="mt-4">
+        <Suspense fallback={<div className="py-10 text-center"><Loader2 className="w-6 h-6 animate-spin text-primary mx-auto" /></div>}>
+          <MarketNews />
+        </Suspense>
+      </div>
 
       {/* 글 본문 미리보기 모달 */}
       <Dialog open={!!previewArticleId} onOpenChange={(open) => !open && setPreviewArticleId(null)}>
