@@ -9,6 +9,7 @@ import {
   RefreshCw, Server, Database, Globe, Key, Activity, Clock, HardDrive,
   Cpu, MemoryStick, CheckCircle2, XCircle, AlertTriangle, Loader2,
   Gauge, Wifi, Lightbulb, ArrowRight, Copy, Check, Trash2,
+  Camera, Download, FileSearch, Info,
 } from "lucide-react";
 
 interface QueryTiming {
@@ -171,11 +172,22 @@ function generateRecommendations(data: SystemStatus): Recommendation[] {
   // === 메모리 관련 ===
   const heapPct = parseFloat(data.server.memory.heapUsagePercent);
   if (heapPct > 90) {
-    recs.push({ level: "critical", category: "메모리", title: `Heap 사용률 위험 (${data.server.memory.heapUsagePercent})`, detail: "메모리 사용률이 90%를 초과했습니다. 메모리 누수 가능성이 있습니다. 서버 재시작 또는 메모리 프로파일링을 권장합니다." });
+    recs.push({ level: "critical", category: "메모리", title: `Heap 사용률 위험 (${data.server.memory.heapUsagePercent})`, detail: "메모리 사용률이 90%를 초과했습니다. 메모리 누수 가능성이 높습니다. 위의 Heap Snapshot 패널에서 스냅샷을 2~3개 생성한 뒤 Chrome DevTools에서 Comparison 분석을 권장합니다." });
   } else if (heapPct > 75) {
-    recs.push({ level: "warning", category: "메모리", title: `Heap 사용률 주의 (${data.server.memory.heapUsagePercent})`, detail: "메모리 사용률이 75%를 초과했습니다. 메모리 사용 추이를 지속 모니터링하세요." });
+    recs.push({ level: "warning", category: "메모리", title: `Heap 사용률 주의 (${data.server.memory.heapUsagePercent})`, detail: "메모리 사용률이 75%를 초과했습니다. 시간 경과에 따라 계속 증가하는지 확인하세요. 증가 추세가 보이면 Heap Snapshot 비교 분석을 권장합니다." });
   } else {
     recs.push({ level: "good", category: "메모리", title: `메모리 사용량 정상 (${data.server.memory.heapUsagePercent})`, detail: "Heap 메모리 사용률이 안정적입니다." });
+  }
+
+  // Detached Context 경고 (메모리 누수 강력한 신호)
+  const detachedContexts = data.server.memoryBreakdown?.heapStats?.numberOfDetachedContexts ?? 0;
+  if (detachedContexts > 0) {
+    recs.push({
+      level: detachedContexts > 3 ? "warning" : "info",
+      category: "메모리",
+      title: `Detached Context ${detachedContexts}개 감지`,
+      detail: `V8에서 분리된 컨텍스트(Detached Context)가 ${detachedContexts}개 발견되었습니다. 이는 메모리 누수의 강력한 신호입니다. Heap Snapshot을 찍어 (Detached) 접두사가 붙은 객체를 추적하세요. 주로 이벤트 리스너 미해제, 클로저 참조, 타이머 미정리가 원인입니다.`,
+    });
   }
 
   // RSS 메모리 (Vercel 무료 플랜은 1024MB 제한)
@@ -335,6 +347,7 @@ export default function SystemMonitor() {
             </p>
           </CardContent>
         </Card>
+        <HeapSnapshotPanel />
       </div>
     );
   }
@@ -584,6 +597,9 @@ export default function SystemMonitor() {
           )}
         </CardContent>
       </Card>
+
+      {/* Heap Snapshot 관리 */}
+      <HeapSnapshotPanel />
 
       {/* DB 상태 */}
       <Card>
@@ -1106,6 +1122,261 @@ function DbDebugPanel({ dbDebug, isCached }: { dbDebug: DbDebug; isCached: boole
             </div>
             <p className="ml-4.5">{dbDebug.note}</p>
           </div>
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
+// ===== Heap Snapshot 관리 패널 =====
+interface SnapshotInfo {
+  filename: string;
+  sizeMB: string;
+  sizeBytes: number;
+  createdAt: string;
+}
+
+interface SnapshotListResponse {
+  snapshots: SnapshotInfo[];
+  totalCount: number;
+  maxSnapshots: number;
+}
+
+function HeapSnapshotPanel() {
+  const [expanded, setExpanded] = useState(false);
+  const [snapshotResult, setSnapshotResult] = useState<{
+    filename: string;
+    sizeMB: string;
+    memoryBefore: { heapUsed: string; heapTotal: string };
+    memoryAfter: { heapUsed: string; heapTotal: string };
+  } | null>(null);
+
+  const snapshotListQuery = useQuery<SnapshotListResponse>({
+    queryKey: ["/api/admin/system/heap-snapshots"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/system/heap-snapshots", { credentials: "include" });
+      if (!res.ok) throw new Error("목록 조회 실패");
+      return res.json();
+    },
+    enabled: expanded,
+    staleTime: 10_000,
+  });
+
+  const createSnapshotMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/admin/system/heap-snapshot", {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message || "스냅샷 생성 실패");
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      setSnapshotResult(data);
+      snapshotListQuery.refetch();
+    },
+  });
+
+  const deleteSnapshotMutation = useMutation({
+    mutationFn: async (filename: string) => {
+      const res = await fetch(`/api/admin/system/heap-snapshot/${filename}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("삭제 실패");
+      return res.json();
+    },
+    onSuccess: () => {
+      snapshotListQuery.refetch();
+    },
+  });
+
+  const deleteAllMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/admin/system/heap-snapshots", {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("전체 삭제 실패");
+      return res.json();
+    },
+    onSuccess: () => {
+      snapshotListQuery.refetch();
+      setSnapshotResult(null);
+    },
+  });
+
+  const snapshots = snapshotListQuery.data?.snapshots ?? [];
+  const maxSnapshots = snapshotListQuery.data?.maxSnapshots ?? 5;
+
+  return (
+    <Card>
+      <CardHeader className="pb-2 cursor-pointer" onClick={() => setExpanded(!expanded)}>
+        <CardTitle className="text-sm flex items-center gap-2">
+          <Camera className="w-4 h-4 text-violet-500" />
+          Heap Snapshot (메모리 누수 분석)
+          {snapshots.length > 0 && (
+            <Badge variant="secondary" className="text-[10px] ml-1">
+              {snapshots.length}/{maxSnapshots}개
+            </Badge>
+          )}
+          <span className="ml-auto text-xs text-muted-foreground font-normal">
+            {expanded ? "▲ 접기" : "▼ 펼치기"}
+          </span>
+        </CardTitle>
+      </CardHeader>
+      {expanded && (
+        <CardContent className="space-y-4">
+          {/* 안내 */}
+          <div className="bg-violet-50 dark:bg-violet-950/30 border border-violet-200 dark:border-violet-800 rounded-lg p-3 text-xs space-y-1.5">
+            <p className="font-medium flex items-center gap-1.5 text-violet-700 dark:text-violet-300">
+              <FileSearch className="w-3.5 h-3.5" />
+              Heap Snapshot으로 메모리 누수 원인 찾기
+            </p>
+            <ol className="list-decimal list-inside text-muted-foreground space-y-0.5 ml-1">
+              <li>아래 버튼으로 스냅샷 2~3개를 <strong>시간 간격</strong>을 두고 생성</li>
+              <li>생성된 .heapsnapshot 파일을 로컬로 다운로드</li>
+              <li>Chrome → <code className="px-1 py-0.5 bg-muted rounded text-[10px]">chrome://inspect</code> → Open dedicated DevTools for Node → Memory 탭</li>
+              <li>Load로 스냅샷 로드 → <strong>Comparison</strong> 모드에서 증가분 확인</li>
+            </ol>
+            <p className="text-[10px] text-muted-foreground mt-1">
+              Summary 탭에서 (Constructor)별 크기 확인 → (array), (string), closure 등이 크면 해당 코드 추적
+            </p>
+          </div>
+
+          {/* 스냅샷 생성 버튼 */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button
+              size="sm"
+              className="gap-1.5 text-xs"
+              onClick={() => createSnapshotMutation.mutate()}
+              disabled={createSnapshotMutation.isPending || snapshots.length >= maxSnapshots}
+            >
+              {createSnapshotMutation.isPending ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Camera className="w-3.5 h-3.5" />
+              )}
+              {createSnapshotMutation.isPending ? "스냅샷 생성 중..." : "Heap Snapshot 생성"}
+            </Button>
+            {snapshots.length >= maxSnapshots && (
+              <span className="text-[10px] text-amber-600">최대 {maxSnapshots}개까지 저장 가능</span>
+            )}
+            {snapshots.length > 0 && (
+              <Button
+                variant="destructive"
+                size="sm"
+                className="gap-1 text-xs ml-auto"
+                onClick={() => {
+                  if (confirm("모든 스냅샷을 삭제하시겠습니까?")) deleteAllMutation.mutate();
+                }}
+                disabled={deleteAllMutation.isPending}
+              >
+                {deleteAllMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                전체 삭제
+              </Button>
+            )}
+          </div>
+
+          {/* 생성 에러 */}
+          {createSnapshotMutation.isError && (
+            <div className="bg-red-50 dark:bg-red-950/30 rounded-lg p-2.5 text-xs text-red-600 flex items-center gap-1.5">
+              <XCircle className="w-3.5 h-3.5 shrink-0" />
+              {(createSnapshotMutation.error as Error).message}
+            </div>
+          )}
+
+          {/* 생성 결과 */}
+          {snapshotResult && (
+            <div className="bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg p-3">
+              <div className="flex items-start justify-between">
+                <div>
+                  <h4 className="text-xs font-semibold flex items-center gap-1.5 text-green-700 dark:text-green-400">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    스냅샷 생성 완료
+                  </h4>
+                  <p className="text-[11px] text-muted-foreground mt-1 font-mono">{snapshotResult.filename} ({snapshotResult.sizeMB})</p>
+                  <div className="mt-1.5 text-[10px] text-muted-foreground grid grid-cols-2 gap-x-4">
+                    <span>생성 전: Heap {snapshotResult.memoryBefore.heapUsed} / {snapshotResult.memoryBefore.heapTotal}</span>
+                    <span>생성 후: Heap {snapshotResult.memoryAfter.heapUsed} / {snapshotResult.memoryAfter.heapTotal}</span>
+                  </div>
+                </div>
+                <Button variant="ghost" size="sm" className="h-5 px-1" onClick={() => setSnapshotResult(null)}>
+                  <XCircle className="w-3 h-3" />
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* 스냅샷 목록 */}
+          {snapshotListQuery.isLoading ? (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              스냅샷 목록 로드 중...
+            </div>
+          ) : snapshots.length > 0 ? (
+            <div className="space-y-1.5">
+              <h4 className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                <HardDrive className="w-3 h-3" />
+                저장된 스냅샷 ({snapshots.length}개)
+              </h4>
+              {snapshots.map((snap) => (
+                <div key={snap.filename} className="flex items-center justify-between bg-muted/30 rounded-lg p-2.5">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-mono truncate">{snap.filename}</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {new Date(snap.createdAt).toLocaleString("ko-KR")} · {snap.sizeMB}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0 ml-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-2 text-[10px] gap-1"
+                      onClick={() => {
+                        window.open(`/api/admin/system/heap-snapshot/${snap.filename}`, "_blank");
+                      }}
+                    >
+                      <Download className="w-3 h-3" />
+                      다운로드
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-1.5 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                      onClick={() => {
+                        if (confirm(`${snap.filename}을 삭제하시겠습니까?`)) {
+                          deleteSnapshotMutation.mutate(snap.filename);
+                        }
+                      }}
+                      disabled={deleteSnapshotMutation.isPending}
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground py-1">저장된 스냅샷이 없습니다.</p>
+          )}
+
+          {/* 분석 팁 */}
+          {snapshots.length >= 2 && (
+            <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-2.5 text-[11px] text-blue-700 dark:text-blue-300">
+              <p className="font-medium flex items-center gap-1 mb-1">
+                <Info className="w-3 h-3" />
+                비교 분석 가능
+              </p>
+              <p className="text-muted-foreground">
+                스냅샷 {snapshots.length}개가 있습니다. 모두 다운로드하여 Chrome DevTools Memory 탭에서
+                Comparison 모드로 비교하면 시간에 따른 메모리 증가 객체를 정확히 식별할 수 있습니다.
+              </p>
+            </div>
+          )}
         </CardContent>
       )}
     </Card>

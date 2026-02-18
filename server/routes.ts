@@ -1,5 +1,6 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import type { Server } from "http";
+import path from "path";
 import { storage } from "./storage.js";
 
 import { z } from "zod";
@@ -11743,6 +11744,137 @@ ${etfListStr}
     } catch (error: any) {
       console.error("[Cache Clear] Error:", error);
       res.status(500).json({ message: error.message || "캐시 클리어 실패" });
+    }
+  });
+
+  // ========== Heap Snapshot 관리 API ==========
+  const HEAP_SNAPSHOT_DIR = path.join(process.cwd(), ".heap-snapshots");
+  const MAX_SNAPSHOTS = 5;
+
+  app.post("/api/admin/system/heap-snapshot", requireAdmin, async (_req, res) => {
+    try {
+      const v8Module = await import("v8");
+      const fs = await import("fs");
+      if (!fs.existsSync(HEAP_SNAPSHOT_DIR)) {
+        fs.mkdirSync(HEAP_SNAPSHOT_DIR, { recursive: true });
+      }
+
+      const existing = fs.readdirSync(HEAP_SNAPSHOT_DIR).filter((f: string) => f.endsWith(".heapsnapshot"));
+      if (existing.length >= MAX_SNAPSHOTS) {
+        return res.status(400).json({
+          message: `스냅샷이 이미 ${MAX_SNAPSHOTS}개 존재합니다. 기존 스냅샷을 삭제한 후 다시 시도하세요.`,
+        });
+      }
+
+      const memBefore = process.memoryUsage();
+      const filename = `heap-${Date.now()}.heapsnapshot`;
+      const filepath = path.join(HEAP_SNAPSHOT_DIR, filename);
+
+      const snapshotPath = v8Module.writeHeapSnapshot(filepath);
+      const memAfter = process.memoryUsage();
+      const stats = fs.statSync(snapshotPath || filepath);
+
+      console.log(`[Heap Snapshot] Created: ${filename} (${(stats.size / 1024 / 1024).toFixed(1)} MB)`);
+      res.json({
+        success: true,
+        filename,
+        sizeMB: `${(stats.size / 1024 / 1024).toFixed(1)} MB`,
+        sizeBytes: stats.size,
+        createdAt: new Date().toISOString(),
+        memoryBefore: {
+          heapUsed: `${(memBefore.heapUsed / 1024 / 1024).toFixed(1)} MB`,
+          heapTotal: `${(memBefore.heapTotal / 1024 / 1024).toFixed(1)} MB`,
+        },
+        memoryAfter: {
+          heapUsed: `${(memAfter.heapUsed / 1024 / 1024).toFixed(1)} MB`,
+          heapTotal: `${(memAfter.heapTotal / 1024 / 1024).toFixed(1)} MB`,
+        },
+      });
+    } catch (error: any) {
+      console.error("[Heap Snapshot] Error:", error);
+      res.status(500).json({ message: error.message || "힙 스냅샷 생성 실패" });
+    }
+  });
+
+  app.get("/api/admin/system/heap-snapshots", requireAdmin, async (_req, res) => {
+    try {
+      const fs = await import("fs");
+      if (!fs.existsSync(HEAP_SNAPSHOT_DIR)) {
+        return res.json({ snapshots: [], totalCount: 0, maxSnapshots: MAX_SNAPSHOTS });
+      }
+      const files = fs.readdirSync(HEAP_SNAPSHOT_DIR)
+        .filter((f: string) => f.endsWith(".heapsnapshot"))
+        .map((f: string) => {
+          const stats = fs.statSync(path.join(HEAP_SNAPSHOT_DIR, f));
+          const tsMatch = f.match(/heap-(\d+)\.heapsnapshot/);
+          return {
+            filename: f,
+            sizeMB: `${(stats.size / 1024 / 1024).toFixed(1)} MB`,
+            sizeBytes: stats.size,
+            createdAt: tsMatch ? new Date(parseInt(tsMatch[1])).toISOString() : stats.birthtime.toISOString(),
+          };
+        })
+        .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+      res.json({ snapshots: files, totalCount: files.length, maxSnapshots: MAX_SNAPSHOTS });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "스냅샷 목록 조회 실패" });
+    }
+  });
+
+  app.get("/api/admin/system/heap-snapshot/:filename", requireAdmin, async (req, res) => {
+    try {
+      const fs = await import("fs");
+      const { filename } = req.params;
+      if (!filename.endsWith(".heapsnapshot") || filename.includes("..") || filename.includes("/")) {
+        return res.status(400).json({ message: "잘못된 파일명입니다." });
+      }
+      const filepath = path.join(HEAP_SNAPSHOT_DIR, filename);
+      if (!fs.existsSync(filepath)) {
+        return res.status(404).json({ message: "스냅샷 파일을 찾을 수 없습니다." });
+      }
+      res.setHeader("Content-Type", "application/octet-stream");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      const stream = fs.createReadStream(filepath);
+      stream.pipe(res);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "스냅샷 다운로드 실패" });
+    }
+  });
+
+  app.delete("/api/admin/system/heap-snapshot/:filename", requireAdmin, async (req, res) => {
+    try {
+      const fs = await import("fs");
+      const { filename } = req.params;
+      if (!filename.endsWith(".heapsnapshot") || filename.includes("..") || filename.includes("/")) {
+        return res.status(400).json({ message: "잘못된 파일명입니다." });
+      }
+      const filepath = path.join(HEAP_SNAPSHOT_DIR, filename);
+      if (!fs.existsSync(filepath)) {
+        return res.status(404).json({ message: "스냅샷 파일을 찾을 수 없습니다." });
+      }
+      fs.unlinkSync(filepath);
+      console.log(`[Heap Snapshot] Deleted: ${filename}`);
+      res.json({ success: true, deleted: filename });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "스냅샷 삭제 실패" });
+    }
+  });
+
+  app.delete("/api/admin/system/heap-snapshots", requireAdmin, async (_req, res) => {
+    try {
+      const fs = await import("fs");
+      if (!fs.existsSync(HEAP_SNAPSHOT_DIR)) {
+        return res.json({ success: true, deletedCount: 0 });
+      }
+      const files = fs.readdirSync(HEAP_SNAPSHOT_DIR).filter((f: string) => f.endsWith(".heapsnapshot"));
+      for (const f of files) {
+        fs.unlinkSync(path.join(HEAP_SNAPSHOT_DIR, f));
+      }
+      console.log(`[Heap Snapshot] Deleted all: ${files.length} files`);
+      res.json({ success: true, deletedCount: files.length });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "전체 삭제 실패" });
     }
   });
 
