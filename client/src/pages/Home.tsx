@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, Suspense, lazy } from "react";
+import { useState, useEffect, useRef, Suspense, lazy, useTransition, useCallback, memo } from "react";
 import { Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { Input } from "@/components/ui/input";
@@ -50,6 +50,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState("home");
+  const [isPending, startTransition] = useTransition();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [darkMode, setDarkMode] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -80,6 +81,13 @@ export default function Home() {
   });
   const totalUsers = adminUsers?.length ?? 0;
   const activeUsers = adminStats?.uniqueVisitors ?? 0;
+
+  // 탭 전환을 startTransition으로 감싸 UI 블로킹 방지
+  const handleTabChange = useCallback((tab: string) => {
+    startTransition(() => {
+      setActiveTab(tab);
+    });
+  }, [startTransition]);
 
   // Dark mode toggle
   useEffect(() => {
@@ -183,13 +191,13 @@ export default function Home() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <Tabs value={activeTab} onValueChange={handleTabChange}>
           <div className="flex gap-4">
           {/* 왼쪽 세로 메인탭 사이드바 */}
           <div className={`hidden md:flex flex-col shrink-0 sticky top-[73px] self-start max-h-[calc(100vh-85px)] overflow-y-auto scrollbar-thin ${sidebarCollapsed ? 'w-14' : 'w-44'}`} style={{ transition: 'width 200ms ease-out' }}>
             <nav className="sidebar-nav bg-card border border-border/60 shadow-sm">
               {/* 홈 */}
-              <SidebarButton icon={<HomeIcon className="h-4 w-4 shrink-0" />} label="홈" active={activeTab === "home"} collapsed={sidebarCollapsed} onClick={() => setActiveTab("home")} />
+              <SidebarButton icon={<HomeIcon className="h-4 w-4 shrink-0" />} label="홈" active={activeTab === "home"} collapsed={sidebarCollapsed} onClick={() => handleTabChange("home")} />
 
               {/* ETF정보 */}
               {sidebarCollapsed ? (
@@ -200,11 +208,11 @@ export default function Home() {
                     </button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent side="right" align="start" className="min-w-[160px]">
-                    <DropdownMenuItem onClick={() => setActiveTab("etf-components")} className="gap-2 cursor-pointer">📊 실시간ETF</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setActiveTab("new-etf")} className="gap-2 cursor-pointer">🆕 신규ETF</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setActiveTab("watchlist-etf")} className="gap-2 cursor-pointer">⭐ 관심(Core)</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setActiveTab("satellite-etf")} className="gap-2 cursor-pointer">🛰️ 관심(Satellite)</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setActiveTab("etf-search")} className="gap-2 cursor-pointer">🔍 ETF통합검색</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleTabChange("etf-components")} className="gap-2 cursor-pointer">📊 실시간ETF</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleTabChange("new-etf")} className="gap-2 cursor-pointer">🆕 신규ETF</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleTabChange("watchlist-etf")} className="gap-2 cursor-pointer">⭐ 관심(Core)</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleTabChange("satellite-etf")} className="gap-2 cursor-pointer">🛰️ 관심(Satellite)</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleTabChange("etf-search")} className="gap-2 cursor-pointer">🔍 ETF통합검색</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               ) : (
@@ -220,7 +228,7 @@ export default function Home() {
                     { label: "🔍 ETF통합검색", value: "etf-search" },
                   ]}
                   activeTab={activeTab}
-                  onSelect={setActiveTab}
+                  onSelect={handleTabChange}
                 />
               )}
 
@@ -233,12 +241,12 @@ export default function Home() {
                     </button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent side="right" align="start" className="min-w-[140px]">
-                    <DropdownMenuItem onClick={() => setActiveTab("markets-domestic")} className="gap-2 cursor-pointer">🇰🇷 국내증시</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setActiveTab("markets-global")} className="gap-2 cursor-pointer">🌍 해외증시</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setActiveTab("markets-etc")} className="gap-2 cursor-pointer">💹 ETC</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setActiveTab("markets-news")} className="gap-2 cursor-pointer">📰 주요뉴스</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setActiveTab("markets-research")} className="gap-2 cursor-pointer">📊 리서치</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setActiveTab("markets-calendar")} className="gap-2 cursor-pointer">📅 증시캘린더</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleTabChange("markets-domestic")} className="gap-2 cursor-pointer">🇰🇷 국내증시</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleTabChange("markets-global")} className="gap-2 cursor-pointer">🌍 해외증시</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleTabChange("markets-etc")} className="gap-2 cursor-pointer">💹 ETC</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleTabChange("markets-news")} className="gap-2 cursor-pointer">📰 주요뉴스</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleTabChange("markets-research")} className="gap-2 cursor-pointer">📊 리서치</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleTabChange("markets-calendar")} className="gap-2 cursor-pointer">📅 증시캘린더</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               ) : (
@@ -255,7 +263,7 @@ export default function Home() {
                     { label: "📅 증시캘린더", value: "markets-calendar" },
                   ]}
                   activeTab={activeTab}
-                  onSelect={setActiveTab}
+                  onSelect={handleTabChange}
                 />
               )}
 
@@ -268,9 +276,9 @@ export default function Home() {
                     </button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent side="right" align="start" className="min-w-[140px]">
-                    <DropdownMenuItem onClick={() => setActiveTab("stocks-domestic")} className="gap-2 cursor-pointer">🇰🇷 국내주식</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setActiveTab("stocks-overseas")} className="gap-2 cursor-pointer">🌐 해외주식</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setActiveTab("stocks-10x")} className="gap-2 cursor-pointer">🚀 10X</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleTabChange("stocks-domestic")} className="gap-2 cursor-pointer">🇰🇷 국내주식</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleTabChange("stocks-overseas")} className="gap-2 cursor-pointer">🌐 해외주식</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleTabChange("stocks-10x")} className="gap-2 cursor-pointer">🚀 10X</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               ) : (
@@ -284,7 +292,7 @@ export default function Home() {
                     { label: "🚀 10X", value: "stocks-10x" },
                   ]}
                   activeTab={activeTab}
-                  onSelect={setActiveTab}
+                  onSelect={handleTabChange}
                 />
               )}
 
@@ -297,10 +305,10 @@ export default function Home() {
                     </button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent side="right" align="start" className="min-w-[130px]">
-                    <DropdownMenuItem onClick={() => setActiveTab("strategy-daily")} className="gap-2 cursor-pointer">📋 일일 보고서</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setActiveTab("strategy-weekly")} className="gap-2 cursor-pointer">📊 주간 보고서</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setActiveTab("strategy-monthly")} className="gap-2 cursor-pointer">📈 월간 보고서</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setActiveTab("strategy-yearly")} className="gap-2 cursor-pointer">📉 연간 보고서</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleTabChange("strategy-daily")} className="gap-2 cursor-pointer">📋 일일 보고서</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleTabChange("strategy-weekly")} className="gap-2 cursor-pointer">📊 주간 보고서</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleTabChange("strategy-monthly")} className="gap-2 cursor-pointer">📈 월간 보고서</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleTabChange("strategy-yearly")} className="gap-2 cursor-pointer">📉 연간 보고서</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               ) : (
@@ -315,7 +323,7 @@ export default function Home() {
                     { label: "📉 연간 보고서", value: "strategy-yearly" },
                   ]}
                   activeTab={activeTab}
-                  onSelect={setActiveTab}
+                  onSelect={handleTabChange}
                 />
               )}
 
@@ -329,8 +337,8 @@ export default function Home() {
                       </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent side="right" align="start" className="min-w-[130px]">
-                      <DropdownMenuItem onClick={() => setActiveTab("crypto-steem-reader")} className="gap-2 cursor-pointer">📖 스팀글읽기</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setActiveTab("crypto-steem-report")} className="gap-2 cursor-pointer">🔬 스팀보고서</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleTabChange("crypto-steem-reader")} className="gap-2 cursor-pointer">📖 스팀글읽기</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleTabChange("crypto-steem-report")} className="gap-2 cursor-pointer">🔬 스팀보고서</DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 ) : (
@@ -343,7 +351,7 @@ export default function Home() {
                       { label: "🔬 스팀보고서", value: "crypto-steem-report" },
                     ]}
                     activeTab={activeTab}
-                    onSelect={setActiveTab}
+                    onSelect={handleTabChange}
                   />
                 )
               )}
@@ -352,15 +360,15 @@ export default function Home() {
               <div className="my-1 border-t border-border/40" />
 
               {/* AI Agent */}
-              <SidebarButton icon={<Bot className="h-4 w-4 shrink-0 text-purple-500" />} label="AI Agent" active={activeTab === "ai-agent"} collapsed={sidebarCollapsed} onClick={() => setActiveTab("ai-agent")} />
+              <SidebarButton icon={<Bot className="h-4 w-4 shrink-0 text-purple-500" />} label="AI Agent" active={activeTab === "ai-agent"} collapsed={sidebarCollapsed} onClick={() => handleTabChange("ai-agent")} />
 
               {/* API 관리 */}
               {isLoggedIn && (
-                <SidebarButton icon={<Key className="h-4 w-4 shrink-0 text-orange-500" />} label="API 관리" active={activeTab === "api-manager"} collapsed={sidebarCollapsed} onClick={() => setActiveTab("api-manager")} />
+                <SidebarButton icon={<Key className="h-4 w-4 shrink-0 text-orange-500" />} label="API 관리" active={activeTab === "api-manager"} collapsed={sidebarCollapsed} onClick={() => handleTabChange("api-manager")} />
               )}
 
               {/* 즐겨찾기 */}
-              <SidebarButton icon={<Star className="h-4 w-4 shrink-0 text-yellow-500" />} label="즐겨찾기" active={activeTab === "bookmarks"} collapsed={sidebarCollapsed} onClick={() => setActiveTab("bookmarks")} />
+              <SidebarButton icon={<Star className="h-4 w-4 shrink-0 text-yellow-500" />} label="즐겨찾기" active={activeTab === "bookmarks"} collapsed={sidebarCollapsed} onClick={() => handleTabChange("bookmarks")} />
 
               {/* Admin Dashboard */}
               {isAdmin && (
@@ -372,11 +380,11 @@ export default function Home() {
                       </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent side="right" align="start" className="min-w-[180px]">
-                      <DropdownMenuItem onClick={() => setActiveTab("admin-dashboard")} className="gap-2 cursor-pointer">👥 방문,사용자 관리</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setActiveTab("admin-system")} className="gap-2 cursor-pointer">🖥️ 시스템점검</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setActiveTab("admin-supabase")} className="gap-2 cursor-pointer">🗄️ Supabase DB</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setActiveTab("admin-security")} className="gap-2 cursor-pointer">🛡️ 보안점검</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setActiveTab("mobile-preview")} className="gap-2 cursor-pointer">📱 Mobile</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleTabChange("admin-dashboard")} className="gap-2 cursor-pointer">👥 방문,사용자 관리</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleTabChange("admin-system")} className="gap-2 cursor-pointer">🖥️ 시스템점검</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleTabChange("admin-supabase")} className="gap-2 cursor-pointer">🗄️ Supabase DB</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleTabChange("admin-security")} className="gap-2 cursor-pointer">🛡️ 보안점검</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleTabChange("mobile-preview")} className="gap-2 cursor-pointer">📱 Mobile</DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 ) : (
@@ -392,7 +400,7 @@ export default function Home() {
                       { label: "📱 Mobile", value: "mobile-preview" },
                     ]}
                     activeTab={activeTab}
-                    onSelect={setActiveTab}
+                    onSelect={handleTabChange}
                   />
                 )
               )}
@@ -416,10 +424,10 @@ export default function Home() {
                 </button>
               </DropdownMenuTrigger>
                 <DropdownMenuContent align="center" className="min-w-[130px]">
-                  <DropdownMenuItem onClick={() => setActiveTab("etf-components")} className="gap-2 cursor-pointer text-xs">📊 실시간ETF</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setActiveTab("new-etf")} className="gap-2 cursor-pointer text-xs">🆕 신규ETF</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setActiveTab("watchlist-etf")} className="gap-2 cursor-pointer text-xs">⭐ 관심(Core)</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setActiveTab("satellite-etf")} className="gap-2 cursor-pointer text-xs">🛰️ 관심(Satellite)</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleTabChange("etf-components")} className="gap-2 cursor-pointer text-xs">📊 실시간ETF</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleTabChange("new-etf")} className="gap-2 cursor-pointer text-xs">🆕 신규ETF</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleTabChange("watchlist-etf")} className="gap-2 cursor-pointer text-xs">⭐ 관심(Core)</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleTabChange("satellite-etf")} className="gap-2 cursor-pointer text-xs">🛰️ 관심(Satellite)</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
             <DropdownMenu>
@@ -431,12 +439,12 @@ export default function Home() {
                 </button>
               </DropdownMenuTrigger>
                 <DropdownMenuContent align="center" className="min-w-[120px]">
-                  <DropdownMenuItem onClick={() => setActiveTab("markets-domestic")} className="gap-2 cursor-pointer text-xs">🇰🇷 국내증시</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setActiveTab("markets-global")} className="gap-2 cursor-pointer text-xs">🌍 해외증시</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setActiveTab("markets-etc")} className="gap-2 cursor-pointer text-xs">💹 ETC</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setActiveTab("markets-news")} className="gap-2 cursor-pointer text-xs">📰 뉴스</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setActiveTab("markets-research")} className="gap-2 cursor-pointer text-xs">📊 리서치</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setActiveTab("markets-calendar")} className="gap-2 cursor-pointer text-xs">📅 캘린더</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleTabChange("markets-domestic")} className="gap-2 cursor-pointer text-xs">🇰🇷 국내증시</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleTabChange("markets-global")} className="gap-2 cursor-pointer text-xs">🌍 해외증시</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleTabChange("markets-etc")} className="gap-2 cursor-pointer text-xs">💹 ETC</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleTabChange("markets-news")} className="gap-2 cursor-pointer text-xs">📰 뉴스</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleTabChange("markets-research")} className="gap-2 cursor-pointer text-xs">📊 리서치</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleTabChange("markets-calendar")} className="gap-2 cursor-pointer text-xs">📅 캘린더</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
             <DropdownMenu>
@@ -448,9 +456,9 @@ export default function Home() {
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="center" className="min-w-[120px]">
-                  <DropdownMenuItem onClick={() => setActiveTab("stocks-domestic")} className="gap-2 cursor-pointer text-xs">🇰🇷 국내주식</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setActiveTab("stocks-overseas")} className="gap-2 cursor-pointer text-xs">🌐 해외주식</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setActiveTab("stocks-10x")} className="gap-2 cursor-pointer text-xs">🚀 10X</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleTabChange("stocks-domestic")} className="gap-2 cursor-pointer text-xs">🇰🇷 국내주식</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleTabChange("stocks-overseas")} className="gap-2 cursor-pointer text-xs">🌐 해외주식</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleTabChange("stocks-10x")} className="gap-2 cursor-pointer text-xs">🚀 10X</DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
               <DropdownMenu>
@@ -462,10 +470,10 @@ export default function Home() {
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="center" className="min-w-[110px]">
-                  <DropdownMenuItem onClick={() => setActiveTab("strategy-daily")} className="gap-2 cursor-pointer text-xs">📋 일일</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setActiveTab("strategy-weekly")} className="gap-2 cursor-pointer text-xs">📊 주간</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setActiveTab("strategy-monthly")} className="gap-2 cursor-pointer text-xs">📈 월간</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setActiveTab("strategy-yearly")} className="gap-2 cursor-pointer text-xs">📉 연간</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleTabChange("strategy-daily")} className="gap-2 cursor-pointer text-xs">📋 일일</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleTabChange("strategy-weekly")} className="gap-2 cursor-pointer text-xs">📊 주간</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleTabChange("strategy-monthly")} className="gap-2 cursor-pointer text-xs">📈 월간</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleTabChange("strategy-yearly")} className="gap-2 cursor-pointer text-xs">📉 연간</DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
                 {isAdmin && (
@@ -478,8 +486,8 @@ export default function Home() {
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="center" className="min-w-[120px]">
-                  <DropdownMenuItem onClick={() => setActiveTab("crypto-steem-reader")} className="gap-2 cursor-pointer text-xs">📖 스팀글읽기</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setActiveTab("crypto-steem-report")} className="gap-2 cursor-pointer text-xs">🔬 스팀보고서</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleTabChange("crypto-steem-reader")} className="gap-2 cursor-pointer text-xs">📖 스팀글읽기</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleTabChange("crypto-steem-report")} className="gap-2 cursor-pointer text-xs">🔬 스팀보고서</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
               )}
@@ -504,11 +512,11 @@ export default function Home() {
                     </button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="center" className="min-w-[170px]">
-                    <DropdownMenuItem onClick={() => setActiveTab("admin-dashboard")} className="gap-2 cursor-pointer text-xs">👥 방문,사용자 관리</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setActiveTab("admin-system")} className="gap-2 cursor-pointer text-xs">🖥️ 시스템점검</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setActiveTab("admin-supabase")} className="gap-2 cursor-pointer text-xs">🗄️ Supabase DB</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setActiveTab("admin-security")} className="gap-2 cursor-pointer text-xs">🛡️ 보안점검</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setActiveTab("mobile-preview")} className="gap-2 cursor-pointer text-xs">📱 Mobile</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleTabChange("admin-dashboard")} className="gap-2 cursor-pointer text-xs">👥 방문,사용자 관리</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleTabChange("admin-system")} className="gap-2 cursor-pointer text-xs">🖥️ 시스템점검</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleTabChange("admin-supabase")} className="gap-2 cursor-pointer text-xs">🗄️ Supabase DB</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleTabChange("admin-security")} className="gap-2 cursor-pointer text-xs">🛡️ 보안점검</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleTabChange("mobile-preview")} className="gap-2 cursor-pointer text-xs">📱 Mobile</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               )}
@@ -516,10 +524,10 @@ export default function Home() {
           </div>
 
           {/* 오른쪽 콘텐츠 영역 */}
-          <div className="flex-1 min-w-0" style={{ contain: 'layout style' }}>
+          <div className={`flex-1 min-w-0 transition-opacity duration-150 ${isPending ? 'opacity-60' : ''}`} style={{ contain: 'layout style' }}>
 
           <TabsContent value="home">
-            <HomeEmbed onNavigate={setActiveTab} />
+            <HomeEmbed onNavigate={handleTabChange} />
           </TabsContent>
 
           <TabsContent value="etf-components">
@@ -560,7 +568,7 @@ export default function Home() {
 
           <TabsContent value="etf-search">
             <Suspense fallback={<ContentSkeleton />}>
-              <EtfSearch isAdmin={isAdmin} onNavigate={setActiveTab} />
+              <EtfSearch isAdmin={isAdmin} onNavigate={handleTabChange} />
             </Suspense>
           </TabsContent>
 
@@ -659,7 +667,7 @@ export default function Home() {
           <TabsContent value="ai-agent">
             {isLoggedIn ? (
               <Suspense fallback={<ContentSkeleton />}>
-                <AiAgent isAdmin={isAdmin} onNavigate={setActiveTab} />
+                <AiAgent isAdmin={isAdmin} onNavigate={handleTabChange} />
               </Suspense>
             ) : (
               <LoginRequiredMessage />
@@ -1597,7 +1605,7 @@ function NoticeBoard() {
   );
 }
 
-function HomeEmbed({ onNavigate }: { onNavigate: (tab: string) => void }) {
+const HomeEmbed = memo(function HomeEmbed({ onNavigate }: { onNavigate: (tab: string) => void }) {
   const { isAdmin, isLoggedIn, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
   const [page, setPage] = useState(1);
@@ -2458,6 +2466,4 @@ function HomeEmbed({ onNavigate }: { onNavigate: (tab: string) => void }) {
       </Dialog>
     </>
   );
-}
-
-
+});
