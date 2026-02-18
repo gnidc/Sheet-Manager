@@ -123,12 +123,28 @@ export function LoginDialog() {
           });
           
           if (res.ok) {
+            const result = await res.json();
             setLoginOpen(false);
             toast({
               title: "로그인 성공",
               description: remember ? "Google 계정으로 로그인되었습니다 (24시간 유지)" : "Google 계정으로 로그인되었습니다",
             });
+            // 즉시 auth 캐시 설정 (서버 refetch 대기 없이 UI 즉시 전환)
             const { queryClient } = await import("@/lib/queryClient");
+            if (result.user) {
+              const authData = {
+                isAdmin: result.isAdmin ?? false,
+                userId: result.user.id,
+                userEmail: result.user.email,
+                userName: result.user.name,
+                userPicture: result.user.picture,
+              };
+              queryClient.setQueryData(["/api/auth/me"], authData);
+              // localStorage에도 저장
+              try {
+                localStorage.setItem("auth-cache", JSON.stringify({ ...authData, cachedAt: Date.now() }));
+              } catch {}
+            }
             queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
           } else {
             let errMsg = `서버 에러 (${res.status})`;

@@ -43,12 +43,32 @@ app.use(
   })
 );
 
+// ========== Fast Path: 초기화 없이 즉시 응답하는 엔드포인트 ==========
+// cookie-session 미들웨어만으로 처리 가능 (DB 불필요)
+
 // 헬스체크 (DB 미사용)
 app.get("/api/ping", (_req, res) => {
   res.json({ ok: true, time: new Date().toISOString(), env: !!process.env.VERCEL });
 });
 
-// 초기화
+// 인증 상태 확인 - Fast Path (서버 초기화 없이 즉시 응답)
+// cookie-session이 쿠키를 읽어 req.session에 데이터를 복원하므로 DB 불필요
+app.get("/api/auth/me", (req, res) => {
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate, private");
+  res.set("Pragma", "no-cache");
+  
+  const response = {
+    isAdmin: !!req.session?.isAdmin,
+    userId: req.session?.userId || null,
+    userEmail: req.session?.userEmail || null,
+    userName: req.session?.userName || null,
+    userPicture: req.session?.userPicture || null,
+  };
+  
+  res.status(200).json(response);
+});
+
+// ========== 초기화 (무거운 라우트 등록) ==========
 let initialized = false;
 let initPromise: Promise<void> | null = null;
 
