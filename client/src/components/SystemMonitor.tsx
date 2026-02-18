@@ -262,10 +262,13 @@ export default function SystemMonitor() {
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [clearResult, setClearResult] = useState<{ cleared: string[]; memory: any; timestamp: string } | null>(null);
 
+  // enabled: false → 탭 진입 시 자동 API 호출 안 함 (캐시된 데이터만 표시)
   const { data, isLoading, error, refetch, isFetching } = useQuery<SystemStatus>({
     queryKey: ["/api/admin/system/status"],
+    enabled: false, // 수동 점검만 실행
     refetchInterval: autoRefresh ? 30000 : false,
-    staleTime: 10000,
+    staleTime: 5 * 60 * 1000, // 5분간 캐시 유효
+    gcTime: 30 * 60 * 1000, // 30분간 캐시 유지
   });
 
   const clearCacheMutation = useMutation({
@@ -281,12 +284,12 @@ export default function SystemMonitor() {
     },
     onSuccess: (data) => {
       setClearResult(data);
-      // 클리어 후 시스템 상태 새로고침
       refetch();
     },
   });
 
-  if (isLoading) {
+  // 점검 실행 중 (첫 로딩)
+  if (isLoading && !data) {
     return (
       <div className="flex justify-center items-center h-60">
         <Loader2 className="h-6 w-6 animate-spin text-primary" />
@@ -295,18 +298,54 @@ export default function SystemMonitor() {
     );
   }
 
-  if (error) {
+  // 데이터 없음: 초기 화면 (점검 시작 버튼)
+  if (!data && !isFetching) {
     return (
-      <Card>
-        <CardContent className="py-10 text-center">
-          <XCircle className="w-10 h-10 mx-auto text-red-400 mb-3" />
-          <p className="text-sm text-red-500">시스템 상태 조회 실패</p>
-          <p className="text-xs text-muted-foreground mt-1">{(error as Error).message}</p>
-          <Button variant="outline" size="sm" className="mt-3" onClick={() => refetch()}>
-            재시도
-          </Button>
-        </CardContent>
-      </Card>
+      <div className="space-y-6">
+        <Card>
+          <CardContent className="py-16 text-center">
+            <Activity className="w-14 h-14 mx-auto text-blue-400/60 mb-4" />
+            <h3 className="text-lg font-bold">Vercel System 점검</h3>
+            <p className="text-sm text-muted-foreground mt-2 mb-6">
+              시스템 점검을 실행하면 서버 상태, DB 연결, API 상태, 메모리 사용량 등을 분석합니다.
+            </p>
+            {error && (
+              <div className="mb-4 p-3 bg-red-50 dark:bg-red-950/30 rounded-lg">
+                <p className="text-sm text-red-500 flex items-center gap-1.5 justify-center">
+                  <XCircle className="w-4 h-4" />
+                  이전 점검 실패: {(error as Error).message}
+                </p>
+              </div>
+            )}
+            <Button 
+              size="lg" 
+              className="gap-2 px-8"
+              onClick={() => refetch()}
+              disabled={isFetching}
+            >
+              {isFetching ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <Activity className="w-5 h-5" />
+              )}
+              시스템 점검 실행
+            </Button>
+            <p className="text-[11px] text-muted-foreground mt-3">
+              DB 쿼리, 외부 API 연결 확인 등으로 약 2~5초 소요됩니다
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // 점검 실행 중 (데이터 없이 fetching)
+  if (!data && isFetching) {
+    return (
+      <div className="flex justify-center items-center h-60">
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+        <span className="ml-2 text-sm text-muted-foreground">시스템 점검 실행 중...</span>
+      </div>
     );
   }
 
@@ -337,7 +376,14 @@ export default function SystemMonitor() {
             Vercel System 점검
           </h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            마지막 조회: {new Date(data.timestamp).toLocaleString("ko-KR")}
+            마지막 점검: {new Date(data.timestamp).toLocaleString("ko-KR")}
+            {data._cached && <span className="ml-1.5 text-blue-500">(캐시됨)</span>}
+            {(() => {
+              const ageMs = Date.now() - new Date(data.timestamp).getTime();
+              const ageMin = Math.floor(ageMs / 60000);
+              if (ageMin >= 1) return <span className="ml-1.5 text-muted-foreground">({ageMin}분 전)</span>;
+              return <span className="ml-1.5 text-green-600">(방금)</span>;
+            })()}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -360,12 +406,26 @@ export default function SystemMonitor() {
             <Clock className="w-3 h-3" />
             {autoRefresh ? "자동갱신 ON" : "자동갱신 OFF"}
           </Button>
-          <Button variant="outline" size="sm" className="text-xs gap-1" onClick={() => refetch()} disabled={isFetching}>
-            {isFetching ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-            새로고침
+          <Button 
+            variant="default" 
+            size="sm" 
+            className="text-xs gap-1" 
+            onClick={() => refetch()} 
+            disabled={isFetching}
+          >
+            {isFetching ? <Loader2 className="w-3 h-3 animate-spin" /> : <Activity className="w-3 h-3" />}
+            {isFetching ? "점검 중..." : "새 점검 실행"}
           </Button>
         </div>
       </div>
+
+      {/* 점검 중 오버레이 알림 */}
+      {isFetching && (
+        <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-3 flex items-center gap-2">
+          <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+          <span className="text-sm text-blue-700 dark:text-blue-300">새로운 시스템 점검을 실행 중입니다... 아래는 이전 점검 결과입니다.</span>
+        </div>
+      )}
 
       {/* 캐시 클리어 결과 */}
       {clearResult && (
