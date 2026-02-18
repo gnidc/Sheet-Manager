@@ -11643,6 +11643,311 @@ ${etfListStr}
     }
   });
 
+  // ========== Supabase DB 서버 시스템 점검 ==========
+  app.get("/api/admin/supabase/status", requireAdmin, async (_req, res) => {
+    const startTime = Date.now();
+    try {
+      const { db } = await import("./db.js");
+      const { sql } = await import("drizzle-orm");
+
+      // 워밍업
+      await db.execute(sql`SELECT 1`);
+
+      // 모든 점검을 병렬 실행
+      const [
+        versionResult,
+        uptimeResult,
+        dbSizeResult,
+        connectionsResult,
+        tableStatsResult,
+        indexStatsResult,
+        lockResult,
+        cacheHitResult,
+        vacuumResult,
+        replicationResult,
+        slowQueryResult,
+        deadTupleResult,
+        extensionsResult,
+        settingsResult,
+      ] = await Promise.all([
+        // 1. PostgreSQL 버전
+        (async () => {
+          try {
+            const r = await db.execute(sql`SELECT version()`);
+            return (r as any).rows?.[0]?.version || "unknown";
+          } catch { return "조회 실패"; }
+        })(),
+        // 2. DB 서버 업타임
+        (async () => {
+          try {
+            const r = await db.execute(sql`SELECT now() - pg_postmaster_start_time() AS uptime, pg_postmaster_start_time() AS started_at`);
+            const row = (r as any).rows?.[0];
+            return { uptime: row?.uptime || "unknown", startedAt: row?.started_at || "unknown" };
+          } catch { return { uptime: "조회 실패", startedAt: "unknown" }; }
+        })(),
+        // 3. DB 크기
+        (async () => {
+          try {
+            const r = await db.execute(sql`
+              SELECT 
+                pg_size_pretty(pg_database_size(current_database())) AS total_size,
+                current_database() AS db_name
+            `);
+            const row = (r as any).rows?.[0];
+            return { totalSize: row?.total_size || "unknown", dbName: row?.db_name || "unknown" };
+          } catch { return { totalSize: "조회 실패", dbName: "unknown" }; }
+        })(),
+        // 4. 연결 상태 (상세)
+        (async () => {
+          try {
+            const r = await db.execute(sql`
+              SELECT 
+                (SELECT count(*)::int FROM pg_stat_activity) AS total,
+                (SELECT count(*)::int FROM pg_stat_activity WHERE state = 'active') AS active,
+                (SELECT count(*)::int FROM pg_stat_activity WHERE state = 'idle') AS idle,
+                (SELECT count(*)::int FROM pg_stat_activity WHERE state = 'idle in transaction') AS idle_in_transaction,
+                (SELECT setting::int FROM pg_settings WHERE name = 'max_connections') AS max_connections
+            `);
+            return (r as any).rows?.[0] || {};
+          } catch { return {}; }
+        })(),
+        // 5. 테이블 통계 (크기순 Top 15)
+        (async () => {
+          try {
+            const r = await db.execute(sql`
+              SELECT 
+                schemaname,
+                relname AS table_name,
+                n_live_tup::int AS live_rows,
+                n_dead_tup::int AS dead_rows,
+                pg_size_pretty(pg_total_relation_size(schemaname || '.' || relname)) AS total_size,
+                pg_total_relation_size(schemaname || '.' || relname) AS size_bytes,
+                CASE WHEN n_live_tup > 0 
+                  THEN round(100.0 * n_dead_tup / (n_live_tup + n_dead_tup), 1)
+                  ELSE 0 
+                END AS dead_ratio,
+                last_vacuum,
+                last_autovacuum,
+                last_analyze,
+                last_autoanalyze
+              FROM pg_stat_user_tables
+              ORDER BY pg_total_relation_size(schemaname || '.' || relname) DESC
+              LIMIT 15
+            `);
+            return (r as any).rows || [];
+          } catch { return []; }
+        })(),
+        // 6. 인덱스 사용률
+        (async () => {
+          try {
+            const r = await db.execute(sql`
+              SELECT 
+                schemaname,
+                relname AS table_name,
+                indexrelname AS index_name,
+                idx_scan::int AS scans,
+                pg_size_pretty(pg_relation_size(indexrelid)) AS index_size,
+                pg_relation_size(indexrelid) AS size_bytes
+              FROM pg_stat_user_indexes
+              ORDER BY idx_scan ASC, pg_relation_size(indexrelid) DESC
+              LIMIT 15
+            `);
+            return (r as any).rows || [];
+          } catch { return []; }
+        })(),
+        // 7. 락 상태
+        (async () => {
+          try {
+            const r = await db.execute(sql`
+              SELECT 
+                locktype, mode, granted,
+                count(*)::int AS count
+              FROM pg_locks
+              GROUP BY locktype, mode, granted
+              ORDER BY count DESC
+              LIMIT 10
+            `);
+            return (r as any).rows || [];
+          } catch { return []; }
+        })(),
+        // 8. 캐시 히트율 (Buffer Cache)
+        (async () => {
+          try {
+            const r = await db.execute(sql`
+              SELECT 
+                sum(blks_hit)::bigint AS hits,
+                sum(blks_read)::bigint AS reads,
+                CASE WHEN sum(blks_hit) + sum(blks_read) > 0
+                  THEN round(100.0 * sum(blks_hit) / (sum(blks_hit) + sum(blks_read)), 2)
+                  ELSE 0
+                END AS hit_ratio
+              FROM pg_stat_database
+              WHERE datname = current_database()
+            `);
+            return (r as any).rows?.[0] || {};
+          } catch { return {}; }
+        })(),
+        // 9. Vacuum 상태 (오래된 것)
+        (async () => {
+          try {
+            const r = await db.execute(sql`
+              SELECT 
+                relname AS table_name,
+                last_vacuum,
+                last_autovacuum,
+                n_dead_tup::int AS dead_tuples,
+                n_live_tup::int AS live_tuples
+              FROM pg_stat_user_tables
+              WHERE n_dead_tup > 100
+              ORDER BY n_dead_tup DESC
+              LIMIT 10
+            `);
+            return (r as any).rows || [];
+          } catch { return []; }
+        })(),
+        // 10. 복제 상태 (Supabase는 보통 readonly replica 사용)
+        (async () => {
+          try {
+            const r = await db.execute(sql`SELECT pg_is_in_recovery() AS is_replica`);
+            return (r as any).rows?.[0] || {};
+          } catch { return {}; }
+        })(),
+        // 11. 느린 쿼리 (pg_stat_statements가 있으면)
+        (async () => {
+          try {
+            const r = await db.execute(sql`
+              SELECT 
+                query,
+                calls::int,
+                round(mean_exec_time::numeric, 2) AS avg_time_ms,
+                round(total_exec_time::numeric, 2) AS total_time_ms,
+                rows::int AS total_rows
+              FROM pg_stat_statements
+              WHERE userid = (SELECT usesysid FROM pg_user WHERE usename = current_user)
+                AND query NOT LIKE '%pg_stat%'
+              ORDER BY mean_exec_time DESC
+              LIMIT 10
+            `);
+            return (r as any).rows || [];
+          } catch { return []; }
+        })(),
+        // 12. Dead Tuple 비율이 높은 테이블
+        (async () => {
+          try {
+            const r = await db.execute(sql`
+              SELECT 
+                relname AS table_name,
+                n_live_tup::int AS live,
+                n_dead_tup::int AS dead,
+                CASE WHEN n_live_tup + n_dead_tup > 0
+                  THEN round(100.0 * n_dead_tup / (n_live_tup + n_dead_tup), 1)
+                  ELSE 0
+                END AS dead_pct
+              FROM pg_stat_user_tables
+              WHERE n_dead_tup > 0
+              ORDER BY n_dead_tup DESC
+              LIMIT 10
+            `);
+            return (r as any).rows || [];
+          } catch { return []; }
+        })(),
+        // 13. 설치된 확장
+        (async () => {
+          try {
+            const r = await db.execute(sql`SELECT extname, extversion FROM pg_extension ORDER BY extname`);
+            return (r as any).rows || [];
+          } catch { return []; }
+        })(),
+        // 14. 주요 DB 설정
+        (async () => {
+          try {
+            const r = await db.execute(sql`
+              SELECT name, setting, unit, short_desc
+              FROM pg_settings
+              WHERE name IN (
+                'max_connections', 'shared_buffers', 'work_mem', 'maintenance_work_mem',
+                'effective_cache_size', 'wal_level', 'max_wal_size', 'checkpoint_completion_target',
+                'random_page_cost', 'effective_io_concurrency', 'statement_timeout',
+                'idle_in_transaction_session_timeout', 'log_min_duration_statement'
+              )
+              ORDER BY name
+            `);
+            return (r as any).rows || [];
+          } catch { return []; }
+        })(),
+      ]);
+
+      // 점검 권고사항 생성
+      const recommendations: { level: string; title: string; detail: string }[] = [];
+      
+      // 캐시 히트율 체크
+      const hitRatio = parseFloat(cacheHitResult?.hit_ratio || "0");
+      if (hitRatio > 0 && hitRatio < 90) {
+        recommendations.push({ level: "critical", title: `Buffer Cache 히트율 낮음 (${hitRatio}%)`, detail: "shared_buffers 증가 또는 쿼리 최적화가 필요합니다." });
+      } else if (hitRatio >= 90 && hitRatio < 99) {
+        recommendations.push({ level: "warning", title: `Buffer Cache 히트율 주의 (${hitRatio}%)`, detail: "캐시 히트율이 99% 미만입니다. 인덱스 및 쿼리를 점검하세요." });
+      } else if (hitRatio >= 99) {
+        recommendations.push({ level: "good", title: `Buffer Cache 히트율 양호 (${hitRatio}%)`, detail: "캐시가 효율적으로 동작하고 있습니다." });
+      }
+
+      // 연결 수 체크
+      const totalConn = parseInt(connectionsResult?.total || "0");
+      const maxConn = parseInt(connectionsResult?.max_connections || "100");
+      const connPct = maxConn > 0 ? (totalConn / maxConn) * 100 : 0;
+      if (connPct > 80) {
+        recommendations.push({ level: "critical", title: `연결 수 위험 (${totalConn}/${maxConn}, ${connPct.toFixed(0)}%)`, detail: "max_connections에 근접합니다. 연결 풀링을 확인하세요." });
+      } else if (connPct > 50) {
+        recommendations.push({ level: "warning", title: `연결 수 주의 (${totalConn}/${maxConn}, ${connPct.toFixed(0)}%)`, detail: "연결 수가 50%를 초과했습니다." });
+      } else {
+        recommendations.push({ level: "good", title: `연결 수 정상 (${totalConn}/${maxConn})`, detail: "연결 수가 안정적입니다." });
+      }
+
+      // Dead Tuple 체크
+      const highDeadTables = (deadTupleResult as any[]).filter((t: any) => parseFloat(t.dead_pct) > 20);
+      if (highDeadTables.length > 0) {
+        recommendations.push({ level: "warning", title: `Dead Tuple 비율 높음 (${highDeadTables.length}개 테이블)`, detail: `${highDeadTables.map((t: any) => `${t.table_name}(${t.dead_pct}%)`).join(", ")} - VACUUM 실행을 권장합니다.` });
+      } else {
+        recommendations.push({ level: "good", title: "Dead Tuple 정상", detail: "모든 테이블의 dead tuple 비율이 양호합니다." });
+      }
+
+      // idle in transaction 체크
+      const idleInTx = parseInt(connectionsResult?.idle_in_transaction || "0");
+      if (idleInTx > 5) {
+        recommendations.push({ level: "warning", title: `Idle in Transaction 연결 ${idleInTx}개`, detail: "트랜잭션이 오래 열려있는 연결이 있습니다. 커밋/롤백을 확인하세요." });
+      }
+
+      // 미사용 인덱스 체크
+      const unusedIndexes = (indexStatsResult as any[]).filter((i: any) => parseInt(i.scans || "0") === 0 && parseInt(i.size_bytes || "0") > 8192);
+      if (unusedIndexes.length > 3) {
+        recommendations.push({ level: "info", title: `미사용 인덱스 ${unusedIndexes.length}개`, detail: "사용되지 않는 인덱스가 있습니다. 디스크 공간 절약을 위해 삭제를 검토하세요." });
+      }
+
+      res.json({
+        timestamp: new Date().toISOString(),
+        checkDurationMs: Date.now() - startTime,
+        server: {
+          version: versionResult,
+          uptime: uptimeResult,
+          dbSize: dbSizeResult,
+          isReplica: replicationResult?.is_replica || false,
+        },
+        connections: connectionsResult,
+        cacheHit: cacheHitResult,
+        tables: tableStatsResult,
+        indexes: indexStatsResult,
+        locks: lockResult,
+        vacuum: vacuumResult,
+        deadTuples: deadTupleResult,
+        slowQueries: slowQueryResult,
+        extensions: extensionsResult,
+        settings: settingsResult,
+        recommendations,
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Supabase DB 점검 실패" });
+    }
+  });
+
   // ========== AI Agent 시스템 ==========
 
   // 🔒 프롬프트 내용 보안 검증 (인젝션 패턴 제거)

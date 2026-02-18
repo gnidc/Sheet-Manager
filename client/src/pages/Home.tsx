@@ -39,6 +39,7 @@ const EtfSearch = lazy(() => import("@/components/EtfSearch"));
 const AdminDashboard = lazy(() => import("@/components/AdminDashboard"));
 const SecurityAudit = lazy(() => import("@/components/SecurityAudit"));
 const SystemMonitor = lazy(() => import("@/components/SystemMonitor"));
+const SupabaseMonitor = lazy(() => import("@/components/SupabaseMonitor"));
 const MobilePreview = lazy(() => import("@/components/MobilePreview"));
 const MarketsEtc = lazy(() => import("@/components/MarketsEtc"));
 const MarketCalendar = lazy(() => import("@/components/MarketCalendar"));
@@ -366,13 +367,14 @@ export default function Home() {
                 sidebarCollapsed ? (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <button className={`sidebar-item relative justify-center px-0 ${(activeTab === "admin-dashboard" || activeTab === "admin-security" || activeTab === "admin-system" || activeTab === "mobile-preview") ? "sidebar-item-active" : ""}`} title="Dashboard">
+                      <button className={`sidebar-item relative justify-center px-0 ${(activeTab === "admin-dashboard" || activeTab === "admin-security" || activeTab === "admin-system" || activeTab === "admin-supabase" || activeTab === "mobile-preview") ? "sidebar-item-active" : ""}`} title="Dashboard">
                         <BarChart3 className="h-4 w-4 shrink-0 text-emerald-500" />
                       </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent side="right" align="start" className="min-w-[180px]">
                       <DropdownMenuItem onClick={() => setActiveTab("admin-dashboard")} className="gap-2 cursor-pointer">👥 방문,사용자 관리</DropdownMenuItem>
                       <DropdownMenuItem onClick={() => setActiveTab("admin-system")} className="gap-2 cursor-pointer">🖥️ 시스템점검</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setActiveTab("admin-supabase")} className="gap-2 cursor-pointer">🗄️ Supabase DB</DropdownMenuItem>
                       <DropdownMenuItem onClick={() => setActiveTab("admin-security")} className="gap-2 cursor-pointer">🛡️ 보안점검</DropdownMenuItem>
                       <DropdownMenuItem onClick={() => setActiveTab("mobile-preview")} className="gap-2 cursor-pointer">📱 Mobile</DropdownMenuItem>
                     </DropdownMenuContent>
@@ -381,10 +383,11 @@ export default function Home() {
                   <SidebarAccordion
                     icon={<BarChart3 className="h-4 w-4 shrink-0 text-emerald-500" />}
                     label="Dashboard"
-                    active={activeTab === "admin-dashboard" || activeTab === "admin-system" || activeTab === "admin-security" || activeTab === "mobile-preview"}
+                    active={activeTab === "admin-dashboard" || activeTab === "admin-system" || activeTab === "admin-supabase" || activeTab === "admin-security" || activeTab === "mobile-preview"}
                     items={[
                       { label: "👥 방문,사용자 관리", value: "admin-dashboard" },
                       { label: "🖥️ 시스템점검", value: "admin-system" },
+                      { label: "🗄️ Supabase DB", value: "admin-supabase" },
                       { label: "🛡️ 보안점검", value: "admin-security" },
                       { label: "📱 Mobile", value: "mobile-preview" },
                     ]}
@@ -495,7 +498,7 @@ export default function Home() {
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <button className={`inline-flex items-center gap-1 shrink-0 px-2 py-1.5 text-xs font-medium rounded-sm transition-colors duration-100 ${
-                      activeTab === "admin-dashboard" || activeTab === "admin-system" || activeTab === "admin-security" || activeTab === "mobile-preview" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"
+                      activeTab === "admin-dashboard" || activeTab === "admin-system" || activeTab === "admin-supabase" || activeTab === "admin-security" || activeTab === "mobile-preview" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"
                     }`}>
                       <BarChart3 className="h-3.5 w-3.5 text-emerald-500" /> Dashboard <ChevronDown className="h-2.5 w-2.5" />
                     </button>
@@ -503,6 +506,7 @@ export default function Home() {
                   <DropdownMenuContent align="center" className="min-w-[170px]">
                     <DropdownMenuItem onClick={() => setActiveTab("admin-dashboard")} className="gap-2 cursor-pointer text-xs">👥 방문,사용자 관리</DropdownMenuItem>
                     <DropdownMenuItem onClick={() => setActiveTab("admin-system")} className="gap-2 cursor-pointer text-xs">🖥️ 시스템점검</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setActiveTab("admin-supabase")} className="gap-2 cursor-pointer text-xs">🗄️ Supabase DB</DropdownMenuItem>
                     <DropdownMenuItem onClick={() => setActiveTab("admin-security")} className="gap-2 cursor-pointer text-xs">🛡️ 보안점검</DropdownMenuItem>
                     <DropdownMenuItem onClick={() => setActiveTab("mobile-preview")} className="gap-2 cursor-pointer text-xs">📱 Mobile</DropdownMenuItem>
                   </DropdownMenuContent>
@@ -691,6 +695,15 @@ export default function Home() {
           <TabsContent value="admin-system">
             <Suspense fallback={<ContentSkeleton />}>
               <SystemMonitor />
+            </Suspense>
+          </TabsContent>
+          )}
+
+          {/* Admin Dashboard - Supabase DB 점검 */}
+          {isAdmin && (
+          <TabsContent value="admin-supabase">
+            <Suspense fallback={<ContentSkeleton />}>
+              <SupabaseMonitor />
             </Suspense>
           </TabsContent>
           )}
