@@ -63,6 +63,7 @@ export function LoginDialog() {
     isLoggingIn,
     isGoogleLoggingIn,
     isLoggingOut,
+    isLoading: authLoading,
   } = useAuth();
   const { toast } = useToast();
 
@@ -224,6 +225,16 @@ export function LoginDialog() {
       {label || "Google 계정으로 로그인"}
     </Button>
   );
+
+  // 인증 상태 확인 중 (브라우저 새로고침 시 세션 확인)
+  if (authLoading) {
+    return (
+      <div className="flex items-center gap-2">
+        <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+        <span className="text-xs text-muted-foreground hidden sm:inline">확인 중...</span>
+      </div>
+    );
+  }
 
   // 로그인 상태일 때
   if (isLoggedIn || isAdmin) {

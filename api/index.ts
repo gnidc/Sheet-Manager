@@ -28,15 +28,18 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.set("trust proxy", 1);
 
-// cookie-session (24시간 만료 - Vercel 서버리스에 적합)
+// cookie-session (Vercel 서버리스에 적합 - 쿠키에 세션 데이터 저장)
 app.use(
   cookieSession({
     name: "session",
     keys: [process.env.SESSION_SECRET || "default-secret-change-in-production"],
-    maxAge: 24 * 60 * 60 * 1000, // 24시간 세션 만료
+    maxAge: 24 * 60 * 60 * 1000, // 기본 24시간 (rememberMe 미체크시 핸들러에서 2시간으로 변경)
     secure: process.env.NODE_ENV === "production",
     httpOnly: true,
     sameSite: "lax" as const,
+    path: "/",        // 모든 경로에서 쿠키 전송
+    overwrite: true,  // 매 응답마다 쿠키 갱신 (만료시간 롤링)
+    signed: true,     // HMAC 서명 사용 (기본값이지만 명시)
   })
 );
 

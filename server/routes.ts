@@ -448,20 +448,20 @@ export async function registerRoutes(
     
     req.session.isAdmin = true;
 
-    // "로그인 유지" 체크 시 쿠키 만료를 24시간으로 설정
+    // 세션 쿠키 만료 설정
     const REMEMBER_MAX_AGE = 24 * 60 * 60 * 1000; // 24시간
-    if (rememberMe) {
-      // express-session (로컬 개발)
-      if (req.session.cookie) {
-        req.session.cookie.maxAge = REMEMBER_MAX_AGE;
-      }
-      // cookie-session (Vercel)
-      if ((req as any).sessionOptions) {
-        (req as any).sessionOptions.maxAge = REMEMBER_MAX_AGE;
-      }
+    const SESSION_MAX_AGE = rememberMe ? REMEMBER_MAX_AGE : (2 * 60 * 60 * 1000); // 미체크시 2시간
+    
+    // cookie-session: req.sessionOptions로 maxAge 설정
+    if ((req as any).sessionOptions) {
+      (req as any).sessionOptions.maxAge = SESSION_MAX_AGE;
+    }
+    // express-session: req.session.cookie로 maxAge 설정
+    if (req.session && (req.session as any).cookie) {
+      (req.session as any).cookie.maxAge = SESSION_MAX_AGE;
     }
 
-    console.log("Login successful, rememberMe:", !!rememberMe);
+    console.log("Login successful, rememberMe:", !!rememberMe, "maxAge:", SESSION_MAX_AGE / 1000, "s");
     res.json({ success: true, isAdmin: true });
   });
   
@@ -489,6 +489,10 @@ export async function registerRoutes(
   });
   
   app.get("/api/auth/me", (req, res) => {
+    // 인증 상태는 절대 캐시하면 안 됨
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate, private");
+    res.set("Pragma", "no-cache");
+    
     const response = {
       isAdmin: !!req.session?.isAdmin,
       userId: req.session?.userId || null,
@@ -496,6 +500,14 @@ export async function registerRoutes(
       userName: req.session?.userName || null,
       userPicture: req.session?.userPicture || null,
     };
+    
+    // 디버그: 세션 상태 확인 (Vercel 로그에서 확인 가능)
+    if (process.env.VERCEL && !response.userId && !response.isAdmin) {
+      const hasCookie = !!(req.headers.cookie);
+      const sessionKeys = req.session ? Object.keys(req.session) : [];
+      console.log(`[Auth/me] No session data. Cookie header: ${hasCookie}, Session keys: [${sessionKeys.join(",")}]`);
+    }
+    
     res.status(200).json(response);
   });
 
@@ -578,16 +590,20 @@ export async function registerRoutes(
         console.log(`[Auth] Admin privilege granted to Google user: ${email}`);
       }
 
-      // "로그인 유지" 체크 시 쿠키 만료를 24시간으로 설정
-      const REMEMBER_MAX_AGE = 24 * 60 * 60 * 1000;
-      if (rememberMe) {
-        if (req.session.cookie) {
-          req.session.cookie.maxAge = REMEMBER_MAX_AGE;
-        }
-        if ((req as any).sessionOptions) {
-          (req as any).sessionOptions.maxAge = REMEMBER_MAX_AGE;
-        }
+      // 세션 쿠키 만료 설정
+      const REMEMBER_MAX_AGE = 24 * 60 * 60 * 1000; // 24시간
+      const SESSION_MAX_AGE = rememberMe ? REMEMBER_MAX_AGE : (2 * 60 * 60 * 1000); // 미체크시 2시간
+      
+      // cookie-session: req.sessionOptions로 maxAge 설정
+      if ((req as any).sessionOptions) {
+        (req as any).sessionOptions.maxAge = SESSION_MAX_AGE;
       }
+      // express-session: req.session.cookie로 maxAge 설정
+      if (req.session && (req.session as any).cookie) {
+        (req.session as any).cookie.maxAge = SESSION_MAX_AGE;
+      }
+      
+      console.log(`[Auth] Google login: ${email}, rememberMe: ${!!rememberMe}, maxAge: ${SESSION_MAX_AGE / 1000}s`);
 
       const isAdminUser = ADMIN_EMAILS.includes(email.toLowerCase());
       res.json({
