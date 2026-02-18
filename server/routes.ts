@@ -11748,7 +11748,9 @@ ${etfListStr}
   });
 
   // ========== Heap Snapshot 관리 API ==========
-  const HEAP_SNAPSHOT_DIR = path.join(process.cwd(), ".heap-snapshots");
+  const HEAP_SNAPSHOT_DIR = process.env.VERCEL
+    ? path.join("/tmp", ".heap-snapshots")
+    : path.join(process.cwd(), ".heap-snapshots");
   const MAX_SNAPSHOTS = 5;
 
   app.post("/api/admin/system/heap-snapshot", requireAdmin, async (_req, res) => {
