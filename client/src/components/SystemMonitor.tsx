@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -8,7 +8,7 @@ import { Progress } from "@/components/ui/progress";
 import {
   RefreshCw, Server, Database, Globe, Key, Activity, Clock, HardDrive,
   Cpu, MemoryStick, CheckCircle2, XCircle, AlertTriangle, Loader2,
-  Gauge, Wifi, Lightbulb, ArrowRight, Copy, Check,
+  Gauge, Wifi, Lightbulb, ArrowRight, Copy, Check, Trash2,
 } from "lucide-react";
 
 interface QueryTiming {
@@ -260,11 +260,30 @@ function StatusDot({ status }: { status: "ok" | "warning" | "error" }) {
 
 export default function SystemMonitor() {
   const [autoRefresh, setAutoRefresh] = useState(false);
+  const [clearResult, setClearResult] = useState<{ cleared: string[]; memory: any; timestamp: string } | null>(null);
 
   const { data, isLoading, error, refetch, isFetching } = useQuery<SystemStatus>({
     queryKey: ["/api/admin/system/status"],
     refetchInterval: autoRefresh ? 30000 : false,
     staleTime: 10000,
+  });
+
+  const clearCacheMutation = useMutation({
+    mutationFn: async (target: "all" | "caches" | "gc") => {
+      const res = await fetch("/api/admin/system/clear-cache", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ target }),
+      });
+      if (!res.ok) throw new Error("캐시 클리어 실패");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      setClearResult(data);
+      // 클리어 후 시스템 상태 새로고침
+      refetch();
+    },
   });
 
   if (isLoading) {
@@ -311,17 +330,27 @@ export default function SystemMonitor() {
   return (
     <div className="space-y-6">
       {/* 헤더 */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
           <h2 className="text-lg font-bold flex items-center gap-2">
             <Activity className="w-5 h-5 text-blue-500" />
-            시스템 모니터링
+            Vercel System 점검
           </h2>
           <p className="text-xs text-muted-foreground mt-0.5">
             마지막 조회: {new Date(data.timestamp).toLocaleString("ko-KR")}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            variant="destructive"
+            size="sm"
+            className="text-xs gap-1"
+            onClick={() => clearCacheMutation.mutate("all")}
+            disabled={clearCacheMutation.isPending}
+          >
+            {clearCacheMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+            캐시/메모리 클리어
+          </Button>
           <Button
             variant={autoRefresh ? "default" : "outline"}
             size="sm"
@@ -337,6 +366,36 @@ export default function SystemMonitor() {
           </Button>
         </div>
       </div>
+
+      {/* 캐시 클리어 결과 */}
+      {clearResult && (
+        <Card className="border-green-200 bg-green-50/50 dark:bg-green-950/20 dark:border-green-800">
+          <CardContent className="p-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <h4 className="text-sm font-semibold flex items-center gap-1.5 text-green-700 dark:text-green-400">
+                  <CheckCircle2 className="w-4 h-4" />
+                  캐시/메모리 클리어 완료
+                </h4>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  {new Date(clearResult.timestamp).toLocaleString("ko-KR")}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {clearResult.cleared.map((item, i) => (
+                    <Badge key={i} variant="secondary" className="text-[10px]">{item}</Badge>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  클리어 후 메모리: RSS {clearResult.memory.rss} · Heap {clearResult.memory.heapUsed} / {clearResult.memory.heapTotal} ({clearResult.memory.heapUsagePercent})
+                </p>
+              </div>
+              <Button variant="ghost" size="sm" className="h-6 px-1.5" onClick={() => setClearResult(null)}>
+                <XCircle className="w-3 h-3" />
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* 종합 상태 카드 */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">

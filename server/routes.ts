@@ -11645,6 +11645,85 @@ ${etfListStr}
     }
   });
 
+  // ========== 캐시/메모리 클리어 API ==========
+  app.post("/api/admin/system/clear-cache", requireAdmin, async (req, res) => {
+    try {
+      const { target } = req.body; // "all" | "caches" | "gc"
+      const cleared: string[] = [];
+
+      if (target === "all" || target === "caches") {
+        // routes.ts 내부 캐시
+        systemStatusCache = null;
+        cleared.push("시스템 상태 캐시");
+
+        dbDetailCache = null;
+        cleared.push("DB 상세 캐시");
+
+        etfListCache = null;
+        cleared.push("ETF 리스트 캐시");
+
+        publicArticlesCache = null;
+        cleared.push("공개 카페글 캐시");
+
+        adminArticlesCache.clear();
+        cleared.push("관리자 카페글 캐시");
+
+        rateLimitMap.clear();
+        cleared.push("Rate Limit 맵");
+
+        prevArticleSnapshot.clear();
+        cleared.push("카페 알림 스냅샷");
+
+        cafeNotifications.length = 0;
+        cleared.push("카페 알림");
+
+        savedKeyResearch = [];
+        cleared.push("투자리서치 캐시");
+
+        stopLossLatestPrices.clear();
+        cleared.push("Stop Loss 가격 캐시");
+
+        // kisApi 캐시
+        kisApi.clearAllCaches();
+        cleared.push("KIS API 토큰/종목 캐시");
+
+        // kiwoomApi 캐시
+        kiwoomApi.clearAllCaches();
+        cleared.push("Kiwoom API 토큰 캐시");
+      }
+
+      if (target === "all" || target === "gc") {
+        // V8 Garbage Collection 수동 실행 (--expose-gc 옵션 필요)
+        if (global.gc) {
+          global.gc();
+          cleared.push("V8 GC 수동 실행 완료");
+        } else {
+          cleared.push("V8 GC 사용 불가 (--expose-gc 미설정)");
+        }
+      }
+
+      // 현재 메모리 상태
+      const mem = process.memoryUsage();
+      const memInfo = {
+        rss: `${(mem.rss / 1024 / 1024).toFixed(1)} MB`,
+        heapUsed: `${(mem.heapUsed / 1024 / 1024).toFixed(1)} MB`,
+        heapTotal: `${(mem.heapTotal / 1024 / 1024).toFixed(1)} MB`,
+        heapUsagePercent: `${((mem.heapUsed / mem.heapTotal) * 100).toFixed(1)}%`,
+      };
+
+      console.log(`[Cache Clear] Target: ${target}, Cleared: ${cleared.join(", ")}`);
+      res.json({
+        success: true,
+        cleared,
+        memory: memInfo,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error: any) {
+      console.error("[Cache Clear] Error:", error);
+      res.status(500).json({ message: error.message || "캐시 클리어 실패" });
+    }
+  });
+
   // ========== Supabase DB 서버 시스템 점검 ==========
   app.get("/api/admin/supabase/status", requireAdmin, async (_req, res) => {
     const startTime = Date.now();

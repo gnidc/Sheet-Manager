@@ -416,3 +416,8 @@ export async function getUserOrderHistory(
 export function clearUserTokenCache(userId: number) {
   userTokenCache.delete(userId);
 }
+
+/** 모든 캐시 일괄 클리어 */
+export function clearAllCaches() {
+  userTokenCache.clear();
+}

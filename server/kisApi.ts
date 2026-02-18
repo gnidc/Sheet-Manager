@@ -1661,3 +1661,12 @@ export async function getUserOrderHistory(userId: number, creds: UserKisCredenti
 export function clearUserTokenCache(userId: number) {
   userTokenCache.delete(userId);
 }
+
+/** 모든 캐시 일괄 클리어 */
+export function clearAllCaches() {
+  cachedTradeToken = null;
+  cachedMarketToken = null;
+  userTokenCache.clear();
+  stockCodeCache.clear();
+  etfComponentCache.clear();
+}
