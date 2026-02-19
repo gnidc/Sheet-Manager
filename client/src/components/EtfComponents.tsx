@@ -41,6 +41,7 @@ import {
   Save,
   Copy,
   ClipboardCopy,
+  CheckCircle2,
   Trash2,
   Star,
   ShoppingCart,
@@ -255,6 +256,8 @@ export default function EtfComponents() {
     analyzedAt: string;
     dataPoints?: { risingCount: number; fallingCount: number; newsCount: number; market: string };
   } | null>(savedAnalysis);
+  const [isSavingReport, setIsSavingReport] = useState(false);
+  const [reportSaved, setReportSaved] = useState(false);
   const [cafePostDialogOpen, setCafePostDialogOpen] = useState(false);
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
   const [previewHtml, setPreviewHtml] = useState("");
@@ -353,39 +356,8 @@ export default function EtfComponents() {
     },
     onSuccess: (data) => {
       setAnalysisResult(data);
+      setReportSaved(false);
       try { localStorage.setItem("etf_analysis_result", JSON.stringify(data)); } catch {}
-
-      // DB에 일일보고서(strategy_analyses)로 저장
-      (async () => {
-        try {
-          await fetch("/api/strategy-analyses", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            credentials: "include",
-            body: JSON.stringify({
-              period: "daily",
-              prompt: analysisPrompt || "ETF 실시간 AI 트렌드 분석",
-              urls: [],
-              fileNames: [],
-              source: "etf-realtime",
-              result: {
-                analysis: data.analysis,
-                analyzedAt: data.analyzedAt,
-                dataPoints: {
-                  indicesCount: 0,
-                  volumeCount: 0,
-                  newsCount: data.dataPoints?.newsCount || 0,
-                  urlCount: 0,
-                  etfCount: (data.dataPoints?.risingCount || 0) + (data.dataPoints?.fallingCount || 0),
-                },
-              },
-              isShared: true,
-            }),
-          });
-        } catch {
-          // DB 저장 실패 시 무시 (localStorage 백업은 아래에서 수행)
-        }
-      })();
 
       // localStorage 백업 (투자전략 > 최근보고서 리스트)
       try {
@@ -1840,9 +1812,58 @@ export default function EtfComponents() {
                       서식복사
                     </Button>
                     <Button
+                      variant={reportSaved ? "outline" : "default"}
+                      size="sm"
+                      disabled={isSavingReport || reportSaved}
+                      onClick={async () => {
+                        setIsSavingReport(true);
+                        try {
+                          const saveRes = await fetch("/api/strategy-analyses", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            credentials: "include",
+                            body: JSON.stringify({
+                              period: "daily",
+                              prompt: analysisPrompt || "ETF 실시간 AI 트렌드 분석",
+                              urls: [],
+                              fileNames: [],
+                              source: "etf-realtime",
+                              result: {
+                                analysis: analysisResult.analysis,
+                                analyzedAt: analysisResult.analyzedAt,
+                                dataPoints: {
+                                  indicesCount: 0,
+                                  volumeCount: 0,
+                                  newsCount: analysisResult.dataPoints?.newsCount || 0,
+                                  urlCount: 0,
+                                  etfCount: (analysisResult.dataPoints?.risingCount || 0) + (analysisResult.dataPoints?.fallingCount || 0),
+                                },
+                              },
+                              isShared: true,
+                            }),
+                          });
+                          if (saveRes.ok) {
+                            setReportSaved(true);
+                            toast({ title: "일일보고서 저장 완료", description: "투자전략 탭의 일일보고서 목록에서 확인할 수 있습니다." });
+                          } else {
+                            const errBody = await saveRes.json().catch(() => ({}));
+                            toast({ title: "저장 실패", description: errBody.message || `서버 오류 (${saveRes.status})`, variant: "destructive" });
+                          }
+                        } catch (err: any) {
+                          toast({ title: "저장 실패", description: err.message || "네트워크 오류", variant: "destructive" });
+                        } finally {
+                          setIsSavingReport(false);
+                        }
+                      }}
+                      className="h-7 text-xs gap-1"
+                    >
+                      {isSavingReport ? <Loader2 className="w-3 h-3 animate-spin" /> : reportSaved ? <CheckCircle2 className="w-3 h-3" /> : <Save className="w-3 h-3" />}
+                      {reportSaved ? "저장됨" : "일일보고서 저장"}
+                    </Button>
+                    <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => { setAnalysisResult(null); try { localStorage.removeItem("etf_analysis_result"); } catch {} }}
+                      onClick={() => { setAnalysisResult(null); setReportSaved(false); try { localStorage.removeItem("etf_analysis_result"); } catch {} }}
                       className="h-7 text-xs"
                     >
                       닫기
