@@ -5,11 +5,12 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Progress } from "@/components/ui/progress";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   RefreshCw, Server, Database, Globe, Key, Activity, Clock, HardDrive,
   Cpu, MemoryStick, CheckCircle2, XCircle, AlertTriangle, Loader2,
   Gauge, Wifi, Lightbulb, ArrowRight, Copy, Check, Trash2,
-  Camera, Download, FileSearch, Info,
+  Camera, Download, FileSearch, Info, Monitor, TrendingUp,
 } from "lucide-react";
 
 interface QueryTiming {
@@ -270,7 +271,7 @@ function StatusDot({ status }: { status: "ok" | "warning" | "error" }) {
   );
 }
 
-export default function SystemMonitor() {
+function MainSystemMonitor() {
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [clearResult, setClearResult] = useState<{ cleared: string[]; memory: any; timestamp: string } | null>(null);
 
@@ -1452,6 +1453,209 @@ function RecommendationsPanel({ data }: { data: SystemStatus }) {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+// ========== Trading App 시스템 모니터 ==========
+
+const TRADING_APP_URL = "https://lifefit2.vercel.app";
+
+function TradingSystemMonitor() {
+  const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [data, setData] = useState<any>(null);
+  const [pingMs, setPingMs] = useState<number | null>(null);
+
+  const runCheck = async () => {
+    setStatus("loading");
+
+    const checks: { name: string; status: string; responseTime?: number; error?: string }[] = [];
+    const start = Date.now();
+
+    // 1. 기본 연결 (ping)
+    try {
+      const pingStart = Date.now();
+      const res = await fetch(`${TRADING_APP_URL}/api/ping`, { mode: "cors" });
+      const pingTime = Date.now() - pingStart;
+      setPingMs(pingTime);
+      checks.push({ name: "서버 연결 (ping)", status: res.ok ? "ok" : "error", responseTime: pingTime, error: res.ok ? undefined : `HTTP ${res.status}` });
+    } catch (e: any) {
+      setPingMs(null);
+      checks.push({ name: "서버 연결 (ping)", status: "error", error: e.message });
+    }
+
+    // 2. 인증 API
+    try {
+      const s = Date.now();
+      const res = await fetch(`${TRADING_APP_URL}/api/auth/me`, { credentials: "include", mode: "cors" });
+      checks.push({ name: "인증 API (/api/auth/me)", status: res.ok || res.status === 401 ? "ok" : "error", responseTime: Date.now() - s, error: res.ok || res.status === 401 ? undefined : `HTTP ${res.status}` });
+    } catch (e: any) {
+      checks.push({ name: "인증 API (/api/auth/me)", status: "error", error: e.message });
+    }
+
+    // 3. 트레이딩 상태 API
+    try {
+      const s = Date.now();
+      const res = await fetch(`${TRADING_APP_URL}/api/trading/status`, { credentials: "include", mode: "cors" });
+      checks.push({ name: "트레이딩 API (/api/trading/status)", status: res.ok || res.status === 401 ? "ok" : "error", responseTime: Date.now() - s, error: res.ok || res.status === 401 ? undefined : `HTTP ${res.status}` });
+    } catch (e: any) {
+      checks.push({ name: "트레이딩 API (/api/trading/status)", status: "error", error: e.message });
+    }
+
+    const totalMs = Date.now() - start;
+    const okCount = checks.filter(c => c.status === "ok").length;
+
+    setData({ checks, totalMs, okCount, totalCount: checks.length, checkedAt: new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }) });
+    setStatus(okCount === checks.length ? "success" : "error");
+  };
+
+  if (status === "idle") {
+    return (
+      <Card>
+        <CardContent className="py-16 text-center">
+          <TrendingUp className="w-14 h-14 mx-auto text-emerald-400/60 mb-4" />
+          <h3 className="text-lg font-bold">Trading App 시스템 점검</h3>
+          <p className="text-sm text-muted-foreground mt-2 mb-1">
+            배포 URL: <a href={TRADING_APP_URL} target="_blank" rel="noreferrer" className="text-primary hover:underline">{TRADING_APP_URL}</a>
+          </p>
+          <p className="text-sm text-muted-foreground mb-6">
+            Trading App의 서버 연결, 인증 API, 트레이딩 API 상태를 확인합니다.
+          </p>
+          <Button size="lg" className="gap-2 px-8" onClick={runCheck}>
+            <Activity className="w-5 h-5" />
+            시스템 점검 실행
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (status === "loading") {
+    return (
+      <div className="flex justify-center items-center h-60">
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+        <span className="ml-2 text-sm text-muted-foreground">Trading App 점검 중...</span>
+      </div>
+    );
+  }
+
+  const overallOk = data?.okCount === data?.totalCount;
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <Card>
+          <CardContent className="py-4 flex items-center gap-3">
+            <div className={`p-2 rounded-lg ${overallOk ? "bg-green-100 dark:bg-green-950/40" : "bg-red-100 dark:bg-red-950/40"}`}>
+              {overallOk ? <CheckCircle2 className="w-5 h-5 text-green-600" /> : <XCircle className="w-5 h-5 text-red-500" />}
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">종합 상태</p>
+              <p className={`text-sm font-bold ${overallOk ? "text-green-600" : "text-red-500"}`}>
+                {overallOk ? "정상" : "이상 감지"}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="py-4 flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-950/40">
+              <Wifi className="w-5 h-5 text-blue-600" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">서버 응답</p>
+              <p className="text-sm font-bold">{pingMs !== null ? `${pingMs}ms` : "N/A"}</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="py-4 flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-purple-100 dark:bg-purple-950/40">
+              <Clock className="w-5 h-5 text-purple-600" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">총 점검 시간</p>
+              <p className="text-sm font-bold">{data?.totalMs}ms</p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Globe className="w-4 h-4" />
+              API 연결 상태 ({data?.okCount}/{data?.totalCount})
+            </CardTitle>
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={runCheck}>
+              <RefreshCw className="w-3.5 h-3.5" />
+              재점검
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>API</TableHead>
+                <TableHead className="w-24 text-center">상태</TableHead>
+                <TableHead className="w-28 text-right">응답시간</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data?.checks.map((check: any, i: number) => (
+                <TableRow key={i}>
+                  <TableCell className="text-sm">{check.name}</TableCell>
+                  <TableCell className="text-center">
+                    {check.status === "ok" ? (
+                      <Badge className="bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-400">정상</Badge>
+                    ) : (
+                      <Badge variant="destructive">오류</Badge>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right text-sm font-mono">
+                    {check.responseTime ? `${check.responseTime}ms` : "-"}
+                    {check.error && <p className="text-[10px] text-red-500 mt-0.5">{check.error}</p>}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <p className="text-[11px] text-muted-foreground mt-3 text-right">
+            점검 시각: {data?.checkedAt}
+          </p>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ========== 통합 시스템 모니터 (탭 래퍼) ==========
+
+export default function SystemMonitor() {
+  const [activeSystem, setActiveSystem] = useState("main");
+
+  return (
+    <div className="space-y-4">
+      <Tabs value={activeSystem} onValueChange={setActiveSystem}>
+        <TabsList className="grid w-full max-w-md grid-cols-2">
+          <TabsTrigger value="main" className="gap-1.5">
+            <Monitor className="w-4 h-4" />
+            시스템1 (메인)
+          </TabsTrigger>
+          <TabsTrigger value="trading" className="gap-1.5">
+            <TrendingUp className="w-4 h-4" />
+            시스템2 (트레이딩)
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="main">
+          <MainSystemMonitor />
+        </TabsContent>
+        <TabsContent value="trading">
+          <TradingSystemMonitor />
+        </TabsContent>
+      </Tabs>
+    </div>
   );
 }
 

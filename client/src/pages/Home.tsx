@@ -1665,7 +1665,7 @@ const HomeEmbed = memo(function HomeEmbed({ onNavigate }: { onNavigate: (tab: st
     staleTime: 5 * 60 * 1000,
   });
 
-  // 카페 알림 조회 (2분마다 자동 폴링)
+  // 카페 알림 조회 (10분마다 자동 폴링)
   const { data: notifData, refetch: refetchNotifications } = useQuery<{
     notifications: CafeNotification[];
     lastChecked: number;
@@ -1680,7 +1680,7 @@ const HomeEmbed = memo(function HomeEmbed({ onNavigate }: { onNavigate: (tab: st
     },
     enabled: isAdmin,
     staleTime: 60 * 1000, // 1분
-    refetchInterval: 2 * 60 * 1000, // 2분마다 자동 갱신
+    refetchInterval: 10 * 60 * 1000, // 10분마다 자동 갱신
   });
 
   const notifications = notifData?.notifications || [];
@@ -2082,7 +2082,7 @@ const HomeEmbed = memo(function HomeEmbed({ onNavigate }: { onNavigate: (tab: st
                 <div className="px-4 py-6 text-center text-sm text-muted-foreground">
                   <Bell className="w-8 h-8 mx-auto mb-2 opacity-20" />
                   <p>새로운 알림이 없습니다</p>
-                  <p className="text-xs mt-1">2분마다 자동으로 확인합니다</p>
+                  <p className="text-xs mt-1">10분마다 자동으로 확인합니다</p>
                 </div>
               ) : (
                 <div className="divide-y">
