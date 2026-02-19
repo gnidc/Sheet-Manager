@@ -1100,7 +1100,7 @@ function MarketsView({ type }: { type: "domestic" | "global" | "etc" | "calendar
 }
 
 // ===== 일반 유저용 공개 카페 글 목록 (버튼 클릭 시 로딩) =====
-function PublicCafeView() {
+function PublicCafeView({ showNews, onToggleNews, newsLoading }: { showNews: boolean; onToggleNews: () => void; newsLoading?: boolean }) {
   const [showArticles, setShowArticles] = useState(false);
   const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -1170,15 +1170,27 @@ function PublicCafeView() {
 
   return (
     <div className="space-y-4">
-      {/* 카페 최신글 버튼 */}
+      {/* 카페 헤더 + 최신뉴스 */}
       <div className="overflow-hidden rounded-lg border">
         <div className="flex items-center justify-between px-4 py-2.5 bg-muted/30">
           <div className="flex items-center gap-2">
-            <img
-              src="https://ssl.pstatic.net/static/cafe/cafe_pc/default/cafe_logo_img.png"
-              alt="카페"
-              className="w-5 h-5"
-            />
+            <Button
+              variant={showNews ? "default" : "outline"}
+              size="sm"
+              className="gap-1.5 text-xs h-7"
+              onClick={onToggleNews}
+            >
+              {newsLoading ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : (
+                <Newspaper className="w-3 h-3" />
+              )}
+              최신뉴스
+              {showNews && <span className="text-[10px] opacity-60">▲</span>}
+              {!showNews && <span className="text-[10px] opacity-60">▼</span>}
+            </Button>
+          </div>
+          <div className="flex items-center gap-1.5">
             <Button
               variant={showArticles ? "default" : "outline"}
               size="sm"
@@ -1196,16 +1208,16 @@ function PublicCafeView() {
               {!showArticles && <span className="text-[10px] opacity-60">▼</span>}
             </Button>
             {isFetching && showArticles && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => window.open(CAFE_URL, "_blank", "noopener,noreferrer")}
+              className="gap-1.5 text-xs h-7"
+            >
+              <ExternalLink className="w-3 h-3" />
+              카페 열기
+            </Button>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => window.open(CAFE_URL, "_blank", "noopener,noreferrer")}
-            className="gap-1.5 text-xs h-7"
-          >
-            <ExternalLink className="w-3 h-3" />
-            카페 열기
-          </Button>
         </div>
 
         {/* 펼쳐진 상태: 검색바 + 글 목록 */}
@@ -1616,6 +1628,9 @@ const HomeEmbed = memo(function HomeEmbed({ onNavigate }: { onNavigate: (tab: st
   const [previewArticleId, setPreviewArticleId] = useState<number | null>(null);
   const [showNotifications, setShowNotifications] = useState(false);
 
+  // 최신뉴스 토글 상태 (일반 유저용)
+  const [showNews, setShowNews] = useState(false);
+
   // 글쓰기 상태
   const [showWriteDialog, setShowWriteDialog] = useState(false);
   const [writeSubject, setWriteSubject] = useState("");
@@ -1833,28 +1848,27 @@ const HomeEmbed = memo(function HomeEmbed({ onNavigate }: { onNavigate: (tab: st
     writeMutation.mutate({ subject: writeSubject, content: writeContent, menuId: writeMenuId });
   };
 
-  // 일반 유저: 공개 카페 글 목록 + 주요뉴스 (로그인 확인 후 뉴스 로딩)
+  // 일반 유저: 공개 카페 글 목록 + 주요뉴스 (버튼 클릭 시에만 로딩)
   if (!isAdmin) {
     return (
       <>
         <NoticeBoard />
         <QuickLinks onNavigate={onNavigate} />
-        <PublicCafeView />
-        {authLoading ? (
-          <div className="mt-4 py-10 text-center">
-            <Loader2 className="w-6 h-6 animate-spin text-primary mx-auto mb-2" />
-            <p className="text-xs text-muted-foreground">로그인 확인 중...</p>
-          </div>
-        ) : !isLoggedIn ? (
-          <div className="mt-4 py-8 text-center border rounded-lg bg-muted/20">
-            <Newspaper className="w-8 h-8 mx-auto text-muted-foreground/40 mb-2" />
-            <p className="text-sm text-muted-foreground">먼저 구글계정 로그인을 하시면 주요 뉴스를 로딩합니다...</p>
-          </div>
-        ) : (
+        <PublicCafeView
+          showNews={showNews}
+          onToggleNews={() => setShowNews(prev => !prev)}
+        />
+        {showNews && isLoggedIn && (
           <div className="mt-4">
             <Suspense fallback={<div className="py-10 text-center"><Loader2 className="w-6 h-6 animate-spin text-primary mx-auto" /></div>}>
               <MarketNews />
             </Suspense>
+          </div>
+        )}
+        {showNews && !authLoading && !isLoggedIn && (
+          <div className="mt-4 py-8 text-center border rounded-lg bg-muted/20">
+            <Newspaper className="w-8 h-8 mx-auto text-muted-foreground/40 mb-2" />
+            <p className="text-sm text-muted-foreground">먼저 구글계정 로그인을 하시면 주요 뉴스를 로딩합니다...</p>
           </div>
         )}
       </>
@@ -1908,26 +1922,16 @@ const HomeEmbed = memo(function HomeEmbed({ onNavigate }: { onNavigate: (tab: st
         {/* 헤더 */}
         <div className="flex items-center justify-between px-4 py-2.5 bg-muted/30">
           <div className="flex items-center gap-2">
-            <img
-              src="https://ssl.pstatic.net/static/cafe/cafe_pc/default/cafe_logo_img.png"
-              alt="카페"
-              className="w-5 h-5"
-            />
             <Button
-              variant={showCafeArticles ? "default" : "outline"}
+              variant={showNews ? "default" : "outline"}
               size="sm"
               className="gap-1.5 text-xs h-7"
-              onClick={() => setShowCafeArticles(!showCafeArticles)}
-              disabled={isLoading}
+              onClick={() => setShowNews(prev => !prev)}
             >
-              {isLoading ? (
-                <Loader2 className="w-3 h-3 animate-spin" />
-              ) : (
-                <Newspaper className="w-3 h-3" />
-              )}
-              카페 최신글(5개)
-              {showCafeArticles && !isLoading && <span className="text-[10px] opacity-60">▲</span>}
-              {!showCafeArticles && <span className="text-[10px] opacity-60">▼</span>}
+              <Newspaper className="w-3 h-3" />
+              최신뉴스
+              {showNews && <span className="text-[10px] opacity-60">▲</span>}
+              {!showNews && <span className="text-[10px] opacity-60">▼</span>}
             </Button>
             {isSearchMode && searchQuery && (
               <span className="text-xs text-primary font-medium">"{searchQuery}" 검색결과</span>
@@ -2003,6 +2007,23 @@ const HomeEmbed = memo(function HomeEmbed({ onNavigate }: { onNavigate: (tab: st
             >
               <PenSquare className="w-3 h-3" />
               글쓰기
+            </Button>
+
+            <Button
+              variant={showCafeArticles ? "default" : "outline"}
+              size="sm"
+              className="gap-1.5 text-xs h-7"
+              onClick={() => setShowCafeArticles(!showCafeArticles)}
+              disabled={isLoading}
+            >
+              {isLoading ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : (
+                <Newspaper className="w-3 h-3" />
+              )}
+              카페 최신글(5개)
+              {showCafeArticles && !isLoading && <span className="text-[10px] opacity-60">▲</span>}
+              {!showCafeArticles && <span className="text-[10px] opacity-60">▼</span>}
             </Button>
 
             <Button 
@@ -2290,13 +2311,8 @@ const HomeEmbed = memo(function HomeEmbed({ onNavigate }: { onNavigate: (tab: st
         )}
         </div>
 
-      {/* 주요뉴스 (로그인 확인 후 로딩) */}
-      {authLoading ? (
-        <div className="mt-4 py-10 text-center">
-          <Loader2 className="w-6 h-6 animate-spin text-primary mx-auto mb-2" />
-          <p className="text-xs text-muted-foreground">로그인 확인 중...</p>
-        </div>
-      ) : (
+      {/* 주요뉴스 (버튼 클릭 시에만 로딩) */}
+      {showNews && (
         <div className="mt-4">
           <Suspense fallback={<div className="py-10 text-center"><Loader2 className="w-6 h-6 animate-spin text-primary mx-auto" /></div>}>
             <MarketNews />
