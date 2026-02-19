@@ -354,7 +354,40 @@ export default function EtfComponents() {
     onSuccess: (data) => {
       setAnalysisResult(data);
       try { localStorage.setItem("etf_analysis_result", JSON.stringify(data)); } catch {}
-      // 투자전략 > 최근보고서 리스트에도 저장 (daily 기준)
+
+      // DB에 일일보고서(strategy_analyses)로 저장
+      (async () => {
+        try {
+          await fetch("/api/strategy-analyses", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({
+              period: "daily",
+              prompt: analysisPrompt || "ETF 실시간 AI 트렌드 분석",
+              urls: [],
+              fileNames: [],
+              source: "etf-realtime",
+              result: {
+                analysis: data.analysis,
+                analyzedAt: data.analyzedAt,
+                dataPoints: {
+                  indicesCount: 0,
+                  volumeCount: 0,
+                  newsCount: data.dataPoints?.newsCount || 0,
+                  urlCount: 0,
+                  etfCount: (data.dataPoints?.risingCount || 0) + (data.dataPoints?.fallingCount || 0),
+                },
+              },
+              isShared: true,
+            }),
+          });
+        } catch {
+          // DB 저장 실패 시 무시 (localStorage 백업은 아래에서 수행)
+        }
+      })();
+
+      // localStorage 백업 (투자전략 > 최근보고서 리스트)
       try {
         const STRATEGY_KEY = "strategy_ai_analysis_daily";
         const MAX_SAVED = 5;
