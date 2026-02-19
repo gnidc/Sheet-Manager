@@ -40,10 +40,43 @@ import {
   BookOpen,
   Save,
   Copy,
+  ClipboardCopy,
   Trash2,
   Star,
   ShoppingCart,
 } from "lucide-react";
+
+async function copyAsRichText(markdown: string): Promise<boolean> {
+  try {
+    let html = markdown
+      .replace(/^#### (.+)$/gm, '<h4 style="font-size:14px;font-weight:bold;margin:12px 0 4px;">$1</h4>')
+      .replace(/^### (.+)$/gm, '<h3 style="font-size:16px;font-weight:bold;margin:14px 0 6px;">$1</h3>')
+      .replace(/^## (.+)$/gm, '<h2 style="font-size:18px;font-weight:bold;margin:16px 0 6px;">$1</h2>')
+      .replace(/^# (.+)$/gm, '<h1 style="font-size:20px;font-weight:bold;margin:18px 0 8px;">$1</h1>')
+      .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+      .replace(/\*(.+?)\*/g, '<i>$1</i>')
+      .replace(/^---+$/gm, '<hr style="border:none;border-top:1px solid #ccc;margin:12px 0;">')
+      .replace(/^(\d+)\. (.+)$/gm, '<div style="margin-left:16px;">$1. $2</div>')
+      .replace(/^[-*] (.+)$/gm, '<div style="margin-left:16px;">• $1</div>')
+      .replace(/`(.+?)`/g, '<code style="background:#f1f1f1;padding:1px 4px;border-radius:3px;font-size:13px;">$1</code>')
+      .replace(/\n\n/g, '</p><p style="margin:8px 0;">')
+      .replace(/\n/g, '<br>');
+    html = `<div style="font-family:'Malgun Gothic','맑은 고딕',sans-serif;font-size:14px;line-height:1.7;color:#333;"><p style="margin:8px 0;">${html}</p></div>`;
+    const htmlBlob = new Blob([html], { type: "text/html" });
+    const textBlob = new Blob([markdown], { type: "text/plain" });
+    await navigator.clipboard.write([
+      new ClipboardItem({ "text/html": htmlBlob, "text/plain": textBlob }),
+    ]);
+    return true;
+  } catch {
+    try {
+      await navigator.clipboard.writeText(markdown);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
 
 type SortField = "weight" | "changePercent" | null;
 type SortDirection = "asc" | "desc";
@@ -1756,6 +1789,22 @@ export default function EtfComponents() {
                     >
                       <Copy className="w-3 h-3" />
                       복사
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        const ok = await copyAsRichText(analysisResult.analysis);
+                        if (ok) {
+                          toast({ title: "서식복사 완료", description: "서식이 포함된 보고서가 복사되었습니다. 워드/한글/노션 등에 붙여넣기 하세요." });
+                        } else {
+                          toast({ title: "복사 실패", description: "클립보드 접근이 거부되었습니다.", variant: "destructive" });
+                        }
+                      }}
+                      className="h-7 text-xs gap-1"
+                    >
+                      <ClipboardCopy className="w-3 h-3" />
+                      서식복사
                     </Button>
                     <Button
                       variant="ghost"
