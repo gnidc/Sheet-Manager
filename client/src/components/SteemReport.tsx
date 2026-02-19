@@ -692,32 +692,62 @@ export default function SteemReport() {
     toast({ title: "초안을 편집 모드로 불러왔습니다" });
   }, []);
 
-  // ===== AI 분석 보고서 불러오기 (DB API에서 가져오기) =====
-  const handleLoadAIReport = useCallback(async () => {
-    setIsLoadingReport(true);
+  // ===== AI 보고서 선택 다이얼로그 =====
+  const [reportPickerOpen, setReportPickerOpen] = useState(false);
+  const [reportList, setReportList] = useState<{
+    id: string;
+    createdAt: string;
+    prompt: string;
+    source: string;
+    result: { analysis: string; analyzedAt?: string; dataPoints?: any };
+    createdBy: string;
+  }[]>([]);
+  const [isLoadingReportList, setIsLoadingReportList] = useState(false);
+
+  const handleOpenReportPicker = useCallback(async () => {
+    setReportPickerOpen(true);
+    setIsLoadingReportList(true);
     try {
-      const aiReport = await fetchLatestReportFromDB();
-    if (aiReport) {
-      setPostBody(aiReport.text);
-      setPostTitle(getDefaultTitle(aiReport.periodLabel));
-      toast({ title: `✅ AI ${aiReport.periodLabel} 분석 보고서를 불러왔습니다` });
-    } else {
-      toast({
-        title: "보고서 없음",
-        description: "AI 분석 보고서가 없습니다. 투자전략 탭에서 먼저 AI 분석을 실행해주세요.",
-        variant: "destructive",
-      });
+      const res = await fetch("/api/strategy-analyses/daily", { credentials: "include" });
+      if (res.ok) {
+        const data = await res.json();
+        setReportList(data.analyses || []);
+      } else {
+        setReportList([]);
       }
     } catch {
-      toast({
-        title: "불러오기 실패",
-        description: "보고서를 불러오는 중 오류가 발생했습니다.",
-        variant: "destructive",
-      });
+      setReportList([]);
     } finally {
-      setIsLoadingReport(false);
+      setIsLoadingReportList(false);
     }
   }, []);
+
+  const handleSelectReport = useCallback((report: typeof reportList[number]) => {
+    const analysis = report.result?.analysis || "";
+    if (!analysis) {
+      toast({ title: "본문 없음", description: "이 보고서에는 분석 내용이 없습니다.", variant: "destructive" });
+      return;
+    }
+    const sourceLabel = report.source === "etf-realtime" ? "AI 트렌드 분석 보고서" : "AI 일간 분석 보고서";
+    const lines: string[] = [];
+    lines.push("# Comment");
+    lines.push(""); lines.push(""); lines.push("");
+    lines.push(`# 📊 ${sourceLabel}`);
+    lines.push("");
+    lines.push(`> 생성 시간: ${report.createdAt}`);
+    lines.push("");
+    lines.push(analysis);
+    lines.push("");
+    lines.push("---");
+    lines.push("*이 보고서는 AI가 자동 수집 데이터를 기반으로 생성한 내용입니다.*");
+    lines.push("*데이터 출처: 네이버 금융, Yahoo Finance, CoinGecko, 한국투자증권 API 등*");
+
+    setPostBody(lines.join("\n"));
+    const periodLabel = report.source === "etf-realtime" ? "실시간ETF" : "일간";
+    setPostTitle(getDefaultTitle(periodLabel));
+    setReportPickerOpen(false);
+    toast({ title: `✅ ${sourceLabel}를 불러왔습니다`, description: `작성일: ${report.createdAt}` });
+  }, [toast]);
 
   // ===== 본문 복사 =====
   const handleCopyBody = useCallback(() => {
@@ -929,8 +959,8 @@ export default function SteemReport() {
               {editingDraft ? "초안 편집" : "새 포스팅 작성"}
             </CardTitle>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={handleLoadAIReport} disabled={isLoadingReport} className="gap-1 text-xs text-purple-600 border-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950">
-                {isLoadingReport ? <Loader2 className="w-3 h-3 animate-spin" /> : <BrainCircuit className="w-3 h-3" />} AI 보고서
+              <Button variant="outline" size="sm" onClick={handleOpenReportPicker} className="gap-1 text-xs text-purple-600 border-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950">
+                <BrainCircuit className="w-3 h-3" /> AI 보고서
               </Button>
               <Button variant="outline" size="sm" onClick={loadTemplate} className="gap-1 text-xs">
                 <FileText className="w-3 h-3" /> 템플릿
@@ -1288,6 +1318,61 @@ export default function SteemReport() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ===== AI 보고서 선택 다이얼로그 ===== */}
+      <Dialog open={reportPickerOpen} onOpenChange={setReportPickerOpen}>
+        <DialogContent className="max-w-lg max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <BrainCircuit className="w-5 h-5 text-purple-600" />
+              일일보고서에서 선택
+            </DialogTitle>
+          </DialogHeader>
+          <div className="overflow-y-auto flex-1 -mx-2 px-2">
+            {isLoadingReportList ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="w-5 h-5 animate-spin text-primary mr-2" />
+                <span className="text-sm text-muted-foreground">보고서 목록 불러오는 중...</span>
+              </div>
+            ) : reportList.length === 0 ? (
+              <div className="text-center py-12">
+                <AlertTriangle className="w-8 h-8 mx-auto text-muted-foreground/50 mb-2" />
+                <p className="text-sm text-muted-foreground">저장된 일일보고서가 없습니다.</p>
+                <p className="text-xs text-muted-foreground mt-1">투자전략 또는 실시간ETF 탭에서 AI 분석을 실행하고 저장해주세요.</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {reportList.map((report) => (
+                  <button
+                    key={report.id}
+                    onClick={() => handleSelectReport(report)}
+                    className="w-full text-left border rounded-lg p-3 hover:bg-accent/50 transition-colors"
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-2">
+                        <Badge variant={report.source === "etf-realtime" ? "default" : "secondary"} className="text-[10px]">
+                          {report.source === "etf-realtime" ? "실시간ETF" : "투자전략"}
+                        </Badge>
+                        <span className="text-xs text-muted-foreground">{report.createdBy}</span>
+                      </div>
+                      <span className="text-xs text-muted-foreground flex items-center gap-1">
+                        <Clock className="w-3 h-3" />
+                        {report.createdAt}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground truncate mt-1">
+                      {report.prompt || "프롬프트 없음"}
+                    </p>
+                    <p className="text-xs mt-1.5 line-clamp-2 text-foreground/80">
+                      {(report.result?.analysis || "").slice(0, 150)}...
+                    </p>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>
