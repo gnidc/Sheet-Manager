@@ -181,6 +181,10 @@ export default function SteemReader() {
     const saved = parseInt(localStorage.getItem("steem_body_font_size") || "14");
     return isNaN(saved) ? 14 : saved;
   });
+  const [listFontSize, setListFontSize] = useState<number>(() => {
+    const saved = parseInt(localStorage.getItem("steem_list_font_size") || "14");
+    return isNaN(saved) ? 14 : saved;
+  });
 
   const increaseFontSize = useCallback(() => {
     setBodyFontSize((prev) => {
@@ -194,6 +198,22 @@ export default function SteemReader() {
     setBodyFontSize((prev) => {
       const next = Math.max(prev - 2, 10);
       localStorage.setItem("steem_body_font_size", String(next));
+      return next;
+    });
+  }, []);
+
+  const increaseListFont = useCallback(() => {
+    setListFontSize((prev) => {
+      const next = Math.min(prev + 2, 24);
+      localStorage.setItem("steem_list_font_size", String(next));
+      return next;
+    });
+  }, []);
+
+  const decreaseListFont = useCallback(() => {
+    setListFontSize((prev) => {
+      const next = Math.max(prev - 2, 10);
+      localStorage.setItem("steem_list_font_size", String(next));
       return next;
     });
   }, []);
@@ -594,16 +614,44 @@ export default function SteemReader() {
             ? `최근 3일 전체글 (${filteredPosts.length}건)`
             : `@${selectedAuthorFilter}의 글 (${filteredPosts.length}건)`}
         </h3>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => refetch()}
-          disabled={isFetching}
-          className="gap-1"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} />
-          새로고침
-        </Button>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 w-6 p-0"
+              onClick={decreaseListFont}
+              disabled={listFontSize <= 10}
+              title="리스트 글자 축소"
+            >
+              <Minus className="h-3 w-3" />
+            </Button>
+            <span className="text-xs font-medium w-7 text-center text-muted-foreground">
+              {listFontSize}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 w-6 p-0"
+              onClick={increaseListFont}
+              disabled={listFontSize >= 24}
+              title="리스트 글자 확대"
+            >
+              <Plus className="h-3 w-3" />
+            </Button>
+            <Type className="h-3.5 w-3.5 text-muted-foreground" />
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="gap-1"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} />
+            새로고침
+          </Button>
+        </div>
       </div>
 
       {/* 로딩 */}
@@ -654,14 +702,20 @@ export default function SteemReader() {
                       className="text-left w-full"
                       onClick={() => setExpandedPost(isExpanded ? null : key)}
                     >
-                      <h4 className="font-medium text-sm leading-snug hover:text-primary transition-colors line-clamp-2">
+                      <h4
+                        className="font-medium leading-snug hover:text-primary transition-colors line-clamp-2"
+                        style={{ fontSize: `${listFontSize}px` }}
+                      >
                         {post.title}
                       </h4>
                     </button>
 
                     {/* 미리보기 (축소 상태) */}
                     {!isExpanded && (
-                      <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                      <p
+                        className="text-muted-foreground mt-1 line-clamp-2"
+                        style={{ fontSize: `${Math.max(listFontSize - 2, 10)}px` }}
+                      >
                         {stripMarkdown(post.body)}
                       </p>
                     )}
