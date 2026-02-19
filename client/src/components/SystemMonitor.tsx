@@ -1486,7 +1486,7 @@ function TradingSystemMonitor() {
     // 2. 인증 API
     try {
       const s = Date.now();
-      const res = await fetch(`${TRADING_APP_URL}/api/auth/me`, { credentials: "include", mode: "cors" });
+      const res = await fetch(`${TRADING_APP_URL}/api/auth/me`, { mode: "cors" });
       checks.push({ name: "인증 API (/api/auth/me)", status: res.ok || res.status === 401 ? "ok" : "error", responseTime: Date.now() - s, error: res.ok || res.status === 401 ? undefined : `HTTP ${res.status}` });
     } catch (e: any) {
       checks.push({ name: "인증 API (/api/auth/me)", status: "error", error: e.message });
@@ -1495,7 +1495,7 @@ function TradingSystemMonitor() {
     // 3. 트레이딩 상태 API
     try {
       const s = Date.now();
-      const res = await fetch(`${TRADING_APP_URL}/api/trading/status`, { credentials: "include", mode: "cors" });
+      const res = await fetch(`${TRADING_APP_URL}/api/trading/status`, { mode: "cors" });
       checks.push({ name: "트레이딩 API (/api/trading/status)", status: res.ok || res.status === 401 ? "ok" : "error", responseTime: Date.now() - s, error: res.ok || res.status === 401 ? undefined : `HTTP ${res.status}` });
     } catch (e: any) {
       checks.push({ name: "트레이딩 API (/api/trading/status)", status: "error", error: e.message });
