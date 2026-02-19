@@ -105,6 +105,8 @@ import {
   skillExecutionLogs,
   type SkillExecutionLog,
   type InsertSkillExecutionLog,
+  systemTradingConfig,
+  type SystemTradingConfig,
 } from "../shared/schema.js";
 import { eq, and, or, desc, isNull, inArray, sql } from "drizzle-orm";
 
@@ -141,6 +143,10 @@ export interface IStorage {
   createUser(user: InsertUser): Promise<User>;
   getUser(id: number): Promise<User | undefined>;
   getUsers(): Promise<User[]>;
+
+  // System Trading Config (관리자 시스템 기본 - DB 기반)
+  getSystemTradingConfig(): Promise<SystemTradingConfig | undefined>;
+  upsertSystemTradingConfig(data: Partial<SystemTradingConfig>): Promise<SystemTradingConfig>;
 
   // User Trading Configs (멀티 API)
   getUserTradingConfig(userId: number): Promise<UserTradingConfig | undefined>;  // 활성 설정 반환 (호환성)
@@ -598,6 +604,43 @@ export class DatabaseStorage implements IStorage {
       });
     }
     return await db.select().from(users).orderBy(desc(users.createdAt));
+  }
+
+  // ========== System Trading Config (관리자 시스템 기본) ==========
+
+  async getSystemTradingConfig(): Promise<SystemTradingConfig | undefined> {
+    const query = async (database: any) => {
+      const [row] = await database.select().from(systemTradingConfig).limit(1);
+      return row;
+    };
+    if (process.env.VERCEL) return await executeWithClient(query);
+    return await query(db);
+  }
+
+  async upsertSystemTradingConfig(data: Partial<SystemTradingConfig>): Promise<SystemTradingConfig> {
+    const query = async (database: any) => {
+      const [existing] = await database.select().from(systemTradingConfig).limit(1);
+      if (existing) {
+        const [updated] = await database.update(systemTradingConfig)
+          .set({ ...data, updatedAt: new Date() })
+          .where(eq(systemTradingConfig.id, existing.id))
+          .returning();
+        return updated;
+      }
+      const [created] = await database.insert(systemTradingConfig)
+        .values({
+          broker: data.broker || "kis",
+          appKey: data.appKey || "",
+          appSecret: data.appSecret || "",
+          accountNo: data.accountNo || "",
+          accountProductCd: data.accountProductCd || "01",
+          mockTrading: data.mockTrading ?? true,
+        })
+        .returning();
+      return created;
+    };
+    if (process.env.VERCEL) return await executeWithClient(query);
+    return await query(db);
   }
 
   // ========== User Trading Configs ==========

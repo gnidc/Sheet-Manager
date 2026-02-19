@@ -1,27 +1,68 @@
 import axios from "axios";
 
-// ========== KIS API 설정 ==========
-const KIS_MOCK_TRADING = process.env.KIS_MOCK_TRADING?.toLowerCase() === "true";
+// ========== KIS API 설정 (DB 우선, ENV fallback) ==========
 const KIS_REAL_URL = "https://openapi.koreainvestment.com:9443";
 const KIS_MOCK_URL = "https://openapivts.koreainvestment.com:29443";
-// 매매용 URL (모의/실전 분리)
-const KIS_TRADE_URL = KIS_MOCK_TRADING ? KIS_MOCK_URL : KIS_REAL_URL;
-// 시세조회용 URL (항상 실전 서버 사용 - 모의투자 서버는 시세 API 미지원)
+
+function parseAccountNo(raw: string) {
+  const cleaned = raw.replace(/-/g, "").trim();
+  return {
+    accountNo: cleaned.length >= 10 ? cleaned.slice(0, 8) : cleaned,
+    accountProductCd: cleaned.length >= 10 ? cleaned.slice(8, 10) : "01",
+  };
+}
+
+// ENV 기반 초기값 (DB 로드 전 / DB 미설정 시 사용)
+const envRaw = (process.env.KIS_ACCOUNT_NO || "").replace(/-/g, "").trim();
+let KIS_MOCK_TRADING = process.env.KIS_MOCK_TRADING?.toLowerCase() === "true";
+let KIS_TRADE_URL = KIS_MOCK_TRADING ? KIS_MOCK_URL : KIS_REAL_URL;
 const KIS_MARKET_URL = KIS_REAL_URL;
-const KIS_APP_KEY = process.env.KIS_APP_KEY || "";
-const KIS_APP_SECRET = process.env.KIS_APP_SECRET || "";
+let KIS_APP_KEY = process.env.KIS_APP_KEY || "";
+let KIS_APP_SECRET = process.env.KIS_APP_SECRET || "";
+let KIS_ACCOUNT_NO = envRaw.length >= 10 ? envRaw.slice(0, 8) : envRaw;
+let KIS_ACCOUNT_PRODUCT_CD = envRaw.length >= 10 ? envRaw.slice(8, 10) : (process.env.KIS_ACCOUNT_PRODUCT_CD || "01");
 
-// 계좌번호 자동 파싱: "50151234-01", "5015123401", "50151234" 모두 지원
-const rawAccountNo = (process.env.KIS_ACCOUNT_NO || "").replace(/-/g, "").trim();
-const KIS_ACCOUNT_NO = rawAccountNo.length >= 10 ? rawAccountNo.slice(0, 8) : rawAccountNo; // 앞 8자리
-const KIS_ACCOUNT_PRODUCT_CD = rawAccountNo.length >= 10 
-  ? rawAccountNo.slice(8, 10) 
-  : (process.env.KIS_ACCOUNT_PRODUCT_CD || "01"); // 뒤 2자리
+let systemConfigLoaded = false;
 
-console.log(`[KIS] Account parsed: CANO=${KIS_ACCOUNT_NO.slice(0,4)}****, ACNT_PRDT_CD=${KIS_ACCOUNT_PRODUCT_CD}, rawLength=${rawAccountNo.length}`);
+/** DB에서 시스템 설정 로드 → 모듈 변수 갱신. 서버 시작 시 & 설정 변경 시 호출 */
+export async function loadSystemConfigFromDB(): Promise<void> {
+  try {
+    const { db: database } = await import("./db.js");
+    const { sql } = await import("drizzle-orm");
+    const result = await database.execute(
+      sql`SELECT app_key, app_secret, account_no, account_product_cd, mock_trading FROM system_trading_config LIMIT 1`
+    );
+    const row = (result as any).rows?.[0];
+    if (row && row.app_key) {
+      const { decrypt } = await import("./encryption.js");
+      KIS_APP_KEY = decrypt(row.app_key);
+      KIS_APP_SECRET = decrypt(row.app_secret);
+      const parsed = parseAccountNo(decrypt(row.account_no));
+      KIS_ACCOUNT_NO = parsed.accountNo;
+      KIS_ACCOUNT_PRODUCT_CD = row.account_product_cd || parsed.accountProductCd;
+      KIS_MOCK_TRADING = row.mock_trading === true;
+      KIS_TRADE_URL = KIS_MOCK_TRADING ? KIS_MOCK_URL : KIS_REAL_URL;
+      // 토큰 캐시 무효화 (설정이 바뀌었으므로)
+      cachedTradeToken = null;
+      cachedMarketToken = null;
+      TR_ID = getTrIds(KIS_MOCK_TRADING);
+      systemConfigLoaded = true;
+      console.log(`[KIS] System config loaded from DB: CANO=${KIS_ACCOUNT_NO.slice(0,4)}****, mock=${KIS_MOCK_TRADING}`);
+    } else {
+      console.log(`[KIS] No DB system config, using ENV: CANO=${KIS_ACCOUNT_NO.slice(0,4)}****, mock=${KIS_MOCK_TRADING}`);
+    }
+  } catch (err: any) {
+    if (err.message?.includes('does not exist') || err.code === '42P01') {
+      console.log("[KIS] system_trading_config table not found, using ENV");
+    } else {
+      console.warn("[KIS] Failed to load system config from DB:", err.message);
+    }
+  }
+}
 
-// tr_id는 모의투자/실전투자에 따라 다름
-const TR_ID = {
+console.log(`[KIS] Initial ENV config: CANO=${KIS_ACCOUNT_NO.slice(0,4)}****, ACNT_PRDT_CD=${KIS_ACCOUNT_PRODUCT_CD}, mock=${KIS_MOCK_TRADING}`);
+
+let TR_ID = {
   buy: KIS_MOCK_TRADING ? "VTTC0802U" : "TTTC0802U",
   sell: KIS_MOCK_TRADING ? "VTTC0801U" : "TTTC0801U",
   balance: KIS_MOCK_TRADING ? "VTTC8434R" : "TTTC8434R",
@@ -1029,6 +1070,8 @@ export function getTradingStatus() {
     mockTrading: KIS_MOCK_TRADING,
     accountNo: KIS_ACCOUNT_NO ? KIS_ACCOUNT_NO.slice(0, 4) + "****" : "",
     accountProductCd: KIS_ACCOUNT_PRODUCT_CD,
+    appKeyPreview: KIS_APP_KEY ? KIS_APP_KEY.slice(0, 6) + "****" : "",
+    configSource: systemConfigLoaded ? "db" : "env",
   };
 }
 

@@ -374,7 +374,21 @@ async function ensureSecurityTables() {
         )
       `);
       await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_kis_token_cache_key ON kis_token_cache(cache_key)`);
-      console.log("[Security] 보안 테이블, 멀티 API 테이블, 토큰 캐시 테이블 확인/생성 완료");
+      // 시스템 트레이딩 설정 테이블 (메인/트레이딩 공유)
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS system_trading_config (
+          id SERIAL PRIMARY KEY,
+          broker TEXT DEFAULT 'kis',
+          app_key TEXT NOT NULL,
+          app_secret TEXT NOT NULL,
+          account_no TEXT NOT NULL,
+          account_product_cd TEXT DEFAULT '01',
+          mock_trading BOOLEAN DEFAULT true,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+        )
+      `);
+      console.log("[Security] 보안 테이블, 멀티 API 테이블, 토큰 캐시 테이블, 시스템 설정 테이블 확인/생성 완료");
       _securityTablesInitialized = true;
     });
   } catch (error: any) {
@@ -393,6 +407,13 @@ export async function registerRoutes(
     console.log("[Security] 테이블 초기화 완료");
   } catch (err: any) {
     console.error("[Security] init error:", err.message);
+  }
+
+  // DB에서 시스템 트레이딩 설정 로드 (ENV fallback)
+  try {
+    await kisApi.loadSystemConfigFromDB();
+  } catch (err: any) {
+    console.warn("[System Config] DB 로드 실패, ENV 사용:", err.message);
   }
   
   // 헬스체크 엔드포인트 (가벼운 DB 연결 확인만)
@@ -904,6 +925,87 @@ export async function registerRoutes(
     }
   });
 
+  // ========== 시스템 기본 트레이딩 설정 (Admin 전용) ==========
+
+  app.get("/api/admin/system-trading-config", requireAdmin, async (_req, res) => {
+    try {
+      const config = await storage.getSystemTradingConfig();
+      const status = kisApi.getTradingStatus();
+      res.json({
+        hasDbConfig: !!config,
+        configSource: status.configSource,
+        broker: config?.broker || "kis",
+        appKey: config ? decrypt(config.appKey).slice(0, 6) + "****" : (process.env.KIS_APP_KEY || "").slice(0, 6) + "****",
+        accountNo: status.accountNo,
+        accountProductCd: status.accountProductCd,
+        mockTrading: status.mockTrading,
+        tradingConfigured: status.tradingConfigured,
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/admin/system-trading-config", requireAdmin, async (req, res) => {
+    try {
+      const { appKey, appSecret, accountNo, accountProductCd, mockTrading } = req.body;
+      if (!appKey || !appSecret || !accountNo) {
+        return res.status(400).json({ message: "앱 키, 앱 시크릿, 계좌번호는 필수입니다" });
+      }
+
+      await storage.upsertSystemTradingConfig({
+        broker: "kis",
+        appKey: encrypt(appKey),
+        appSecret: encrypt(appSecret),
+        accountNo: encrypt(accountNo),
+        accountProductCd: accountProductCd || "01",
+        mockTrading: mockTrading ?? true,
+      });
+
+      // kisApi 모듈 변수 즉시 갱신
+      await kisApi.loadSystemConfigFromDB();
+
+      res.json({ success: true, message: "시스템 트레이딩 설정이 저장되었습니다. 메인/트레이딩 양쪽에 자동 반영됩니다." });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "시스템 설정 저장 실패" });
+    }
+  });
+
+  // ENV → DB 마이그레이션 (기존 환경변수 값을 DB로 이관)
+  app.post("/api/admin/system-trading-config/migrate-env", requireAdmin, async (_req, res) => {
+    try {
+      const envKey = process.env.KIS_APP_KEY;
+      const envSecret = process.env.KIS_APP_SECRET;
+      const envAccount = process.env.KIS_ACCOUNT_NO;
+      if (!envKey || !envSecret || !envAccount) {
+        return res.status(400).json({ message: "ENV에 KIS_APP_KEY, KIS_APP_SECRET, KIS_ACCOUNT_NO가 설정되어 있지 않습니다" });
+      }
+
+      const existing = await storage.getSystemTradingConfig();
+      if (existing) {
+        return res.status(400).json({ message: "이미 DB에 시스템 설정이 존재합니다. 덮어쓰려면 직접 저장해주세요." });
+      }
+
+      const rawAcc = envAccount.replace(/-/g, "").trim();
+      const accountNo = rawAcc.length >= 10 ? rawAcc.slice(0, 8) : rawAcc;
+      const accountProductCd = rawAcc.length >= 10 ? rawAcc.slice(8, 10) : (process.env.KIS_ACCOUNT_PRODUCT_CD || "01");
+
+      await storage.upsertSystemTradingConfig({
+        broker: "kis",
+        appKey: encrypt(envKey),
+        appSecret: encrypt(envSecret),
+        accountNo: encrypt(accountNo),
+        accountProductCd,
+        mockTrading: process.env.KIS_MOCK_TRADING?.toLowerCase() === "true",
+      });
+
+      await kisApi.loadSystemConfigFromDB();
+      res.json({ success: true, message: "ENV 설정이 DB로 마이그레이션되었습니다." });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "마이그레이션 실패" });
+    }
+  });
+
   // ========== 멀티 API 관리 엔드포인트 ==========
 
   // Trading Configs 전체 목록 (Admin: env 기반 + DB 기반 모두 표시)
@@ -927,20 +1029,20 @@ export async function registerRoutes(
         updatedAt: c.updatedAt,
       }));
 
-      // Admin인 경우 env 기반 KIS API를 "시스템 기본" 가상 항목으로 추가
+      // Admin인 경우 시스템 기본 API를 가상 항목으로 추가 (DB 우선, ENV fallback)
       if (req.session?.isAdmin) {
-        const envStatus = kisApi.getTradingStatus();
-        if (envStatus.tradingConfigured) {
+        const sysStatus = kisApi.getTradingStatus();
+        if (sysStatus.tradingConfigured) {
           const hasActiveDbConfig = safeConfigs.some((c: any) => c.isActive);
           safeConfigs.unshift({
-            id: -1, // 가상 ID
+            id: -1,
             broker: "kis",
-            label: "시스템 기본 (ENV)",
-            appKey: (process.env.KIS_APP_KEY || "").slice(0, 6) + "****",
-            accountNo: envStatus.accountNo || "****",
-            accountProductCd: envStatus.accountProductCd || "01",
-            mockTrading: envStatus.mockTrading ?? true,
-            isActive: !hasActiveDbConfig, // DB에 활성 config 없으면 env가 활성
+            label: "시스템 기본",
+            appKey: sysStatus.appKeyPreview || "****",
+            accountNo: sysStatus.accountNo || "****",
+            accountProductCd: sysStatus.accountProductCd || "01",
+            mockTrading: sysStatus.mockTrading ?? true,
+            isActive: !hasActiveDbConfig,
             isSystem: true,
             createdAt: "",
             updatedAt: "",

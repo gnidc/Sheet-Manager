@@ -616,6 +616,22 @@ export const securityRemediations = pgTable("security_remediations", {
 export type SecurityRemediation = typeof securityRemediations.$inferSelect;
 export type InsertSecurityRemediation = typeof securityRemediations.$inferInsert;
 
+// ========== 시스템 자동매매 설정 (관리자 - DB 기반, 양쪽 프로젝트 공유) ==========
+export const systemTradingConfig = pgTable("system_trading_config", {
+  id: serial("id").primaryKey(),
+  broker: text("broker").default("kis"),
+  appKey: text("app_key").notNull(),
+  appSecret: text("app_secret").notNull(),
+  accountNo: text("account_no").notNull(),
+  accountProductCd: text("account_product_cd").default("01"),
+  mockTrading: boolean("mock_trading").default(true),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export type SystemTradingConfig = typeof systemTradingConfig.$inferSelect;
+export type InsertSystemTradingConfig = typeof systemTradingConfig.$inferInsert;
+
 // ========== 자동매매 스킬 레지스트리 ==========
 
 // 스킬 템플릿 (시스템 빌트인 + 사용자 커스텀)

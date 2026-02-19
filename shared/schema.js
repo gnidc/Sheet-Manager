@@ -550,6 +550,17 @@ const securityRemediations = pgTable("security_remediations", {
   executedBy: text("executed_by"),
   executedAt: timestamp("executed_at").default(sql`CURRENT_TIMESTAMP`).notNull()
 });
+const systemTradingConfig = pgTable("system_trading_config", {
+  id: serial("id").primaryKey(),
+  broker: text("broker").default("kis"),
+  appKey: text("app_key").notNull(),
+  appSecret: text("app_secret").notNull(),
+  accountNo: text("account_no").notNull(),
+  accountProductCd: text("account_product_cd").default("01"),
+  mockTrading: boolean("mock_trading").default(true),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+});
 const tradingSkills = pgTable("trading_skills", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
@@ -667,6 +678,7 @@ export {
   stopLossOrders,
   strategyAnalyses,
   strategyReports,
+  systemTradingConfig,
   tenbaggerStocks,
   tradingOrders,
   tradingSkills,
