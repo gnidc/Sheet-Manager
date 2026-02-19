@@ -2928,54 +2928,59 @@ export async function registerRoutes(
   });
 
   // ========== 주요뉴스 (많이 본 뉴스 - 네이버 금융 RANK) ==========
+  let marketNewsCache: { data: any; expiry: number } | null = null;
+  const MARKET_NEWS_CACHE_TTL = 3 * 60 * 1000; // 3분
+
   app.get("/api/news/market", async (req, res) => {
     try {
-      const newsResults: { title: string; link: string; source: string; time: string; category: string }[] = [];
+      // 캐시 히트
+      if (marketNewsCache && Date.now() < marketNewsCache.expiry) {
+        return res.json({ ...marketNewsCache.data, _cached: true });
+      }
 
-      // 네이버 금융 많이 본 뉴스 (RANK)
+      const newsResults: { title: string; link: string; source: string; time: string; category: string }[] = [];
       const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
-      // 페이지 1~2를 가져옴
-      for (const page of [1, 2]) {
-        try {
+      // 페이지 1~2를 병렬로 가져옴
+      const pageResults = await Promise.allSettled(
+        [1, 2].map(async (page) => {
           const rankRes = await axios.get(`https://finance.naver.com/news/news_list.naver?mode=RANK&page=${page}`, {
             headers: { "User-Agent": UA },
-            timeout: 8000,
+            timeout: 5000,
             responseType: "arraybuffer",
           });
           const html = new TextDecoder("euc-kr").decode(rankRes.data);
           const $ = cheerio.load(html);
+          const items: typeof newsResults = [];
 
-          // 많이 본 뉴스 리스트 파싱
           $("dl dd, .realtimeNewsList li, .newsList li, .type06_headline li, .simpleNewsList li").each((_i, el) => {
             const $el = $(el);
             const $a = $el.find("a").first();
             const title = $a.text().trim();
             let link = $a.attr("href") || "";
-            if (link && !link.startsWith("http")) {
-              link = "https://finance.naver.com" + link;
-            }
+            if (link && !link.startsWith("http")) link = "https://finance.naver.com" + link;
             const source = $el.find(".press, .info_press, .writing").text().trim();
             const time = $el.find(".wdate, .date").text().trim();
-            if (title && title.length > 5 && link) {
-              newsResults.push({ title, link, source, time, category: "주요뉴스" });
-            }
+            if (title && title.length > 5 && link) items.push({ title, link, source, time, category: "주요뉴스" });
           });
 
-          // dt 안의 a도 확인 (일부 레이아웃)
           $("dl dt a").each((_i, el) => {
             const $a = $(el);
             const title = $a.text().trim();
             let link = $a.attr("href") || "";
-            if (link && !link.startsWith("http")) {
-              link = "https://finance.naver.com" + link;
-            }
-            if (title && title.length > 5 && link) {
-              newsResults.push({ title, link, source: "", time: "", category: "주요뉴스" });
-            }
+            if (link && !link.startsWith("http")) link = "https://finance.naver.com" + link;
+            if (title && title.length > 5 && link) items.push({ title, link, source: "", time: "", category: "주요뉴스" });
           });
-        } catch (e: any) {
-          console.error(`네이버 RANK 뉴스 page ${page} 스크래핑 실패:`, e.message);
+
+          return items;
+        })
+      );
+
+      for (const result of pageResults) {
+        if (result.status === "fulfilled") {
+          newsResults.push(...result.value);
+        } else {
+          console.error("네이버 RANK 뉴스 스크래핑 실패:", result.reason?.message);
         }
       }
 
@@ -3018,7 +3023,6 @@ export async function registerRoutes(
             }
           }
         }
-        // 순서가 앞일수록 가산점 (많이 본 뉴스이므로 원래 순서도 중요)
         score += Math.max(0, 30 - idx);
         if (item.time) score += 1;
         return { ...item, score };
@@ -3027,13 +3031,22 @@ export async function registerRoutes(
       scoredNews.sort((a, b) => b.score - a.score);
       const top25 = scoredNews.slice(0, 25).map(({ score, ...rest }) => rest);
 
-      res.json({
+      const responseData = {
         news: top25,
         updatedAt: new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }),
         totalScraped: newsResults.length,
-      });
+      };
+
+      // 캐시 저장
+      marketNewsCache = { data: responseData, expiry: Date.now() + MARKET_NEWS_CACHE_TTL };
+
+      res.json(responseData);
     } catch (error: any) {
       console.error("Failed to fetch market news:", error);
+      // 캐시가 만료되었더라도 에러 시 stale 캐시 반환
+      if (marketNewsCache) {
+        return res.json({ ...marketNewsCache.data, _cached: true, _stale: true });
+      }
       res.status(500).json({ message: error.message || "뉴스 가져오기 실패" });
     }
   });
@@ -11743,6 +11756,9 @@ ${etfListStr}
 
         etfListCache = null;
         cleared.push("ETF 리스트 캐시");
+
+        marketNewsCache = null;
+        cleared.push("주요뉴스 캐시");
 
         publicArticlesCache = null;
         cleared.push("공개 카페글 캐시");
