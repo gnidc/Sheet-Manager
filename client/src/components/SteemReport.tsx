@@ -32,6 +32,7 @@ import {
   Edit3,
   Link2,
   BrainCircuit,
+  ImagePlus,
 } from "lucide-react";
 
 // ===== Steem Keychain 타입 정의 =====
@@ -543,11 +544,14 @@ export default function SteemReport() {
     const permlink = generatePermlink(postTitle);
     const parentPermlink = mainTag || tags[0] || "kr";
 
+    const bodyImageUrls = Array.from(postBody.matchAll(/!\[.*?\]\((https?:\/\/[^\s)]+)\)/g)).map(m => m[1]);
+    const allImages = Array.from(new Set(uploadedImages.concat(bodyImageUrls)));
+
     const jsonMetadata = JSON.stringify({
       tags,
       app: "sheet-manager/1.0",
       format: "markdown",
-      image: [],
+      image: allImages,
     });
 
     try {
@@ -720,6 +724,96 @@ export default function SteemReport() {
     navigator.clipboard.writeText(postBody);
     toast({ title: "본문이 클립보드에 복사되었습니다" });
   }, [postBody]);
+
+  // ===== 이미지 업로드 =====
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadedImages, setUploadedImages] = useState<string[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const uploadImage = useCallback(async (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      toast({ title: "이미지 파일만 업로드 가능합니다", variant: "destructive" });
+      return null;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      toast({ title: "파일 크기 제한 초과", description: "10MB 이하의 이미지만 업로드 가능합니다.", variant: "destructive" });
+      return null;
+    }
+
+    setIsUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("image", file);
+      const res = await fetch("/api/upload/image", { method: "POST", credentials: "include", body: formData });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message || "업로드 실패");
+      }
+      const data = await res.json();
+      setUploadedImages((prev) => [...prev, data.url]);
+      return data.url as string;
+    } catch (error: any) {
+      toast({ title: "이미지 업로드 실패", description: error.message, variant: "destructive" });
+      return null;
+    } finally {
+      setIsUploading(false);
+    }
+  }, [toast]);
+
+  const insertImageAtCursor = useCallback((url: string) => {
+    const textarea = bodyRef.current;
+    if (!textarea) {
+      setPostBody((prev) => prev + `\n![image](${url})\n`);
+      return;
+    }
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const before = postBody.slice(0, start);
+    const after = postBody.slice(end);
+    const imageMarkdown = `\n![image](${url})\n`;
+    const newBody = before + imageMarkdown + after;
+    setPostBody(newBody);
+    requestAnimationFrame(() => {
+      const pos = start + imageMarkdown.length;
+      textarea.setSelectionRange(pos, pos);
+      textarea.focus();
+    });
+  }, [postBody]);
+
+  const handleImageUploadAndInsert = useCallback(async (file: File) => {
+    const url = await uploadImage(file);
+    if (url) {
+      insertImageAtCursor(url);
+      toast({ title: "이미지 삽입 완료", description: "본문에 이미지가 추가되었습니다." });
+    }
+  }, [uploadImage, insertImageAtCursor, toast]);
+
+  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith("image/")) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (file) handleImageUploadAndInsert(file);
+        return;
+      }
+    }
+  }, [handleImageUploadAndInsert]);
+
+  const handleDrop = useCallback((e: React.DragEvent<HTMLTextAreaElement>) => {
+    const files = e.dataTransfer?.files;
+    if (!files || files.length === 0) return;
+    const file = files[0];
+    if (file.type.startsWith("image/")) {
+      e.preventDefault();
+      handleImageUploadAndInsert(file);
+    }
+  }, [handleImageUploadAndInsert]);
+
+  const handleDragOver = useCallback((e: React.DragEvent<HTMLTextAreaElement>) => {
+    if (e.dataTransfer?.types?.includes("Files")) e.preventDefault();
+  }, []);
 
   // ===== 상태 배지 =====
   function StatusBadgeComponent({ status }: { status: string }) {
@@ -907,9 +1001,33 @@ export default function SteemReport() {
           <div>
             <div className="flex items-center justify-between mb-1">
               <Label htmlFor="post-body" className="text-sm font-medium">본문 (Markdown)</Label>
-              <span className="text-xs text-muted-foreground">
-                {isLoadingReport ? "보고서 불러오는 중..." : `${postBody.length} 자`}
-              </span>
+              <div className="flex items-center gap-2">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleImageUploadAndInsert(file);
+                    e.target.value = "";
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploading}
+                  className="h-6 text-[11px] gap-1 px-2"
+                >
+                  {isUploading ? <Loader2 className="w-3 h-3 animate-spin" /> : <ImagePlus className="w-3 h-3" />}
+                  이미지 첨부
+                </Button>
+                <span className="text-xs text-muted-foreground">
+                  {isLoadingReport ? "보고서 불러오는 중..." : `${postBody.length} 자`}
+                </span>
+              </div>
             </div>
             {isLoadingReport ? (
               <div className="min-h-[400px] flex items-center justify-center border rounded-md bg-muted/20">
@@ -919,14 +1037,27 @@ export default function SteemReport() {
                 </div>
               </div>
             ) : (
-            <Textarea
-              ref={bodyRef}
-              id="post-body"
-              value={postBody}
-              onChange={(e) => setPostBody(e.target.value)}
-                placeholder="마크다운 형식으로 본문을 작성하세요... (AI 보고서 버튼으로 최신 보고서를 불러올 수 있습니다)"
-              className="min-h-[400px] font-mono text-sm"
-            />
+              <div className="relative">
+                <Textarea
+                  ref={bodyRef}
+                  id="post-body"
+                  value={postBody}
+                  onChange={(e) => setPostBody(e.target.value)}
+                  onPaste={handlePaste}
+                  onDrop={handleDrop}
+                  onDragOver={handleDragOver}
+                  placeholder="마크다운 형식으로 본문을 작성하세요...&#10;&#10;💡 이미지를 붙여넣기(Ctrl+V) 하거나 드래그하여 첨부할 수 있습니다."
+                  className="min-h-[400px] font-mono text-sm"
+                />
+                {isUploading && (
+                  <div className="absolute inset-0 bg-background/70 flex items-center justify-center rounded-md">
+                    <div className="text-center">
+                      <Loader2 className="w-6 h-6 animate-spin mx-auto text-primary mb-2" />
+                      <p className="text-sm text-muted-foreground">이미지 업로드 중...</p>
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
           </div>
 

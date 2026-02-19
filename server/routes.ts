@@ -9119,9 +9119,68 @@ ${etfListStr}
     }
   });
 
-  // ========== AI 보고서 분석 (URL + 파일 첨부 지원) ==========
+  // ========== 이미지 업로드 (스팀 포스팅용) ==========
   const multer = (await import("multer")).default;
   const uploadStorage = multer.memoryStorage();
+
+  const UPLOAD_DIR = process.env.VERCEL
+    ? path.join("/tmp", "uploads")
+    : path.join(process.cwd(), "uploads");
+
+  const imageUpload = multer({
+    storage: uploadStorage,
+    limits: { fileSize: 10 * 1024 * 1024 },
+    fileFilter: (_req: any, file: any, cb: any) => {
+      if (file.mimetype.startsWith("image/")) cb(null, true);
+      else cb(new Error("이미지 파일만 업로드 가능합니다."), false);
+    },
+  });
+
+  app.post("/api/upload/image", requireUser, imageUpload.single("image"), async (req, res) => {
+    try {
+      const fs = await import("fs");
+      const crypto = await import("crypto");
+      const file = (req as any).file as Express.Multer.File;
+      if (!file) return res.status(400).json({ message: "이미지 파일이 필요합니다." });
+
+      if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+      const ext = file.originalname.split(".").pop()?.toLowerCase() || "png";
+      const hash = crypto.createHash("md5").update(file.buffer).digest("hex").slice(0, 12);
+      const filename = `${Date.now()}-${hash}.${ext}`;
+      const filepath = path.join(UPLOAD_DIR, filename);
+      fs.writeFileSync(filepath, file.buffer);
+
+      const protocol = req.headers["x-forwarded-proto"] || req.protocol;
+      const host = req.headers["x-forwarded-host"] || req.headers.host;
+      const imageUrl = `${protocol}://${host}/api/uploads/${filename}`;
+
+      console.log(`[Image Upload] ${filename} (${(file.size / 1024).toFixed(0)} KB)`);
+      res.json({ success: true, url: imageUrl, filename, sizeMB: `${(file.size / 1024 / 1024).toFixed(1)} MB` });
+    } catch (error: any) {
+      console.error("[Image Upload] Error:", error);
+      res.status(500).json({ message: error.message || "이미지 업로드 실패" });
+    }
+  });
+
+  app.get("/api/uploads/:filename", async (req, res) => {
+    try {
+      const fs = await import("fs");
+      const { filename } = req.params;
+      if (filename.includes("..") || filename.includes("/")) return res.status(400).end();
+
+      const filepath = path.join(UPLOAD_DIR, filename);
+      if (!fs.existsSync(filepath)) return res.status(404).json({ message: "파일을 찾을 수 없습니다." });
+
+      const ext = filename.split(".").pop()?.toLowerCase();
+      const mimeMap: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml" };
+      res.setHeader("Content-Type", mimeMap[ext || ""] || "application/octet-stream");
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      fs.createReadStream(filepath).pipe(res);
+    } catch { res.status(500).end(); }
+  });
+
+  // ========== AI 보고서 분석 (URL + 파일 첨부 지원) ==========
   const upload = multer({ storage: uploadStorage, limits: { fileSize: 5 * 1024 * 1024 } }); // 5MB 제한
 
   app.post("/api/report/ai-analyze", requireUser, upload.array("files", 5), async (req, res) => {
