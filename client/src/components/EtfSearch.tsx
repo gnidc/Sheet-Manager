@@ -1,4 +1,5 @@
-import { useState, useMemo, useCallback, useEffect, useRef, useTransition, memo } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef, useTransition, memo, type RefObject } from "react";
+import { toPng } from "html-to-image";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
@@ -21,7 +22,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   Search, Filter, BarChart3, Loader2, TrendingUp, TrendingDown,
-  ArrowUpDown, Star, Copy, Zap, LayoutGrid, List, RefreshCw, Brain,
+  ArrowUpDown, Star, Copy, Camera, Zap, LayoutGrid, List, RefreshCw, Brain,
   ChevronDown, ChevronUp, X, Scale, Layers, ExternalLink, PieChart, Calendar, Info,
   Key, CheckCircle
 } from "lucide-react";
@@ -609,6 +610,42 @@ function CompareSection({ initialCodes, onInitialCodesConsumed }: { initialCodes
   const [compareCodes, setCompareCodes] = useState<string[]>([]);
   const [showSearch, setShowSearch] = useState(false);
   const [compareTab, setCompareTab] = useState<"performance" | "info" | "holdings">("performance");
+  const [isCapturing, setIsCapturing] = useState(false);
+
+  const perfCardRef = useRef<HTMLDivElement>(null);
+  const infoCardRef = useRef<HTMLDivElement>(null);
+  const holdingsCardRef = useRef<HTMLDivElement>(null);
+
+  const captureSnapshot = useCallback(async (ref: RefObject<HTMLDivElement | null>, title: string) => {
+    if (!ref.current || isCapturing) return;
+    setIsCapturing(true);
+    try {
+      const dataUrl = await toPng(ref.current, {
+        backgroundColor: "#ffffff",
+        pixelRatio: 2,
+        style: { padding: "16px" },
+      });
+      const res = await fetch(dataUrl);
+      const blob = await res.blob();
+      try {
+        await navigator.clipboard.write([
+          new ClipboardItem({ "image/png": blob }),
+        ]);
+        toast({ title: `${title} 이미지가 클립보드에 복사되었습니다` });
+      } catch {
+        const link = document.createElement("a");
+        link.download = `${title}_${new Date().toISOString().slice(0, 10)}.png`;
+        link.href = dataUrl;
+        link.click();
+        toast({ title: `${title} 이미지가 다운로드되었습니다` });
+      }
+    } catch (err) {
+      console.error("Snapshot failed:", err);
+      toast({ title: "이미지 캡처에 실패했습니다", variant: "destructive" });
+    } finally {
+      setIsCapturing(false);
+    }
+  }, [isCapturing, toast]);
 
   useEffect(() => {
     if (initialCodes && initialCodes.length >= 2) {
@@ -895,22 +932,12 @@ function CompareSection({ initialCodes, onInitialCodesConsumed }: { initialCodes
                 <TrendingUp className="w-4 h-4 text-primary" /> 성과분석
               </h3>
               <Button variant="outline" size="sm" className="gap-1 text-xs h-7"
-                onClick={() => {
-                  const periods = ["1개월", "3개월", "6개월", "1년", "3년", "5년"];
-                  const keys = ["month1", "month3", "month6", "year1", "year3", "year5"] as const;
-                  const header = ["기간", ...etfs.map(e => e.name)].join("\t");
-                  const rows = periods.map((p, i) =>
-                    [p, ...etfs.map(e => {
-                      const v = e.performance?.[keys[i] as keyof typeof e.performance];
-                      return v != null ? `${Number(v) > 0 ? "+" : ""}${Number(v).toFixed(2)}%` : "-";
-                    })].join("\t")
-                  );
-                  navigator.clipboard.writeText([header, ...rows].join("\n"));
-                  toast({ title: "성과분석 데이터가 복사되었습니다" });
-                }}>
-                <Copy className="w-3 h-3" /> 복사
+                disabled={isCapturing}
+                onClick={() => captureSnapshot(perfCardRef, "성과분석")}>
+                <Camera className="w-3 h-3" /> {isCapturing ? "캡처중..." : "스냅샷"}
               </Button>
             </div>
+            <div ref={perfCardRef}>
             {/* 수익률 추이 차트 */}
             {chartLines.length > 0 && (
               <div className="mb-6">
@@ -1001,6 +1028,7 @@ function CompareSection({ initialCodes, onInitialCodesConsumed }: { initialCodes
                 </Table>
               </div>
             </div>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -1014,27 +1042,12 @@ function CompareSection({ initialCodes, onInitialCodesConsumed }: { initialCodes
                 <Info className="w-4 h-4 text-primary" /> 기본 정보(비용)
               </h3>
               <Button variant="outline" size="sm" className="gap-1 text-xs h-7"
-                onClick={() => {
-                  const infoRows = [
-                    ["항목", ...etfs.map(e => e.name)],
-                    ["운용사", ...etfs.map(e => e.managementCompany || "-")],
-                    ["상장일", ...etfs.map(e => e.listingDate || "-")],
-                    ["순자산총액", ...etfs.map(e => e.totalAssets || (e.marketCap ? `${Math.round(e.marketCap).toLocaleString()}억` : "-"))],
-                    ["거래량(주)", ...etfs.map(e => e.quant ? Number(e.quant).toLocaleString() : "-")],
-                    ["현재가(원)", ...etfs.map(e => `${Number(e.nowVal).toLocaleString()} (${e.changeRate > 0 ? "+" : ""}${e.changeRate?.toFixed(2)}%)`)],
-                    ["총보수(%)", ...etfs.map(e => { const f = e.totalExpenseRatio ?? e.costDetail?.totalFee; return f != null ? `${f}%` : "-"; })],
-                    ["배당수익률(%)", ...etfs.map(e => e.dividendYield || e.costDetail?.annualDividendRate || "-")],
-                    ["추적지수", ...etfs.map(e => e.indexName || "-")],
-                    ["추적오차", ...etfs.map(e => e.trackingError || "-")],
-                    ["52주 최고", ...etfs.map(e => e.highPrice52w ? Number(e.highPrice52w).toLocaleString() : "-")],
-                    ["52주 최저", ...etfs.map(e => e.lowPrice52w ? Number(e.lowPrice52w).toLocaleString() : "-")],
-                  ];
-                  navigator.clipboard.writeText(infoRows.map(r => r.join("\t")).join("\n"));
-                  toast({ title: "기본 정보가 복사되었습니다" });
-                }}>
-                <Copy className="w-3 h-3" /> 복사
+                disabled={isCapturing}
+                onClick={() => captureSnapshot(infoCardRef, "기본정보")}>
+                <Camera className="w-3 h-3" /> {isCapturing ? "캡처중..." : "스냅샷"}
               </Button>
             </div>
+            <div ref={infoCardRef}>
             <div className="overflow-x-auto border rounded-lg">
               <Table>
                 <TableHeader>
@@ -1186,6 +1199,7 @@ function CompareSection({ initialCodes, onInitialCodesConsumed }: { initialCodes
                 </TableBody>
               </Table>
             </div>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -1199,20 +1213,12 @@ function CompareSection({ initialCodes, onInitialCodesConsumed }: { initialCodes
                 <Layers className="w-4 h-4 text-primary" /> 구성종목 TOP10
               </h3>
               <Button variant="outline" size="sm" className="gap-1 text-xs h-7"
-                onClick={() => {
-                  const header = ["순위", ...etfs.map(e => `${e.name} (종목/비중)`)].join("\t");
-                  const rows = Array.from({ length: 10 }).map((_, i) =>
-                    [`${i + 1}`, ...etfs.map(e => {
-                      const h = e.holdings?.[i];
-                      return h ? `${h.name} ${h.weight.toFixed(1)}%` : "-";
-                    })].join("\t")
-                  );
-                  navigator.clipboard.writeText([header, ...rows].join("\n"));
-                  toast({ title: "구성종목 데이터가 복사되었습니다" });
-                }}>
-                <Copy className="w-3 h-3" /> 복사
+                disabled={isCapturing}
+                onClick={() => captureSnapshot(holdingsCardRef, "구성종목")}>
+                <Camera className="w-3 h-3" /> {isCapturing ? "캡처중..." : "스냅샷"}
               </Button>
             </div>
+            <div ref={holdingsCardRef}>
             <div className="overflow-x-auto border rounded-lg">
               <Table>
                 <TableHeader>
@@ -1278,6 +1284,7 @@ function CompareSection({ initialCodes, onInitialCodesConsumed }: { initialCodes
             <p className="text-[10px] text-muted-foreground mt-2">
               · 종목비중 TOP10 (종목 / 비중(%))
             </p>
+            </div>
           </CardContent>
         </Card>
       )}
