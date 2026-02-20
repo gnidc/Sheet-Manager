@@ -22,6 +22,7 @@ import {
   ResponsiveContainer,
   ComposedChart,
   Bar,
+  Line,
   YAxis,
   Tooltip,
 } from "recharts";
@@ -44,6 +45,10 @@ interface ChartPoint {
   low: number;
   close: number;
   vol: number;
+  ma5?: number;
+  ma10?: number;
+  ma20?: number;
+  ma60?: number;
 }
 
 interface SectorData {
@@ -105,6 +110,10 @@ function CandleShape(props: any) {
   );
 }
 
+// ===== 이평선 색상 =====
+const MA_COLORS: Record<string, string> = { ma5: "#f59e0b", ma10: "#a855f7", ma20: "#10b981", ma60: "#6366f1" };
+const MA_LABELS: Record<string, string> = { ma5: "5일", ma10: "10일", ma20: "20일", ma60: "60일" };
+
 // ===== 캔들 차트 툴팁 =====
 function CandleTooltip({ active, payload }: any) {
   if (!active || !payload?.[0]?.payload) return null;
@@ -120,6 +129,16 @@ function CandleTooltip({ active, payload }: any) {
         <span className="text-muted-foreground">종가</span>
         <span className={`text-right tabular-nums font-semibold ${isUp ? "text-red-500" : "text-blue-500"}`}>{d.close?.toLocaleString()}</span>
       </div>
+      {(d.ma5 || d.ma10 || d.ma20 || d.ma60) && (
+        <div className="border-t pt-0.5 mt-0.5 grid grid-cols-2 gap-x-3">
+          {(["ma5", "ma10", "ma20", "ma60"] as const).map(k => d[k] != null && (
+            <span key={k} className="text-right tabular-nums col-span-2 flex justify-between">
+              <span style={{ color: MA_COLORS[k] }}>{MA_LABELS[k]}</span>
+              <span>{d[k]?.toLocaleString()}</span>
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -178,11 +197,31 @@ function IndexCard({ index, chart }: { index: IndexData; chart: ChartPoint[] }) 
                   }}
                   isAnimationActive={false}
                 />
+                {(["ma5", "ma10", "ma20", "ma60"] as const).map(k => (
+                  <Line
+                    key={k}
+                    type="monotone"
+                    dataKey={k}
+                    stroke={MA_COLORS[k]}
+                    strokeWidth={1}
+                    dot={false}
+                    connectNulls
+                    isAnimationActive={false}
+                  />
+                ))}
               </ComposedChart>
             </ResponsiveContainer>
           </div>
         )}
-        <div className="flex items-center justify-between text-[10px] text-muted-foreground mt-1">
+        <div className="flex items-center gap-2 flex-wrap text-[9px] mt-1">
+          {(["ma5", "ma10", "ma20", "ma60"] as const).map(k => (
+            <span key={k} className="flex items-center gap-0.5">
+              <span className="inline-block w-2.5 h-[2px] rounded" style={{ backgroundColor: MA_COLORS[k] }} />
+              <span className="text-muted-foreground">{MA_LABELS[k]}</span>
+            </span>
+          ))}
+        </div>
+        <div className="flex items-center justify-between text-[10px] text-muted-foreground mt-0.5">
           <span>거래량 {index.quant}</span>
           <span>거래대금 {index.amount}</span>
         </div>

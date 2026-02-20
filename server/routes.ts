@@ -3682,23 +3682,34 @@ ${researchList}
         result.push({ code: "KPI200", name: "코스피200", nowVal: 0, changeVal: 0, changeRate: 0, quant: "0", amount: "0" });
       }
 
-      // 미니 차트 데이터 (일/주/월봉)
+      // 미니 차트 데이터 (일/주/월봉) + 이동평균선
       const tf = (_req.query?.timeframe as string) || "day";
       const validTf = ["day", "week", "month"].includes(tf) ? tf : "day";
-      const chartCount = validTf === "day" ? 60 : validTf === "week" ? 52 : 36;
+      const fetchCount = validTf === "day" ? 120 : validTf === "week" ? 80 : 60;
       const sliceCount = validTf === "day" ? 30 : validTf === "week" ? 26 : 24;
+      const maPeriods = [5, 10, 20, 60];
       const chartData: Record<string, any[]> = {};
       await Promise.all(["KOSPI", "KOSDAQ", "KPI200"].map(async (indexCode) => {
         try {
           const chartRes = await axios.get("https://fchart.stock.naver.com/sise.nhn", {
-            params: { symbol: indexCode, timeframe: validTf, count: chartCount, requestType: 0 },
+            params: { symbol: indexCode, timeframe: validTf, count: fetchCount, requestType: 0 },
             headers: { "User-Agent": UA }, timeout: 5000, responseType: "text",
           });
           const matches = [...(chartRes.data as string).matchAll(/<item data="([^"]+)"/g)];
-          chartData[indexCode] = matches.map((m) => {
+          const allData = matches.map((m) => {
             const [date, open, high, low, close, vol] = m[1].split("|");
-            return { date, open: +open, high: +high, low: +low, close: +close, vol: +vol };
-          }).slice(-sliceCount);
+            return { date, open: +open, high: +high, low: +low, close: +close, vol: +vol } as any;
+          });
+          for (let i = 0; i < allData.length; i++) {
+            for (const p of maPeriods) {
+              if (i >= p - 1) {
+                let sum = 0;
+                for (let j = i - p + 1; j <= i; j++) sum += allData[j].close;
+                allData[i][`ma${p}`] = Math.round((sum / p) * 100) / 100;
+              }
+            }
+          }
+          chartData[indexCode] = allData.slice(-sliceCount);
         } catch {
           chartData[indexCode] = [];
         }
