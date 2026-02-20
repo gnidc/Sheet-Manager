@@ -3392,18 +3392,32 @@ export async function registerRoutes(
         });
       }
 
-      // DB의 실제 속성 이름 매핑 (한글/영문 유연 매칭)
-      const findProp = (candidates: string[], type: string) => {
+      // DB 속성 구조 로깅
+      const propEntries = Object.entries(dbProps).map(([name, prop]: [string, any]) => `${name}(${prop.type})`);
+      console.log("[Notion] DB properties:", propEntries.join(", "));
+
+      // DB의 실제 속성 이름 매핑
+      const findProp = (candidates: string[], preferredTypes: string[]) => {
+        // 1차: 이름+타입 매칭
         for (const c of candidates) {
-          const match = Object.entries(dbProps).find(([name, prop]: [string, any]) =>
-            name.toLowerCase().trim() === c.toLowerCase().trim() && prop.type === type
-          );
-          if (match) return match[0];
+          for (const t of preferredTypes) {
+            const match = Object.entries(dbProps).find(([name, prop]: [string, any]) =>
+              name.trim() === c.trim() && prop.type === t
+            );
+            if (match) return match[0];
+          }
         }
-        // 타입 무시하고 이름만 매칭
+        // 2차: 이름만 매칭 (대소문자 무시)
         for (const c of candidates) {
           const match = Object.entries(dbProps).find(([name]) =>
             name.toLowerCase().trim() === c.toLowerCase().trim()
+          );
+          if (match) return match[0];
+        }
+        // 3차: 포함 매칭
+        for (const c of candidates) {
+          const match = Object.entries(dbProps).find(([name]) =>
+            name.toLowerCase().includes(c.toLowerCase())
           );
           if (match) return match[0];
         }
@@ -3412,10 +3426,21 @@ export async function registerRoutes(
 
       const titleProp = Object.entries(dbProps).find(([, p]: [string, any]) => p.type === "title");
       const titleName = titleProp ? titleProp[0] : "제목";
-      const sourceName = findProp(["증권사", "source", "출처"], "rich_text");
-      const dateName = findProp(["날짜", "date", "일자"], "rich_text");
-      const linkName = findProp(["링크", "link", "url"], "url");
-      const pdfName = findProp(["pdf", "PDF", "파일"], "url");
+      const sourceName = findProp(["증권사", "source", "출처"], ["rich_text", "select"]);
+      const dateName = findProp(["날짜", "date", "일자"], ["rich_text", "date"]);
+      const linkName = findProp(["링크", "link", "url", "링크"], ["url"]);
+      const pdfName = findProp(["PDF", "pdf", "파일"], ["url"]);
+
+      console.log("[Notion] Mapped props - title:", titleName, "source:", sourceName, "date:", dateName, "link:", linkName, "pdf:", pdfName);
+
+      const unmapped: string[] = [];
+      if (!sourceName) unmapped.push("증권사");
+      if (!dateName) unmapped.push("날짜");
+      if (!linkName) unmapped.push("링크");
+      if (!pdfName) unmapped.push("PDF");
+      if (unmapped.length > 0) {
+        console.warn(`[Notion] 매핑 안 된 속성: ${unmapped.join(", ")}. DB 속성: ${propEntries.join(", ")}`);
+      }
 
       let successCount = 0;
       let failCount = 0;
@@ -3477,9 +3502,10 @@ export async function registerRoutes(
         }
       }
 
+      const unmappedWarning = unmapped.length > 0 ? ` (미매핑 속성: ${unmapped.join(", ")})` : "";
       res.json({
         success: successCount > 0,
-        message: `Notion 내보내기 완료: ${successCount}건 성공${failCount > 0 ? `, ${failCount}건 실패` : ""}`,
+        message: `Notion 내보내기 완료: ${successCount}건 성공${failCount > 0 ? `, ${failCount}건 실패` : ""}${unmappedWarning}`,
         successCount,
         failCount,
         errors: errors.length > 0 ? errors : undefined,
