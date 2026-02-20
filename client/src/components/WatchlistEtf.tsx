@@ -29,6 +29,7 @@ import {
   FileText,
   Users,
   User,
+  Scale,
 } from "lucide-react";
 
 export type WatchlistListType = "core" | "satellite";
@@ -299,9 +300,10 @@ function EtfTable({
 
 interface WatchlistEtfProps {
   listType?: WatchlistListType;
+  onCompare?: (codes: string[]) => void;
 }
 
-export default function WatchlistEtfComponent({ listType = "core" }: WatchlistEtfProps) {
+export default function WatchlistEtfComponent({ listType = "core", onCompare }: WatchlistEtfProps) {
   const { isAdmin, isLoggedIn, user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -558,6 +560,16 @@ export default function WatchlistEtfComponent({ listType = "core" }: WatchlistEt
     navigate(`/trading?code=${encodeURIComponent(first.etfCode)}&name=${encodeURIComponent(first.etfName)}`);
   }, [checkedIds, allItems, navigate, toast]);
 
+  const handleCompareChecked = useCallback(() => {
+    const selected = allItems.filter((e) => checkedIds.has(e.id));
+    if (selected.length < 2) {
+      toast({ title: "2개 이상 선택 필요", description: "비교하려면 ETF를 2개 이상 선택해주세요.", variant: "destructive" });
+      return;
+    }
+    const codes = selected.slice(0, 5).map((e) => e.etfCode);
+    onCompare?.(codes);
+  }, [checkedIds, allItems, onCompare, toast]);
+
   // 수정 핸들러
   const handleEdit = useCallback((etf: WatchlistEtf) => {
     setEditTarget(etf);
@@ -613,10 +625,18 @@ export default function WatchlistEtfComponent({ listType = "core" }: WatchlistEt
                   </Button>
                 )}
                 {checkedIds.size > 0 && (
-                  <Button size="sm" onClick={handleBuyChecked} className="gap-1.5 bg-red-500 hover:bg-red-600 text-white">
-                    <ShoppingCart className="w-4 h-4" />
-                    매수 ({checkedIds.size})
-                  </Button>
+                  <>
+                    <Button size="sm" onClick={handleBuyChecked} className="gap-1.5 bg-red-500 hover:bg-red-600 text-white">
+                      <ShoppingCart className="w-4 h-4" />
+                      매수 ({checkedIds.size})
+                    </Button>
+                    {onCompare && checkedIds.size >= 2 && (
+                      <Button size="sm" variant="outline" onClick={handleCompareChecked} className="gap-1.5 border-indigo-300 text-indigo-600 hover:bg-indigo-50 dark:border-indigo-700 dark:text-indigo-400 dark:hover:bg-indigo-950">
+                        <Scale className="w-4 h-4" />
+                        비교 ({checkedIds.size})
+                      </Button>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -730,10 +750,18 @@ export default function WatchlistEtfComponent({ listType = "core" }: WatchlistEt
                 </Button>
               ) : null}
               {checkedIds.size > 0 && (
-                <Button size="sm" onClick={handleBuyChecked} className="gap-1.5 bg-red-500 hover:bg-red-600 text-white">
-                  <ShoppingCart className="w-4 h-4" />
-                  매수 ({checkedIds.size})
-                </Button>
+                <>
+                  <Button size="sm" onClick={handleBuyChecked} className="gap-1.5 bg-red-500 hover:bg-red-600 text-white">
+                    <ShoppingCart className="w-4 h-4" />
+                    매수 ({checkedIds.size})
+                  </Button>
+                  {onCompare && checkedIds.size >= 2 && (
+                    <Button size="sm" variant="outline" onClick={handleCompareChecked} className="gap-1.5 border-indigo-300 text-indigo-600 hover:bg-indigo-50 dark:border-indigo-700 dark:text-indigo-400 dark:hover:bg-indigo-950">
+                      <Scale className="w-4 h-4" />
+                      비교 ({checkedIds.size})
+                    </Button>
+                  )}
+                </>
               )}
             </div>
           </div>

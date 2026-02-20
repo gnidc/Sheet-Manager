@@ -114,12 +114,20 @@ interface CompareEtf extends EtfItem {
 interface EtfSearchProps {
   isAdmin: boolean;
   onNavigate?: (tab: string) => void;
+  initialCompareCodes?: string[];
+  onCompareCodesConsumed?: () => void;
 }
 
-export default function EtfSearch({ isAdmin, onNavigate }: EtfSearchProps) {
+export default function EtfSearch({ isAdmin, onNavigate, initialCompareCodes, onCompareCodesConsumed }: EtfSearchProps) {
   const { toast } = useToast();
   const [activeSection, setActiveSection] = useState("search");
   const [isPending, startTransition] = useTransition();
+
+  useEffect(() => {
+    if (initialCompareCodes && initialCompareCodes.length >= 2) {
+      setActiveSection("compare");
+    }
+  }, [initialCompareCodes]);
 
   const handleTabChange = useCallback((value: string) => {
     startTransition(() => {
@@ -164,7 +172,7 @@ export default function EtfSearch({ isAdmin, onNavigate }: EtfSearchProps) {
 
         <TabsContent value="search"><SearchSection onNavigate={onNavigate} /></TabsContent>
         <TabsContent value="screener"><ScreenerSection onNavigate={onNavigate} /></TabsContent>
-        <TabsContent value="compare"><CompareSection /></TabsContent>
+        <TabsContent value="compare"><CompareSection initialCodes={initialCompareCodes} onInitialCodesConsumed={onCompareCodesConsumed} /></TabsContent>
         <TabsContent value="themes"><ThemeMapSection onNavigate={onNavigate} /></TabsContent>
         <TabsContent value="ai"><AiRecommendSection /></TabsContent>
       </Tabs>
@@ -593,7 +601,7 @@ function ScreenerSection({ onNavigate }: { onNavigate?: (tab: string) => void })
 // =============================================
 const COMPARE_COLORS = ["#e74c3c", "#3498db", "#2ecc71", "#f39c12", "#9b59b6"];
 
-function CompareSection() {
+function CompareSection({ initialCodes, onInitialCodesConsumed }: { initialCodes?: string[]; onInitialCodesConsumed?: () => void }) {
   const { toast } = useToast();
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -601,6 +609,13 @@ function CompareSection() {
   const [compareCodes, setCompareCodes] = useState<string[]>([]);
   const [showSearch, setShowSearch] = useState(false);
   const [compareTab, setCompareTab] = useState<"performance" | "info" | "holdings">("performance");
+
+  useEffect(() => {
+    if (initialCodes && initialCodes.length >= 2) {
+      setCompareCodes(initialCodes.slice(0, 5));
+      onInitialCodesConsumed?.();
+    }
+  }, [initialCodes, onInitialCodesConsumed]);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);

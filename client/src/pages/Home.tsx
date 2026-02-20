@@ -52,6 +52,7 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState("home");
   const [isPending, startTransition] = useTransition();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [pendingCompareCodes, setPendingCompareCodes] = useState<string[]>([]);
   const [darkMode, setDarkMode] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('theme') === 'dark' || 
@@ -86,6 +87,13 @@ export default function Home() {
   const handleTabChange = useCallback((tab: string) => {
     startTransition(() => {
       setActiveTab(tab);
+    });
+  }, [startTransition]);
+
+  const handleCompareEtfs = useCallback((codes: string[]) => {
+    setPendingCompareCodes(codes);
+    startTransition(() => {
+      setActiveTab("etf-search");
     });
   }, [startTransition]);
 
@@ -560,7 +568,7 @@ export default function Home() {
           <TabsContent value="watchlist-etf">
             {isLoggedIn ? (
               <Suspense fallback={<ContentSkeleton />}>
-                <WatchlistEtfComp listType="core" />
+                <WatchlistEtfComp listType="core" onCompare={handleCompareEtfs} />
               </Suspense>
             ) : (
               <LoginRequiredMessage />
@@ -570,7 +578,7 @@ export default function Home() {
           <TabsContent value="satellite-etf">
             {isLoggedIn ? (
               <Suspense fallback={<ContentSkeleton />}>
-                <WatchlistEtfComp listType="satellite" />
+                <WatchlistEtfComp listType="satellite" onCompare={handleCompareEtfs} />
               </Suspense>
             ) : (
               <LoginRequiredMessage />
@@ -579,7 +587,7 @@ export default function Home() {
 
           <TabsContent value="etf-search">
             <Suspense fallback={<ContentSkeleton />}>
-              <EtfSearch isAdmin={isAdmin} onNavigate={handleTabChange} />
+              <EtfSearch isAdmin={isAdmin} onNavigate={handleTabChange} initialCompareCodes={pendingCompareCodes} onCompareCodesConsumed={() => setPendingCompareCodes([])} />
             </Suspense>
           </TabsContent>
 
