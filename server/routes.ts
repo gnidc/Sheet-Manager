@@ -3614,7 +3614,7 @@ ${researchList}
   const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 
   // --- 1) 시장 지수 (KOSPI, KOSDAQ, KOSPI200) ---
-  app.get("/api/markets/domestic/indices", async (_req, res) => {
+  app.get("/api/markets/domestic/indices", async (_req: any, res) => {
     try {
       const indices = [
         { code: "KOSPI", name: "코스피" },
@@ -3682,19 +3682,23 @@ ${researchList}
         result.push({ code: "KPI200", name: "코스피200", nowVal: 0, changeVal: 0, changeRate: 0, quant: "0", amount: "0" });
       }
 
-      // 미니 차트 데이터 (최근 60일)
+      // 미니 차트 데이터 (일/주/월봉)
+      const tf = (_req.query?.timeframe as string) || "day";
+      const validTf = ["day", "week", "month"].includes(tf) ? tf : "day";
+      const chartCount = validTf === "day" ? 60 : validTf === "week" ? 52 : 36;
+      const sliceCount = validTf === "day" ? 30 : validTf === "week" ? 26 : 24;
       const chartData: Record<string, any[]> = {};
       await Promise.all(["KOSPI", "KOSDAQ", "KPI200"].map(async (indexCode) => {
         try {
           const chartRes = await axios.get("https://fchart.stock.naver.com/sise.nhn", {
-            params: { symbol: indexCode, timeframe: "day", count: 60, requestType: 0 },
+            params: { symbol: indexCode, timeframe: validTf, count: chartCount, requestType: 0 },
             headers: { "User-Agent": UA }, timeout: 5000, responseType: "text",
           });
           const matches = [...(chartRes.data as string).matchAll(/<item data="([^"]+)"/g)];
           chartData[indexCode] = matches.map((m) => {
             const [date, open, high, low, close, vol] = m[1].split("|");
             return { date, open: +open, high: +high, low: +low, close: +close, vol: +vol };
-          }).slice(-30); // 최근 30일
+          }).slice(-sliceCount);
         } catch {
           chartData[indexCode] = [];
         }

@@ -19,9 +19,11 @@ import {
   ShoppingCart,
 } from "lucide-react";
 import {
-  AreaChart,
-  Area,
   ResponsiveContainer,
+  ComposedChart,
+  Bar,
+  YAxis,
+  Tooltip,
 } from "recharts";
 
 // ===== 타입 정의 =====
@@ -76,12 +78,68 @@ interface TopStock {
   marketCap: number;
 }
 
-// ===== 지수 카드 컴포넌트 =====
+// ===== 캔들 커스텀 Shape =====
+function CandleShape(props: any) {
+  const { x, y, width, height, payload } = props;
+  if (!payload) return null;
+  const { open, close, high, low } = payload;
+  const isUp = close >= open;
+  const fill = isUp ? "#ef4444" : "#3b82f6";
+  const stroke = isUp ? "#dc2626" : "#2563eb";
+
+  const yScale = props.yScale;
+  if (!yScale) return null;
+
+  const bodyTop = yScale(Math.max(open, close));
+  const bodyBottom = yScale(Math.min(open, close));
+  const bodyH = Math.max(bodyBottom - bodyTop, 1);
+  const wickX = x + width / 2;
+  const wickTop = yScale(high);
+  const wickBottom = yScale(low);
+
+  return (
+    <g>
+      <line x1={wickX} y1={wickTop} x2={wickX} y2={wickBottom} stroke={stroke} strokeWidth={1} />
+      <rect x={x + 1} y={bodyTop} width={Math.max(width - 2, 2)} height={bodyH} fill={fill} stroke={stroke} strokeWidth={0.5} rx={0.5} />
+    </g>
+  );
+}
+
+// ===== 캔들 차트 툴팁 =====
+function CandleTooltip({ active, payload }: any) {
+  if (!active || !payload?.[0]?.payload) return null;
+  const d = payload[0].payload;
+  const isUp = d.close >= d.open;
+  return (
+    <div className="bg-background/95 border rounded-lg shadow-lg p-2 text-xs space-y-0.5">
+      <div className="font-medium text-muted-foreground">{d.date}</div>
+      <div className="grid grid-cols-2 gap-x-3">
+        <span className="text-muted-foreground">시가</span><span className="text-right tabular-nums">{d.open?.toLocaleString()}</span>
+        <span className="text-muted-foreground">고가</span><span className="text-right tabular-nums text-red-500">{d.high?.toLocaleString()}</span>
+        <span className="text-muted-foreground">저가</span><span className="text-right tabular-nums text-blue-500">{d.low?.toLocaleString()}</span>
+        <span className="text-muted-foreground">종가</span>
+        <span className={`text-right tabular-nums font-semibold ${isUp ? "text-red-500" : "text-blue-500"}`}>{d.close?.toLocaleString()}</span>
+      </div>
+    </div>
+  );
+}
+
+// ===== 지수 카드 컴포넌트 (캔들차트) =====
 function IndexCard({ index, chart }: { index: IndexData; chart: ChartPoint[] }) {
   const isUp = index.changeVal > 0;
   const isDown = index.changeVal < 0;
   const color = isUp ? "#ef4444" : isDown ? "#3b82f6" : "#6b7280";
   const bgColor = isUp ? "bg-red-50 dark:bg-red-950/20" : isDown ? "bg-blue-50 dark:bg-blue-950/20" : "bg-gray-50 dark:bg-gray-800/20";
+
+  const yDomain = useMemo(() => {
+    if (chart.length === 0) return [0, 0];
+    const lows = chart.map(c => c.low);
+    const highs = chart.map(c => c.high);
+    const min = Math.min(...lows);
+    const max = Math.max(...highs);
+    const pad = (max - min) * 0.05 || 1;
+    return [min - pad, max + pad];
+  }, [chart]);
 
   return (
     <Card className={`${bgColor} border-0 shadow-sm`}>
@@ -102,26 +160,25 @@ function IndexCard({ index, chart }: { index: IndexData; chart: ChartPoint[] }) 
             {" "}({isUp ? "+" : ""}{index.changeRate.toFixed(2)}%)
           </span>
         </div>
-        {/* 미니 차트 */}
         {chart.length > 0 && (
-          <div className="h-[80px] -mx-2">
+          <div className="h-[120px] -mx-2">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chart} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id={`grad-${index.code}`} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={color} stopOpacity={0.3} />
-                    <stop offset="95%" stopColor={color} stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <Area
-                  type="monotone"
+              <ComposedChart data={chart} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
+                <YAxis domain={yDomain} hide />
+                <Tooltip content={<CandleTooltip />} />
+                <Bar
                   dataKey="close"
-                  stroke={color}
-                  strokeWidth={1.5}
-                  fill={`url(#grad-${index.code})`}
-                  dot={false}
+                  shape={(props: any) => {
+                    const yScale = (val: number) => {
+                      const [yMin, yMax] = yDomain;
+                      const chartH = 112;
+                      return 4 + (1 - (val - yMin) / (yMax - yMin)) * chartH;
+                    };
+                    return <CandleShape {...props} yScale={yScale} />;
+                  }}
+                  isAnimationActive={false}
                 />
-              </AreaChart>
+              </ComposedChart>
             </ResponsiveContainer>
           </div>
         )}
@@ -198,6 +255,7 @@ export default function DomesticMarket() {
   const [selectedSector, setSelectedSector] = useState<SectorData | null>(null);
   const [checkedStocks, setCheckedStocks] = useState<Set<string>>(new Set());
   const [checkedTopStocks, setCheckedTopStocks] = useState<Set<string>>(new Set());
+  const [chartTimeframe, setChartTimeframe] = useState<"day" | "week" | "month">("day");
 
   // 1) 시장 지수
   const { data: indicesData, isFetching: isLoadingIndices, refetch: refetchIndices } = useQuery<{
@@ -205,9 +263,9 @@ export default function DomesticMarket() {
     charts: Record<string, ChartPoint[]>;
     updatedAt: string;
   }>({
-    queryKey: ["/api/markets/domestic/indices"],
+    queryKey: ["/api/markets/domestic/indices", chartTimeframe],
     queryFn: async () => {
-      const res = await fetch("/api/markets/domestic/indices", { credentials: "include" });
+      const res = await fetch(`/api/markets/domestic/indices?timeframe=${chartTimeframe}`, { credentials: "include" });
       if (!res.ok) throw new Error("지수 조회 실패");
       return res.json();
     },
@@ -316,11 +374,26 @@ export default function DomesticMarket() {
       </div>
 
       {/* ===== 1. 시장 지수 카드 ===== */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <h2 className="text-lg font-bold flex items-center gap-2">
           🇰🇷 국내증시 대시보드
         </h2>
         <div className="flex items-center gap-2">
+          <div className="flex items-center border rounded-md overflow-hidden">
+            {([["day", "일봉"], ["week", "주봉"], ["month", "월봉"]] as const).map(([tf, label]) => (
+              <button
+                key={tf}
+                onClick={() => setChartTimeframe(tf)}
+                className={`px-2.5 py-1 text-xs font-medium transition-colors ${
+                  chartTimeframe === tf
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-background text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           {indicesData?.updatedAt && (
             <span className="text-xs text-muted-foreground">{indicesData.updatedAt}</span>
           )}
