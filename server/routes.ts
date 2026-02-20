@@ -4037,45 +4037,46 @@ ${researchList}
   app.get("/api/markets/global/indices", async (_req, res) => {
     try {
       const worldIndices = [
-        { symbol: "DJI@DJI", name: "다우존스", market: "us" },
-        { symbol: "NAS@IXIC", name: "나스닥 종합", market: "us" },
-        { symbol: "SPI@SPX", name: "S&P 500", market: "us" },
-        { symbol: "SPI@NDX", name: "나스닥 100", market: "us" },
-        { symbol: "NII@NI225", name: "닛케이 225", market: "jp" },
-        { symbol: "HSI@HSI", name: "항셍", market: "cn" },
-        { symbol: "SHS@000001", name: "상해종합", market: "cn" },
-        { symbol: "STI@STI", name: "FTSE 100", market: "eu" },
-        { symbol: "DAX@DAX", name: "DAX", market: "eu" },
+        { symbol: ".DJI", name: "다우존스", market: "us" },
+        { symbol: ".IXIC", name: "나스닥 종합", market: "us" },
+        { symbol: ".INX", name: "S&P 500", market: "us" },
+        { symbol: ".NDX", name: "나스닥 100", market: "us" },
+        { symbol: ".N225", name: "닛케이 225", market: "jp" },
+        { symbol: ".HSI", name: "항셍", market: "cn" },
+        { symbol: ".SSEC", name: "상해종합", market: "cn" },
+        { symbol: ".FTSE", name: "FTSE 100", market: "eu" },
+        { symbol: ".GDAXI", name: "DAX", market: "eu" },
       ];
 
       const result: any[] = [];
       const chartData: Record<string, any[]> = {};
 
-      // 네이버 금융 해외지수 polling API 사용
       await Promise.all(worldIndices.map(async (idx) => {
         try {
-          const apiRes = await axios.get(`https://polling.finance.naver.com/api/realtime/worldstock/index/${idx.symbol}`, {
+          const apiRes = await axios.get(`https://api.stock.naver.com/index/${encodeURIComponent(idx.symbol)}/basic`, {
             headers: { "User-Agent": UA },
-            timeout: 5000,
+            timeout: 8000,
           });
-          const data = apiRes.data?.datas?.[0] || {};
-          const nv = parseFloat(data.nv) || 0;
-          const cv = parseFloat(data.cv) || 0;
-          const cr = parseFloat(data.cr) || 0;
-          const aq = data.aq || "0";
-          const aa = data.aa || "0";
-          const ms = data.ms || ""; // market status
+          const data = apiRes.data || {};
+          const parseNum = (s: string) => parseFloat((s || "0").replace(/,/g, "")) || 0;
+          const nv = parseNum(data.closePrice);
+          const cv = parseNum(data.compareToPreviousClosePrice);
+          const cr = parseFloat(data.fluctuationsRatio) || 0;
+          const infos = data.stockItemTotalInfos || [];
+          const aq = infos.find((i: any) => i.code === "accumulatedTradingVolume")?.value || "0";
+          const aa = infos.find((i: any) => i.code === "accumulatedTradingValue")?.value || "0";
+          const ms = data.marketStatus || "";
 
           result.push({
             code: idx.symbol,
-            name: idx.name,
+            name: data.indexName || idx.name,
             market: idx.market,
             nowVal: nv,
             changeVal: cv,
             changeRate: cr,
             quant: aq,
             amount: aa,
-            marketStatus: ms,
+            marketStatus: ms === "CLOSE" ? "장마감" : ms === "OPEN" ? "장중" : ms,
           });
         } catch {
           result.push({
@@ -4088,19 +4089,27 @@ ${researchList}
         }
       }));
 
-      // 미니 차트 데이터 (주요 지수 3개만)
-      const chartSymbols = ["DJI@DJI", "NAS@IXIC", "SPI@SPX"];
+      const chartSymbols = [".DJI", ".IXIC", ".INX", ".NDX"];
       await Promise.all(chartSymbols.map(async (sym) => {
         try {
-          const chartRes = await axios.get("https://fchart.stock.naver.com/sise.nhn", {
-            params: { symbol: sym, timeframe: "day", count: 60, requestType: 0 },
-            headers: { "User-Agent": UA }, timeout: 5000, responseType: "text",
+          const chartRes = await axios.get(`https://api.stock.naver.com/index/${encodeURIComponent(sym)}/price`, {
+            params: { page: 1, pageSize: 30 },
+            headers: { "User-Agent": UA },
+            timeout: 8000,
           });
-          const matches = [...(chartRes.data as string).matchAll(/<item data="([^"]+)"/g)];
-          chartData[sym] = matches.map((m) => {
-            const [date, open, high, low, close, vol] = m[1].split("|");
-            return { date, open: +open, high: +high, low: +low, close: +close, vol: +vol };
-          }).slice(-30);
+          const items = Array.isArray(chartRes.data) ? chartRes.data : [];
+          chartData[sym] = items.map((item: any) => {
+            const parseNum = (s: string) => parseFloat((s || "0").replace(/,/g, "")) || 0;
+            const dateStr = item.localTradedAt ? item.localTradedAt.slice(0, 10).replace(/-/g, "") : "";
+            return {
+              date: dateStr,
+              open: parseNum(item.openPrice),
+              high: parseNum(item.highPrice),
+              low: parseNum(item.lowPrice),
+              close: parseNum(item.closePrice),
+              vol: 0,
+            };
+          }).reverse();
         } catch {
           chartData[sym] = [];
         }
