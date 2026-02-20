@@ -3282,9 +3282,13 @@ export async function registerRoutes(
     try {
       const config = await storage.getNotionConfig();
       if (!config) return res.json({ configured: false });
+      const keyLen = config.apiKey.length;
+      const masked = keyLen > 12
+        ? config.apiKey.slice(0, 12) + "****" + config.apiKey.slice(-4) + ` (${keyLen}자)`
+        : config.apiKey.slice(0, 4) + "****";
       res.json({
         configured: true,
-        apiKey: config.apiKey.slice(0, 8) + "****",
+        apiKey: masked,
         databaseId: config.databaseId,
       });
     } catch (error: any) {
