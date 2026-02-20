@@ -25,12 +25,6 @@ import {
   DollarSign,
   Newspaper,
 } from "lucide-react";
-import {
-  AreaChart,
-  Area,
-  ResponsiveContainer,
-} from "recharts";
-
 // ===== 타입 =====
 interface GlobalIndex {
   code: string;
@@ -42,15 +36,8 @@ interface GlobalIndex {
   quant: string;
   amount: string;
   marketStatus?: string;
-}
-
-interface ChartPoint {
-  date: string;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  vol: number;
+  chartImageUrl?: string;
+  tradedAt?: string;
 }
 
 interface GlobalStock {
@@ -78,7 +65,7 @@ interface GlobalNews {
 }
 
 // ===== 지수 카드 =====
-function GlobalIndexCard({ index, chart }: { index: GlobalIndex; chart: ChartPoint[] }) {
+function GlobalIndexCard({ index }: { index: GlobalIndex }) {
   const isUp = index.changeVal > 0;
   const isDown = index.changeVal < 0;
   const color = isUp ? "#ef4444" : isDown ? "#3b82f6" : "#6b7280";
@@ -89,6 +76,16 @@ function GlobalIndexCard({ index, chart }: { index: GlobalIndex; chart: ChartPoi
     jp: "🇯🇵",
     cn: "🇨🇳",
     eu: "🇪🇺",
+  };
+
+  const formatTradedAt = (tradedAt: string) => {
+    if (!tradedAt) return "";
+    try {
+      const d = new Date(tradedAt);
+      return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")} 기준`;
+    } catch {
+      return "";
+    }
   };
 
   return (
@@ -104,38 +101,29 @@ function GlobalIndexCard({ index, chart }: { index: GlobalIndex; chart: ChartPoi
             </span>
           )}
         </div>
-        <div className="flex items-baseline gap-2 mb-1">
+        <div className="flex items-center gap-2 mb-0.5">
           <span className="text-xl sm:text-2xl font-bold tabular-nums">
             {index.nowVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </span>
-        </div>
-        <div className="flex items-center gap-2 mb-2">
           <span className="text-sm font-semibold flex items-center gap-0.5" style={{ color }}>
             {isUp ? <ArrowUpRight className="w-3.5 h-3.5" /> : isDown ? <ArrowDownRight className="w-3.5 h-3.5" /> : <Minus className="w-3.5 h-3.5" />}
-            {isUp ? "+" : ""}{index.changeVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            {" "}({isUp ? "+" : ""}{index.changeRate.toFixed(2)}%)
+            {Math.abs(index.changeVal).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {" "}{isUp ? "+" : ""}{index.changeRate.toFixed(2)}%
           </span>
         </div>
-        {chart.length > 0 && (
-          <div className="h-[60px] -mx-2">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chart} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id={`ggrad-${index.code.replace(/[^a-zA-Z0-9]/g, "")}`} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={color} stopOpacity={0.3} />
-                    <stop offset="95%" stopColor={color} stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <Area
-                  type="monotone"
-                  dataKey="close"
-                  stroke={color}
-                  strokeWidth={1.5}
-                  fill={`url(#ggrad-${index.code.replace(/[^a-zA-Z0-9]/g, "")})`}
-                  dot={false}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+        {index.chartImageUrl && (
+          <div className="mt-1 -mx-1 rounded overflow-hidden bg-white">
+            <img
+              src={index.chartImageUrl}
+              alt={`${index.name} 차트`}
+              className="w-full h-auto"
+              loading="lazy"
+            />
+          </div>
+        )}
+        {index.tradedAt && (
+          <div className="text-[10px] text-muted-foreground text-center mt-1">
+            {formatTradedAt(index.tradedAt)}
           </div>
         )}
       </CardContent>
@@ -169,7 +157,6 @@ export default function GlobalMarket() {
   // 1) 주요 해외 지수
   const { data: indicesData, isLoading: isLoadingIndices, refetch: refetchIndices } = useQuery<{
     indices: GlobalIndex[];
-    charts: Record<string, ChartPoint[]>;
     updatedAt: string;
   }>({
     queryKey: ["/api/markets/global/indices"],
@@ -183,7 +170,6 @@ export default function GlobalMarket() {
   });
 
   const indices = indicesData?.indices || [];
-  const charts = indicesData?.charts || {};
 
   // 2) 미국 종목 순위
   const { data: topStocksData, isLoading: isLoadingStocks, refetch: refetchStocks } = useQuery<{
@@ -271,9 +257,9 @@ export default function GlobalMarket() {
             <div className="text-sm font-semibold text-muted-foreground mb-2 flex items-center gap-1">
               🇺🇸 미국 주요 지수
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               {usIndices.map((idx) => (
-                <GlobalIndexCard key={idx.code} index={idx} chart={charts[idx.code] || []} />
+                <GlobalIndexCard key={idx.code} index={idx} />
               ))}
             </div>
           </div>
@@ -284,9 +270,9 @@ export default function GlobalMarket() {
               <div className="text-sm font-semibold text-muted-foreground mb-2 flex items-center gap-1">
                 🌐 글로벌 지수
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
                 {otherIndices.map((idx) => (
-                  <GlobalIndexCard key={idx.code} index={idx} chart={[]} />
+                  <GlobalIndexCard key={idx.code} index={idx} />
                 ))}
               </div>
             </div>

@@ -4067,6 +4067,10 @@ ${researchList}
           const aa = infos.find((i: any) => i.code === "accumulatedTradingValue")?.value || "0";
           const ms = data.marketStatus || "";
 
+          const chartImages = data.imageCharts || {};
+          const chartUrl = chartImages.day || chartImages.day_up || "";
+          const tradedAt = data.localTradedAt || "";
+
           result.push({
             code: idx.symbol,
             name: data.indexName || idx.name,
@@ -4077,6 +4081,8 @@ ${researchList}
             quant: aq,
             amount: aa,
             marketStatus: ms === "CLOSE" ? "장마감" : ms === "OPEN" ? "장중" : ms,
+            chartImageUrl: chartUrl,
+            tradedAt: tradedAt,
           });
         } catch {
           result.push({
@@ -4085,37 +4091,13 @@ ${researchList}
             market: idx.market,
             nowVal: 0, changeVal: 0, changeRate: 0,
             quant: "0", amount: "0", marketStatus: "",
+            chartImageUrl: "",
+            tradedAt: "",
           });
         }
       }));
 
-      const chartSymbols = [".DJI", ".IXIC", ".INX", ".NDX"];
-      await Promise.all(chartSymbols.map(async (sym) => {
-        try {
-          const chartRes = await axios.get(`https://api.stock.naver.com/index/${encodeURIComponent(sym)}/price`, {
-            params: { page: 1, pageSize: 30 },
-            headers: { "User-Agent": UA },
-            timeout: 8000,
-          });
-          const items = Array.isArray(chartRes.data) ? chartRes.data : [];
-          chartData[sym] = items.map((item: any) => {
-            const parseNum = (s: string) => parseFloat((s || "0").replace(/,/g, "")) || 0;
-            const dateStr = item.localTradedAt ? item.localTradedAt.slice(0, 10).replace(/-/g, "") : "";
-            return {
-              date: dateStr,
-              open: parseNum(item.openPrice),
-              high: parseNum(item.highPrice),
-              low: parseNum(item.lowPrice),
-              close: parseNum(item.closePrice),
-              vol: 0,
-            };
-          }).reverse();
-        } catch {
-          chartData[sym] = [];
-        }
-      }));
-
-      res.json({ indices: result, charts: chartData, updatedAt: new Date().toLocaleString("ko-KR") });
+      res.json({ indices: result, updatedAt: new Date().toLocaleString("ko-KR") });
     } catch (error: any) {
       console.error("[GlobalMarket] Indices error:", error.message);
       res.status(500).json({ message: "해외 지수 조회 실패" });
