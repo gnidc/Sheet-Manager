@@ -3322,43 +3322,105 @@ export async function registerRoutes(
       const { Client } = await import("@notionhq/client");
       const notion = new Client({ auth: config.apiKey });
 
+      // DB 속성 구조를 먼저 조회하여 실제 속성 이름/타입 파악
+      let dbProps: Record<string, any> = {};
+      try {
+        const dbInfo = await notion.databases.retrieve({ database_id: config.databaseId });
+        dbProps = (dbInfo as any).properties || {};
+      } catch (dbErr: any) {
+        console.error("Notion DB retrieve error:", dbErr);
+        return res.status(400).json({
+          message: `Notion 데이터베이스 접근 실패: ${dbErr.message || "알 수 없는 오류"}. Integration이 데이터베이스에 연결되어 있는지 확인해주세요.`,
+        });
+      }
+
+      // DB의 실제 속성 이름 매핑 (한글/영문 유연 매칭)
+      const findProp = (candidates: string[], type: string) => {
+        for (const c of candidates) {
+          const match = Object.entries(dbProps).find(([name, prop]: [string, any]) =>
+            name.toLowerCase().trim() === c.toLowerCase().trim() && prop.type === type
+          );
+          if (match) return match[0];
+        }
+        // 타입 무시하고 이름만 매칭
+        for (const c of candidates) {
+          const match = Object.entries(dbProps).find(([name]) =>
+            name.toLowerCase().trim() === c.toLowerCase().trim()
+          );
+          if (match) return match[0];
+        }
+        return null;
+      };
+
+      const titleProp = Object.entries(dbProps).find(([, p]: [string, any]) => p.type === "title");
+      const titleName = titleProp ? titleProp[0] : "제목";
+      const sourceName = findProp(["증권사", "source", "출처"], "rich_text");
+      const dateName = findProp(["날짜", "date", "일자"], "rich_text");
+      const linkName = findProp(["링크", "link", "url"], "url");
+      const pdfName = findProp(["pdf", "PDF", "파일"], "url");
+
       let successCount = 0;
       let failCount = 0;
       const errors: string[] = [];
 
       for (const item of items) {
         try {
+          const properties: Record<string, any> = {
+            [titleName]: {
+              title: [{ text: { content: item.title || "(제목 없음)" } }],
+            },
+          };
+
+          if (sourceName) {
+            const propType = dbProps[sourceName]?.type;
+            if (propType === "rich_text") {
+              properties[sourceName] = { rich_text: [{ text: { content: item.source || "" } }] };
+            } else if (propType === "select") {
+              properties[sourceName] = { select: item.source ? { name: item.source } : null };
+            }
+          }
+
+          if (dateName) {
+            const propType = dbProps[dateName]?.type;
+            if (propType === "rich_text") {
+              properties[dateName] = { rich_text: [{ text: { content: item.date || "" } }] };
+            } else if (propType === "date" && item.date) {
+              // "25.02.19" → "2025-02-19" 변환 시도
+              const parts = item.date.split(".");
+              if (parts.length === 3) {
+                const yr = parts[0].length === 2 ? "20" + parts[0] : parts[0];
+                properties[dateName] = { date: { start: `${yr}-${parts[1].padStart(2,"0")}-${parts[2].padStart(2,"0")}` } };
+              }
+            }
+          }
+
+          if (linkName) {
+            const url = item.link && item.link.startsWith("http") ? item.link : null;
+            properties[linkName] = { url };
+          }
+
+          if (pdfName) {
+            const url = item.file && item.file.startsWith("http") ? item.file : null;
+            properties[pdfName] = { url };
+          }
+
           await notion.pages.create({
             parent: { database_id: config.databaseId },
-            properties: {
-              "제목": {
-                title: [{ text: { content: item.title || "" } }],
-              },
-              "증권사": {
-                rich_text: [{ text: { content: item.source || "" } }],
-              },
-              "날짜": {
-                rich_text: [{ text: { content: item.date || "" } }],
-              },
-              "링크": {
-                url: item.link || null,
-              },
-              "PDF": {
-                url: item.file || null,
-              },
-            },
+            properties,
           });
           successCount++;
         } catch (err: any) {
           failCount++;
-          if (errors.length < 3) {
-            errors.push(err.message?.slice(0, 100) || "Unknown error");
+          const errMsg = err.body ? JSON.stringify(err.body).slice(0, 200) : (err.message?.slice(0, 200) || "Unknown error");
+          console.error(`Notion page create error [${item.title?.slice(0,30)}]:`, errMsg);
+          if (errors.length < 5) {
+            errors.push(errMsg);
           }
         }
       }
 
       res.json({
-        success: true,
+        success: successCount > 0,
         message: `Notion 내보내기 완료: ${successCount}건 성공${failCount > 0 ? `, ${failCount}건 실패` : ""}`,
         successCount,
         failCount,

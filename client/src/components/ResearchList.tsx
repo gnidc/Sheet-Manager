@@ -289,7 +289,14 @@ export default function ResearchList() {
       return res.json();
     },
     onSuccess: (data) => {
-      toast({ title: "Notion 내보내기", description: data.message });
+      const desc = data.errors?.length
+        ? `${data.message}\n오류: ${data.errors[0]}`
+        : data.message;
+      toast({
+        title: data.success ? "Notion 내보내기" : "Notion 내보내기 실패",
+        description: desc,
+        variant: data.success ? "default" : "destructive",
+      });
     },
     onError: (error: Error) => {
       toast({ title: "Notion 내보내기 실패", description: error.message, variant: "destructive" });
