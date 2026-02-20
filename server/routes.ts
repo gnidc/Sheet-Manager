@@ -8212,43 +8212,50 @@ ${newsSummary}`;
   app.get("/api/etf/performance/:code", async (req, res) => {
     try {
       const code = req.params.code;
-      const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)";
+      const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 
-      // 네이버 모바일 API에서 ETF 수익률 정보
-      const [perfRes, integrationRes] = await Promise.all([
-        axios.get(`https://m.stock.naver.com/api/stock/${code}/basic`, {
-          headers: { "User-Agent": UA }, timeout: 5000
-        }).catch(() => null),
-        axios.get(`https://m.stock.naver.com/api/stock/${code}/integration`, {
-          headers: { "User-Agent": UA }, timeout: 5000
-        }).catch(() => null),
-      ]);
+      const integrationRes = await axios.get(
+        `https://m.stock.naver.com/api/stock/${code}/integration`,
+        { headers: { "User-Agent": UA }, timeout: 8000 }
+      ).catch(() => null);
 
-      const basic = perfRes?.data || {};
       const integration = integrationRes?.data || {};
       const etfIndicator = integration?.etfKeyIndicator || {};
-      const returnRates = integration?.etfReturnRate || {};
+      const totalInfos: any[] = integration?.totalInfos || [];
+
+      // totalInfos에서 수익률 추출 ("+17.69%" → 17.69)
+      function extractRate(codeKey: string): number | null {
+        const item = totalInfos.find((i: any) => i.code === codeKey);
+        if (!item?.value) return null;
+        const cleaned = item.value.replace(/[%+,\s]/g, "");
+        const v = parseFloat(cleaned);
+        return isNaN(v) ? null : v;
+      }
+
+      // etfKeyIndicator에서 수치 추출
+      function indicatorRate(key: string): number | null {
+        const v = etfIndicator?.[key];
+        if (v == null) return null;
+        const n = typeof v === "string" ? parseFloat(v) : Number(v);
+        return isNaN(n) ? null : n;
+      }
 
       res.json({
-        // 기간별 수익률
-        return1w: returnRates?.["1주"] || returnRates?.oneWeek || null,
-        return1m: returnRates?.["1개월"] || returnRates?.oneMonth || null,
-        return3m: returnRates?.["3개월"] || returnRates?.threeMonths || null,
-        return6m: returnRates?.["6개월"] || returnRates?.sixMonths || null,
-        return1y: returnRates?.["1년"] || returnRates?.oneYear || null,
-        return3y: returnRates?.["3년"] || returnRates?.threeYears || null,
-        return5y: returnRates?.["5년"] || returnRates?.fiveYears || null,
-        returnYtd: returnRates?.["연초이후"] || returnRates?.ytd || null,
-        returnSinceListing: returnRates?.["상장이후"] || returnRates?.sinceListing || null,
-        // 지표
-        nav: etfIndicator?.nav,
-        trackingError: etfIndicator?.trackingError,
-        premiumDiscount: etfIndicator?.premiumDiscount || etfIndicator?.premium,
-        dividendYield: etfIndicator?.dividendYieldTtm,
-        totalExpenseRatio: etfIndicator?.totalExpenseRatio,
-        // 52주 고저
-        highPrice52w: basic?.highPrice52w || basic?.yearHighPrice,
-        lowPrice52w: basic?.lowPrice52w || basic?.yearLowPrice,
+        return1m: extractRate("oneMonthEarnRate") ?? indicatorRate("returnRate1m"),
+        return3m: extractRate("threeMonthEarnRate") ?? indicatorRate("returnRate3m"),
+        return6m: extractRate("sixMonthEarnRate") ?? indicatorRate("returnRate6m"),
+        return1y: extractRate("oneYearEarnRate") ?? indicatorRate("returnRate1y"),
+        return3y: extractRate("threeYearEarnRate") ?? indicatorRate("returnRate3y"),
+        return5y: extractRate("fiveYearEarnRate") ?? indicatorRate("returnRate5y"),
+        returnYtd: extractRate("ytdEarnRate") ?? indicatorRate("returnRateYtd"),
+        returnSinceListing: extractRate("sinceListingEarnRate") ?? indicatorRate("returnRateSinceListing"),
+        nav: etfIndicator?.nav ?? null,
+        trackingError: etfIndicator?.trackingError ?? null,
+        premiumDiscount: etfIndicator?.deviationRate != null
+          ? (etfIndicator.deviationSign === "-" ? -etfIndicator.deviationRate : etfIndicator.deviationRate)
+          : null,
+        dividendYield: etfIndicator?.dividendYieldTtm ?? null,
+        totalExpenseRatio: etfIndicator?.totalFee ?? null,
       });
     } catch (error: any) {
       console.error("[ETF Performance] Error:", error.message);
