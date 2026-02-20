@@ -78,6 +78,19 @@ function GlobalIndexCard({ index }: { index: GlobalIndex }) {
     eu: "🇪🇺",
   };
 
+  const naverSymbolMap: Record<string, string> = {
+    ".DJI": "DJI@DJI",
+    ".IXIC": "NAS@IXIC",
+    ".INX": "SPI@SPX",
+    ".NDX": "SPI@NDX",
+    ".N225": "NII@NI225",
+    ".HSI": "HSI@HSI",
+    ".SSEC": "SHS@000001",
+    ".FTSE": "LNS@FTSE100",
+    ".GDAXI": "DAX@DAX",
+  };
+  const naverUrl = `https://finance.naver.com/world/sise.naver?symbol=${naverSymbolMap[index.code] || index.code}`;
+
   const formatTradedAt = (tradedAt: string) => {
     if (!tradedAt) return "";
     try {
@@ -112,14 +125,15 @@ function GlobalIndexCard({ index }: { index: GlobalIndex }) {
           </span>
         </div>
         {index.chartImageUrl && (
-          <div className="mt-1 -mx-1 rounded overflow-hidden bg-white">
+          <a href={naverUrl} target="_blank" rel="noopener noreferrer"
+            className="block mt-1 -mx-1 rounded overflow-hidden bg-white hover:opacity-90 transition-opacity cursor-pointer">
             <img
               src={index.chartImageUrl}
               alt={`${index.name} 차트`}
               className="w-full h-auto"
               loading="lazy"
             />
-          </div>
+          </a>
         )}
         {index.tradedAt && (
           <div className="text-[10px] text-muted-foreground text-center mt-1">
