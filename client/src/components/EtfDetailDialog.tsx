@@ -1,7 +1,7 @@
 /**
  * ETF 상세 정보 팝업 다이얼로그
  * - 실시간ETF, 신규ETF, 관심(Core/Satellite) 등에서 공통으로 사용
- * - ETF 구성종목, 요약 정보, 차트를 보여줌
+ * - ETF 구성종목, 요약 정보, 차트, 기간별 수익률을 보여줌
  */
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -21,6 +21,7 @@ import {
   ArrowUp,
   ArrowDown,
 } from "lucide-react";
+import { EtfPerformanceTable } from "./EtfPerformanceTable";
 
 interface EtfComponentStock {
   stockCode: string;
@@ -93,7 +94,7 @@ export function EtfDetailDialog({ open, onOpenChange, etfCode, etfName }: EtfDet
       return res.json();
     },
     enabled: open && !!etfCode && /^[0-9A-Za-z]{6}$/.test(etfCode),
-    staleTime: 1000 * 60 * 2, // 2분
+    staleTime: 1000 * 60 * 2,
   });
 
   const displayName = componentData?.etfName || etfName || etfCode;
@@ -387,6 +388,11 @@ export function EtfDetailDialog({ open, onOpenChange, etfCode, etfName }: EtfDet
                     }}
                   />
                 </div>
+              </div>
+
+              {/* 기간별 수익률 */}
+              <div className="border rounded-lg p-3">
+                <EtfPerformanceTable etfCode={etfCode} enabled={open} />
               </div>
 
               {/* 외부 링크 */}

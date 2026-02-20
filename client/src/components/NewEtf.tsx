@@ -15,6 +15,7 @@ import {
   TrendingUp, TrendingDown, Minus, Link as LinkIcon, FileText,
   ChevronDown, ChevronUp, BarChart3, PieChart, RefreshCw, ShoppingCart,
 } from "lucide-react";
+import { EtfPerformanceTable } from "./EtfPerformanceTable";
 
 // ========== Types ==========
 interface SavedEtf {
@@ -1102,7 +1103,7 @@ function ChartSection({ etfCode, etfName }: { etfCode: string; etfName: string }
           실시간 차트
         </CardTitle>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-4">
         <div className="bg-white rounded-lg overflow-hidden border">
           <iframe
             src={`https://ssl.pstatic.net/imgfinance/chart/item/candle/day/${etfCode}.png?sidcode=${Date.now()}`}
@@ -1121,7 +1122,8 @@ function ChartSection({ etfCode, etfName }: { etfCode: string; etfName: string }
             차트를 불러올 수 없습니다.
           </div>
         </div>
-        <div className="flex gap-2 mt-2 justify-center">
+        <EtfPerformanceTable etfCode={etfCode} />
+        <div className="flex gap-2 justify-center">
           <Button variant="ghost" size="sm" asChild>
             <a href={`https://finance.naver.com/item/fchart.naver?code=${etfCode}`} target="_blank" rel="noopener noreferrer">
               <ExternalLink className="w-3 h-3 mr-1" />

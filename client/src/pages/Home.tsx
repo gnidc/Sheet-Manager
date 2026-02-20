@@ -836,11 +836,24 @@ function LoginRequiredMessage() {
   useEffect(() => {
     if (!showLogin) return;
     const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-    if (!GOOGLE_CLIENT_ID || !window.google) return;
+    if (!GOOGLE_CLIENT_ID) return;
 
-    const timer = setTimeout(() => {
+    let cancelled = false;
+    const maxWait = 10000; // 10s
+    const interval = 200;
+    let elapsed = 0;
+
+    const tryInit = () => {
+      if (cancelled || !googleBtnRef.current) return;
+      if (!window.google?.accounts?.id) {
+        if (elapsed < maxWait) {
+          elapsed += interval;
+          setTimeout(tryInit, interval);
+        }
+        return;
+      }
       try {
-        window.google?.accounts.id.initialize({
+        window.google.accounts.id.initialize({
           client_id: GOOGLE_CLIENT_ID,
           callback: async (response: any) => {
             try {
@@ -854,9 +867,9 @@ function LoginRequiredMessage() {
           auto_select: false,
           cancel_on_tap_outside: false,
         });
-        if (googleBtnRef.current) {
+        if (googleBtnRef.current && !cancelled) {
           googleBtnRef.current.innerHTML = "";
-          window.google?.accounts.id.renderButton(googleBtnRef.current, {
+          window.google.accounts.id.renderButton(googleBtnRef.current, {
             type: "standard",
             theme: "outline",
             size: "large",
@@ -866,9 +879,16 @@ function LoginRequiredMessage() {
           });
           setGoogleReady(true);
         }
-      } catch {}
-    }, 100);
-    return () => clearTimeout(timer);
+      } catch (e) {
+        console.error("[Google Sign-In] renderButton failed:", e);
+      }
+    };
+
+    const timer = setTimeout(tryInit, 100);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [showLogin]);
 
   return (

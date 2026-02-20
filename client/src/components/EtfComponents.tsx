@@ -46,6 +46,7 @@ import {
   Star,
   ShoppingCart,
 } from "lucide-react";
+import { EtfPerformanceTable } from "./EtfPerformanceTable";
 
 async function copyAsRichText(markdown: string): Promise<boolean> {
   try {
@@ -1587,16 +1588,19 @@ export default function EtfComponents() {
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="flex justify-center">
-              <img
-                key={`${selectedEtfCode}-${chartType}-${chartPeriod}`}
-                src={`https://ssl.pstatic.net/imgfinance/chart/item/${chartType}/${chartPeriod}/${selectedEtfCode}.png`}
-                alt={`${componentData.etfName} ${chartPeriod} 차트`}
-                className="max-w-full h-auto rounded-lg"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).style.display = "none";
-                }}
-              />
+            <CardContent className="space-y-4">
+              <div className="flex justify-center">
+                <img
+                  key={`${selectedEtfCode}-${chartType}-${chartPeriod}`}
+                  src={`https://ssl.pstatic.net/imgfinance/chart/item/${chartType}/${chartPeriod}/${selectedEtfCode}.png`}
+                  alt={`${componentData.etfName} ${chartPeriod} 차트`}
+                  className="max-w-full h-auto rounded-lg"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.display = "none";
+                  }}
+                />
+              </div>
+              <EtfPerformanceTable etfCode={selectedEtfCode} />
             </CardContent>
           </Card>
         </>

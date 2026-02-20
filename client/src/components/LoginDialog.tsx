@@ -74,7 +74,10 @@ export function LoginDialog() {
 
   // Google OAuth 팝업 로그인 (INP 최적화: 팝업 열기 후 리스너는 rAF로 지연)
   const triggerGoogleLogin = useCallback(() => {
-    if (!GOOGLE_CLIENT_ID) return;
+    if (!GOOGLE_CLIENT_ID) {
+      console.warn("[Google Login] VITE_GOOGLE_CLIENT_ID is not set. Set it in Vercel (or build) env and redeploy.");
+      return;
+    }
 
     const callbackUrl = `${window.location.origin}/oauth-callback.html`;
     const oauthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(callbackUrl)}&response_type=token&scope=openid%20email%20profile&prompt=select_account`;

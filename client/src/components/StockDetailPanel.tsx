@@ -23,6 +23,7 @@ import {
   ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Cell, BarChart, Customized,
 } from "recharts";
+import { EtfPerformanceTable } from "./EtfPerformanceTable";
 
 interface StockDetailPanelProps {
   stockCode: string;
@@ -973,6 +974,7 @@ export default function StockDetailPanel({
             ) : (
               <p className="text-sm text-muted-foreground text-center py-4">차트 데이터를 불러올 수 없습니다.</p>
             )}
+            {isEtf && <EtfPerformanceTable etfCode={stockCode} className="mt-4" />}
           </TabsContent>
 
           {/* 실적 */}

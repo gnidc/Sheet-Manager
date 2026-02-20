@@ -8236,7 +8236,10 @@ ${newsSummary}`;
         return3m: returnRates?.["3개월"] || returnRates?.threeMonths || null,
         return6m: returnRates?.["6개월"] || returnRates?.sixMonths || null,
         return1y: returnRates?.["1년"] || returnRates?.oneYear || null,
+        return3y: returnRates?.["3년"] || returnRates?.threeYears || null,
+        return5y: returnRates?.["5년"] || returnRates?.fiveYears || null,
         returnYtd: returnRates?.["연초이후"] || returnRates?.ytd || null,
+        returnSinceListing: returnRates?.["상장이후"] || returnRates?.sinceListing || null,
         // 지표
         nav: etfIndicator?.nav,
         trackingError: etfIndicator?.trackingError,
