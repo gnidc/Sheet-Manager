@@ -4184,6 +4184,49 @@ ${researchList}
     }
   });
 
+  // --- 2-1) 미국 상승종목 TOP 20 ---
+  app.get("/api/markets/global/rising-stocks", async (_req, res) => {
+    try {
+      const allStocks: any[] = [];
+      const exchanges = ["NASDAQ", "NYSE"];
+
+      await Promise.all(exchanges.map(async (exchange) => {
+        try {
+          const apiRes = await axios.get(`https://api.stock.naver.com/stock/exchange/${exchange}/marketValue`, {
+            params: { page: 1, pageSize: 100 },
+            headers: { "User-Agent": UA },
+            timeout: 8000,
+          });
+          const stocks = apiRes.data?.stocks || [];
+          for (const s of stocks) {
+            const rate = parseFloat(s.fluctuationsRatio) || 0;
+            if (rate > 0) {
+              allStocks.push({
+                code: s.symbolCode || s.reutersCode || "",
+                name: s.stockName || "",
+                nameEn: s.stockNameEng || "",
+                exchange,
+                nowVal: parseFloat((s.closePrice || "0").replace(/,/g, "")) || 0,
+                changeVal: parseFloat((s.compareToPreviousClosePrice || "0").replace(/,/g, "")) || 0,
+                changeRate: rate,
+                volume: parseInt(s.accumulatedTradingVolume) || 0,
+                marketCap: s.marketValueHangeul || s.marketValue || "",
+              });
+            }
+          }
+        } catch { /* skip exchange */ }
+      }));
+
+      allStocks.sort((a, b) => b.changeRate - a.changeRate);
+      const top20 = allStocks.slice(0, 20);
+
+      res.json({ stocks: top20, updatedAt: new Date().toLocaleString("ko-KR") });
+    } catch (error: any) {
+      console.error("[GlobalMarket] Rising stocks error:", error.message);
+      res.status(500).json({ message: "상승종목 조회 실패" });
+    }
+  });
+
   // --- 3) 오늘의 환율 현황 ---
   app.get("/api/markets/global/exchange-rates", async (_req, res) => {
     try {

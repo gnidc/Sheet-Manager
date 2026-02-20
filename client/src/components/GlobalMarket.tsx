@@ -22,7 +22,7 @@ import {
   ArrowDownRight,
   ExternalLink,
   Globe,
-  DollarSign,
+  TrendingUp,
   Newspaper,
 } from "lucide-react";
 // ===== 타입 =====
@@ -51,11 +51,16 @@ interface GlobalStock {
   marketCap: string;
 }
 
-interface ExchangeRate {
+interface RisingStock {
+  code: string;
   name: string;
-  value: number;
-  change: number;
+  nameEn: string;
+  exchange: string;
+  nowVal: number;
+  changeVal: number;
   changeRate: number;
+  volume: number;
+  marketCap: string;
 }
 
 interface GlobalNews {
@@ -145,27 +150,6 @@ function GlobalIndexCard({ index }: { index: GlobalIndex }) {
   );
 }
 
-// ===== 환율 카드 =====
-function ExchangeRateCard({ rate }: { rate: ExchangeRate }) {
-  const isUp = rate.change > 0;
-  const isDown = rate.change < 0;
-  const color = isUp ? "text-red-500" : isDown ? "text-blue-500" : "text-muted-foreground";
-
-  return (
-    <div className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-muted/30 transition-colors">
-      <span className="text-sm font-medium truncate flex-1">{rate.name}</span>
-      <div className="flex items-center gap-3 shrink-0">
-        <span className="text-sm font-bold tabular-nums">{rate.value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-        <span className={`text-xs font-medium tabular-nums flex items-center gap-0.5 w-[80px] justify-end ${color}`}>
-          {isUp ? <ArrowUpRight className="w-3 h-3" /> : isDown ? <ArrowDownRight className="w-3 h-3" /> : null}
-          {isUp ? "+" : ""}{rate.change.toFixed(2)}
-          <span className="text-[10px] opacity-70">({isUp ? "+" : ""}{rate.changeRate.toFixed(2)}%)</span>
-        </span>
-      </div>
-    </div>
-  );
-}
-
 // ===== 메인 컴포넌트 =====
 export default function GlobalMarket() {
   // 1) 주요 해외 지수
@@ -201,21 +185,22 @@ export default function GlobalMarket() {
 
   const topStocks = topStocksData?.stocks || [];
 
-  // 3) 환율 현황
-  const { data: ratesData, isLoading: isLoadingRates, refetch: refetchRates } = useQuery<{
-    rates: ExchangeRate[];
+  // 3) 상승종목 TOP 20
+  const { data: risingData, isLoading: isLoadingRising, refetch: refetchRising } = useQuery<{
+    stocks: RisingStock[];
     updatedAt: string;
   }>({
-    queryKey: ["/api/markets/global/exchange-rates"],
+    queryKey: ["/api/markets/global/rising-stocks"],
     queryFn: async () => {
-      const res = await fetch("/api/markets/global/exchange-rates");
+      const res = await fetch("/api/markets/global/rising-stocks");
       if (!res.ok) throw new Error("Failed");
       return res.json();
     },
-    staleTime: 300000,
+    staleTime: 120000,
+    refetchInterval: 120000,
   });
 
-  const rates = ratesData?.rates || [];
+  const risingStocks = risingData?.stocks || [];
 
   // 4) 글로벌 뉴스
   const { data: newsData, isLoading: isLoadingNews } = useQuery<{
@@ -251,7 +236,7 @@ export default function GlobalMarket() {
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => { refetchIndices(); refetchStocks(); refetchRates(); }}
+          onClick={() => { refetchIndices(); refetchStocks(); refetchRising(); }}
           disabled={isLoadingIndices}
           className="h-7 w-7 p-0"
         >
@@ -398,45 +383,80 @@ export default function GlobalMarket() {
         </CardContent>
       </Card>
 
-      {/* ===== 하단: 환율 + 뉴스 2열 레이아웃 ===== */}
+      {/* ===== 하단: 상승종목 + 뉴스 2열 레이아웃 ===== */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* 환율 현황 */}
+        {/* 실시간 상승종목 TOP 20 */}
         <Card>
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
               <CardTitle className="text-base flex items-center gap-2">
-                <DollarSign className="w-4 h-4 text-green-600" />
-                오늘의 환율 현황
+                <TrendingUp className="w-4 h-4 text-red-500" />
+                실시간 상승종목 TOP 20
               </CardTitle>
               <div className="flex items-center gap-2">
-                {ratesData?.updatedAt && (
-                  <span className="text-xs text-muted-foreground">{ratesData.updatedAt}</span>
+                {risingData?.updatedAt && (
+                  <span className="text-xs text-muted-foreground">{risingData.updatedAt}</span>
                 )}
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => refetchRates()}
-                  disabled={isLoadingRates}
+                  onClick={() => refetchRising()}
+                  disabled={isLoadingRising}
                   className="h-7 w-7 p-0"
                 >
-                  {isLoadingRates ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                  {isLoadingRising ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
                 </Button>
               </div>
             </div>
           </CardHeader>
           <CardContent className="pt-0">
-            {isLoadingRates && rates.length === 0 ? (
+            {isLoadingRising && risingStocks.length === 0 ? (
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="w-5 h-5 animate-spin text-primary" />
               </div>
-            ) : rates.length > 0 ? (
-              <div className="divide-y">
-                {rates.map((rate, i) => (
-                  <ExchangeRateCard key={i} rate={rate} />
-                ))}
+            ) : risingStocks.length > 0 ? (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/30">
+                      <TableHead className="text-xs w-[30px]">#</TableHead>
+                      <TableHead className="text-xs">종목명</TableHead>
+                      <TableHead className="text-right text-xs w-[85px]">현재가($)</TableHead>
+                      <TableHead className="text-right text-xs w-[65px]">등락률</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {risingStocks.map((stock, i) => (
+                      <TableRow key={stock.code || i} className="hover:bg-muted/30">
+                        <TableCell className="text-xs text-muted-foreground font-mono py-1.5">{i + 1}</TableCell>
+                        <TableCell className="py-1.5">
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              className="text-left hover:text-primary hover:underline"
+                              onClick={() => {
+                                const exchange = stock.exchange === "NYSE" ? "NYSE" : "NASDAQ";
+                                const url = `/stock-detail?code=${stock.code}&name=${encodeURIComponent(stock.name)}&market=overseas&exchange=${exchange}`;
+                                window.open(url, `stock_${stock.code}`, "width=1000,height=800,scrollbars=yes,resizable=yes");
+                              }}
+                            >
+                              <div className="text-xs font-medium leading-tight">{stock.name}</div>
+                              <div className="text-[10px] text-muted-foreground">{stock.code} · {stock.exchange}</div>
+                            </button>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right text-xs font-semibold tabular-nums py-1.5">
+                          ${stock.nowVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </TableCell>
+                        <TableCell className="text-right text-xs font-bold tabular-nums text-red-500 py-1.5">
+                          +{stock.changeRate.toFixed(2)}%
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               </div>
             ) : (
-              <div className="text-center py-6 text-sm text-muted-foreground">환율 데이터를 불러올 수 없습니다</div>
+              <div className="text-center py-6 text-sm text-muted-foreground">상승종목 데이터를 불러올 수 없습니다</div>
             )}
           </CardContent>
         </Card>
