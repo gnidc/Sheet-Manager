@@ -14,7 +14,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import {
-  Key, Zap, Bot, User, Plus, Trash2, CheckCircle2, Circle, Pencil, Shield, Loader2, ExternalLink, AlertTriangle, RefreshCw,
+  Key, Zap, Bot, User, Plus, Trash2, CheckCircle2, Circle, Pencil, Shield, Loader2, ExternalLink, AlertTriangle, RefreshCw, BookOpen, Eye, EyeOff,
 } from "lucide-react";
 
 // ========== Interfaces ==========
@@ -85,7 +85,7 @@ export default function ApiManager() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-3 max-w-lg">
+        <TabsList className="grid w-full grid-cols-4 max-w-xl">
           <TabsTrigger value="trading" className="gap-1.5 text-xs">
             <Zap className="h-3.5 w-3.5" />
             자동매매 API
@@ -93,6 +93,10 @@ export default function ApiManager() {
           <TabsTrigger value="ai" className="gap-1.5 text-xs">
             <Bot className="h-3.5 w-3.5" />
             AI API
+          </TabsTrigger>
+          <TabsTrigger value="notion" className="gap-1.5 text-xs">
+            <BookOpen className="h-3.5 w-3.5" />
+            Notion API
           </TabsTrigger>
           <TabsTrigger value="google" className="gap-1.5 text-xs">
             <User className="h-3.5 w-3.5" />
@@ -105,6 +109,9 @@ export default function ApiManager() {
         </TabsContent>
         <TabsContent value="ai">
           <AiApiSection />
+        </TabsContent>
+        <TabsContent value="notion">
+          <NotionApiSection />
         </TabsContent>
         <TabsContent value="google">
           <GoogleAccountSection />
@@ -807,6 +814,167 @@ function GoogleAccountSection() {
               {linkMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
               다른 Google 계정 연결
             </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ========== Notion API Section ==========
+function NotionApiSection() {
+  const { toast } = useToast();
+  const { isAdmin } = useAuth();
+  const [editing, setEditing] = useState(false);
+  const [apiKey, setApiKey] = useState("");
+  const [databaseId, setDatabaseId] = useState("");
+  const [showKey, setShowKey] = useState(false);
+
+  const { data: config, isLoading, refetch } = useQuery<{ configured: boolean; apiKey?: string; databaseId?: string }>({
+    queryKey: ["/api/admin/notion-config"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/notion-config", { credentials: "include" });
+      if (!res.ok) return { configured: false };
+      return res.json();
+    },
+    enabled: isAdmin,
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: async ({ apiKey, databaseId }: { apiKey: string; databaseId: string }) => {
+      const res = await fetch("/api/admin/notion-config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ apiKey, databaseId }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "저장 실패");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      refetch();
+      setEditing(false);
+      setApiKey("");
+      setDatabaseId("");
+      toast({ title: "Notion 설정 저장 완료" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "저장 실패", description: error.message, variant: "destructive" });
+    },
+  });
+
+  if (!isAdmin) {
+    return (
+      <Card>
+        <CardContent className="py-8 text-center">
+          <BookOpen className="w-8 h-8 mx-auto text-muted-foreground/30 mb-2" />
+          <p className="text-sm text-muted-foreground">관리자만 Notion API를 관리할 수 있습니다.</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <BookOpen className="w-4 h-4 text-gray-700" />
+          Notion Integration
+        </CardTitle>
+        <CardDescription className="text-xs">
+          주요 리서치를 Notion 데이터베이스로 내보내기 위한 설정
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {isLoading ? (
+          <div className="flex items-center justify-center py-4">
+            <Loader2 className="w-5 h-5 animate-spin text-primary" />
+          </div>
+        ) : config?.configured && !editing ? (
+          <div className="space-y-3">
+            <div className="p-3 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg space-y-2">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-green-600" />
+                <span className="text-sm font-medium text-green-700 dark:text-green-400">연동 완료</span>
+              </div>
+              <div className="grid gap-1.5 text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground w-20">API Key</span>
+                  <code className="bg-muted px-1.5 py-0.5 rounded">{config.apiKey}</code>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground w-20">Database ID</span>
+                  <code className="bg-muted px-1.5 py-0.5 rounded">{config.databaseId}</code>
+                </div>
+              </div>
+            </div>
+            <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={() => setEditing(true)}>
+              <Pencil className="w-3 h-3" />
+              설정 변경
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {!config?.configured && (
+              <div className="p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+                <p className="text-xs text-amber-700 dark:text-amber-400 font-medium mb-2">설정 방법</p>
+                <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
+                  <li><a href="https://www.notion.so/my-integrations" target="_blank" rel="noopener noreferrer" className="text-primary underline">Notion Integrations</a>에서 Internal Integration 생성 → API Key 복사</li>
+                  <li>Notion에서 데이터베이스 생성 (속성: 제목, 증권사, 날짜, 링크, PDF)</li>
+                  <li>데이터베이스 ··· → 연결(Connections)에서 Integration 연결</li>
+                  <li>데이터베이스 URL에서 Database ID (32자리) 복사</li>
+                </ol>
+              </div>
+            )}
+            <div className="space-y-1.5">
+              <Label className="text-xs">Notion API Key</Label>
+              <div className="relative">
+                <Input
+                  type={showKey ? "text" : "password"}
+                  placeholder="ntn_xxxxx..."
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  className="text-sm pr-10"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="absolute right-0 top-0 h-full px-3 text-muted-foreground hover:text-foreground"
+                  onClick={() => setShowKey(!showKey)}
+                >
+                  {showKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                </Button>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Notion Database ID</Label>
+              <Input
+                placeholder="32자리 영숫자 (URL에서 복사)"
+                value={databaseId}
+                onChange={(e) => setDatabaseId(e.target.value)}
+                className="text-sm"
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                className="gap-1.5"
+                onClick={() => saveMutation.mutate({ apiKey, databaseId })}
+                disabled={!apiKey || !databaseId || saveMutation.isPending}
+              >
+                {saveMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
+                저장
+              </Button>
+              {editing && (
+                <Button variant="ghost" size="sm" onClick={() => { setEditing(false); setApiKey(""); setDatabaseId(""); }}>
+                  취소
+                </Button>
+              )}
+            </div>
           </div>
         )}
       </CardContent>
