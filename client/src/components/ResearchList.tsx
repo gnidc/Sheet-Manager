@@ -724,7 +724,7 @@ export default function ResearchList() {
                 >
                   <Settings className="w-3.5 h-3.5" />
                 </Button>
-                {isAdmin && checkedKeyItems.size > 0 && (
+                {checkedKeyItems.size > 0 && (
                   <Button
                     variant="ghost"
                     size="sm"
@@ -752,21 +752,19 @@ export default function ResearchList() {
               <Table>
                 <TableHeader>
                   <TableRow className="bg-amber-50/50 dark:bg-amber-950/10">
-                    {isAdmin && (
-                      <TableHead className="w-[40px] text-center">
-                        <Checkbox
-                          checked={keyResearchItems.length > 0 && keyResearchItems.every((_, i) => checkedKeyItems.has(i))}
-                          onCheckedChange={(checked) => {
-                            if (checked) {
-                              setCheckedKeyItems(new Set(keyResearchItems.map((_, i) => i)));
-                            } else {
-                              setCheckedKeyItems(new Set());
-                            }
-                          }}
-                          className="w-3.5 h-3.5"
-                        />
-                      </TableHead>
-                    )}
+                    <TableHead className="w-[40px] text-center">
+                      <Checkbox
+                        checked={keyResearchItems.length > 0 && keyResearchItems.every((_, i) => checkedKeyItems.has(i))}
+                        onCheckedChange={(checked) => {
+                          if (checked) {
+                            setCheckedKeyItems(new Set(keyResearchItems.map((_, i) => i)));
+                          } else {
+                            setCheckedKeyItems(new Set());
+                          }
+                        }}
+                        className="w-3.5 h-3.5"
+                      />
+                    </TableHead>
                     <TableHead className="text-xs">제목</TableHead>
                     <TableHead className="w-[100px] text-xs">증권사</TableHead>
                     <TableHead className="w-[85px] text-center text-xs">날짜</TableHead>
@@ -786,8 +784,7 @@ export default function ResearchList() {
                         key={index}
                         className={`hover:bg-muted/30 group ${isChecked ? "bg-indigo-50/50 dark:bg-indigo-950/10" : ""}`}
                       >
-                        {isAdmin && (
-                          <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
+                        <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
                             <Checkbox
                               checked={isChecked}
                               onCheckedChange={(checked) => {
@@ -799,7 +796,6 @@ export default function ResearchList() {
                               className="w-3.5 h-3.5"
                             />
                           </TableCell>
-                        )}
                         <TableCell
                           className="cursor-pointer"
                           onClick={() => {
