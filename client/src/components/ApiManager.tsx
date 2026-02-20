@@ -824,25 +824,23 @@ function GoogleAccountSection() {
 // ========== Notion API Section ==========
 function NotionApiSection() {
   const { toast } = useToast();
-  const { isAdmin } = useAuth();
   const [editing, setEditing] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [databaseId, setDatabaseId] = useState("");
   const [showKey, setShowKey] = useState(false);
 
   const { data: config, isLoading, refetch } = useQuery<{ configured: boolean; apiKey?: string; databaseId?: string }>({
-    queryKey: ["/api/admin/notion-config"],
+    queryKey: ["/api/user/notion-config"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/notion-config", { credentials: "include" });
+      const res = await fetch("/api/user/notion-config", { credentials: "include" });
       if (!res.ok) return { configured: false };
       return res.json();
     },
-    enabled: isAdmin,
   });
 
   const saveMutation = useMutation({
     mutationFn: async ({ apiKey, databaseId }: { apiKey: string; databaseId: string }) => {
-      const res = await fetch("/api/admin/notion-config", {
+      const res = await fetch("/api/user/notion-config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -866,16 +864,23 @@ function NotionApiSection() {
     },
   });
 
-  if (!isAdmin) {
-    return (
-      <Card>
-        <CardContent className="py-8 text-center">
-          <BookOpen className="w-8 h-8 mx-auto text-muted-foreground/30 mb-2" />
-          <p className="text-sm text-muted-foreground">관리자만 Notion API를 관리할 수 있습니다.</p>
-        </CardContent>
-      </Card>
-    );
-  }
+  const deleteMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/user/notion-config", {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("삭제 실패");
+      return res.json();
+    },
+    onSuccess: () => {
+      refetch();
+      toast({ title: "Notion 설정이 삭제되었습니다" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "삭제 실패", description: error.message, variant: "destructive" });
+    },
+  });
 
   return (
     <Card>
@@ -885,7 +890,7 @@ function NotionApiSection() {
           Notion Integration
         </CardTitle>
         <CardDescription className="text-xs">
-          주요 리서치를 Notion 데이터베이스로 내보내기 위한 설정
+          주요 리서치를 나의 Notion 데이터베이스로 내보내기 위한 설정
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -911,10 +916,22 @@ function NotionApiSection() {
                 </div>
               </div>
             </div>
-            <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={() => setEditing(true)}>
-              <Pencil className="w-3 h-3" />
-              설정 변경
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={() => setEditing(true)}>
+                <Pencil className="w-3 h-3" />
+                설정 변경
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
+                onClick={() => { if (confirm("Notion 설정을 삭제하시겠습니까?")) deleteMutation.mutate(); }}
+                disabled={deleteMutation.isPending}
+              >
+                <Trash2 className="w-3 h-3" />
+                삭제
+              </Button>
+            </div>
           </div>
         ) : (
           <div className="space-y-4">

@@ -236,22 +236,21 @@ export default function ResearchList() {
     },
   });
 
-  // Notion 설정 조회
+  // Notion 설정 조회 (사용자별)
   const { data: notionConfigData, refetch: refetchNotionConfig } = useQuery<{ configured: boolean; apiKey?: string; databaseId?: string }>({
-    queryKey: ["/api/admin/notion-config"],
+    queryKey: ["/api/user/notion-config"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/notion-config", { credentials: "include" });
+      const res = await fetch("/api/user/notion-config", { credentials: "include" });
       if (!res.ok) return { configured: false };
       return res.json();
     },
-    enabled: isAdmin,
     staleTime: 60 * 1000,
   });
 
   // Notion 설정 저장 뮤테이션
   const saveNotionConfigMutation = useMutation({
     mutationFn: async ({ apiKey, databaseId }: { apiKey: string; databaseId: string }) => {
-      const res = await fetch("/api/admin/notion-config", {
+      const res = await fetch("/api/user/notion-config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -701,41 +700,41 @@ export default function ResearchList() {
                   </>
                 )}
               </div>
-              {isAdmin && (
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 text-xs gap-1"
-                    onClick={handleExportToNotion}
-                    disabled={notionExportMutation.isPending}
-                  >
-                    {notionExportMutation.isPending ? (
-                      <Loader2 className="w-3 h-3 animate-spin" />
-                    ) : (
-                      <Upload className="w-3 h-3" />
-                    )}
-                    Notion {checkedKeyItems.size > 0 ? `(${checkedKeyItems.size})` : `(전체)`}
-                  </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs gap-1"
+                  onClick={handleExportToNotion}
+                  disabled={notionExportMutation.isPending}
+                >
+                  {notionExportMutation.isPending ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <Upload className="w-3 h-3" />
+                  )}
+                  Notion {checkedKeyItems.size > 0 ? `(${checkedKeyItems.size})` : `(전체)`}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0 text-muted-foreground"
+                  onClick={() => setShowNotionSettings(true)}
+                  title="Notion 설정"
+                >
+                  <Settings className="w-3.5 h-3.5" />
+                </Button>
+                {isAdmin && checkedKeyItems.size > 0 && (
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-7 w-7 p-0 text-muted-foreground"
-                    onClick={() => setShowNotionSettings(true)}
-                    title="Notion 설정"
+                    className="h-6 text-xs px-2"
+                    onClick={() => setCheckedKeyItems(new Set())}
                   >
-                    <Settings className="w-3.5 h-3.5" />
+                    선택해제
                   </Button>
-                  {checkedKeyItems.size > 0 && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 text-xs px-2"
-                      onClick={() => setCheckedKeyItems(new Set())}
-                    >
-                      선택해제
-                    </Button>
-                  )}
+                )}
+                {isAdmin && (
                   <Button
                     variant="ghost"
                     size="sm"
@@ -744,8 +743,8 @@ export default function ResearchList() {
                   >
                     전체 초기화
                   </Button>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </CardHeader>
           <CardContent className="p-0">
