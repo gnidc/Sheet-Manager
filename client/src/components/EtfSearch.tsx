@@ -596,19 +596,31 @@ const COMPARE_COLORS = ["#e74c3c", "#3498db", "#2ecc71", "#f39c12", "#9b59b6"];
 function CompareSection() {
   const { toast } = useToast();
   const [searchInput, setSearchInput] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
   const [compareCodes, setCompareCodes] = useState<string[]>([]);
   const [showSearch, setShowSearch] = useState(false);
   const [compareTab, setCompareTab] = useState<"performance" | "info" | "holdings">("performance");
 
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      setDebouncedSearch(searchInput);
+    }, 300);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [searchInput]);
+
   // 검색
-  const { data: searchData } = useQuery({
-    queryKey: ["/api/etf/search", searchInput],
+  const { data: searchData, isLoading: isSearching, error: searchError } = useQuery({
+    queryKey: ["/api/etf/compare-search", debouncedSearch],
     queryFn: async () => {
-      if (!searchInput || searchInput.length < 2) return null;
-      const res = await apiRequest("GET", `/api/etf/search?q=${encodeURIComponent(searchInput)}`);
+      if (!debouncedSearch || debouncedSearch.length < 2) return null;
+      const res = await fetch(`/api/etf/search?q=${encodeURIComponent(debouncedSearch)}`, { credentials: "include" });
+      if (!res.ok) throw new Error("검색 실패");
       return res.json();
     },
-    enabled: searchInput.length >= 2,
+    enabled: debouncedSearch.length >= 2,
+    retry: 1,
   });
 
   // 비교 데이터
@@ -689,6 +701,7 @@ function CompareSection() {
     if (compareCodes.includes(code)) return;
     setCompareCodes([...compareCodes, code]);
     setSearchInput("");
+    setDebouncedSearch("");
     setShowSearch(false);
   };
 
@@ -799,6 +812,17 @@ function CompareSection() {
                   placeholder="ETF 이름 또는 코드 검색..." className="h-8 text-sm flex-1" autoFocus />
                 <Button variant="ghost" size="sm" className="text-xs shrink-0" onClick={() => { setShowSearch(false); setSearchInput(""); }}>닫기</Button>
               </div>
+              {isSearching && debouncedSearch.length >= 2 && (
+                <div className="flex items-center justify-center py-4 text-xs text-muted-foreground">
+                  <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> 검색 중...
+                </div>
+              )}
+              {searchError && (
+                <div className="text-xs text-destructive text-center py-3">검색 중 오류가 발생했습니다. 다시 시도해 주세요.</div>
+              )}
+              {!isSearching && debouncedSearch.length >= 2 && searchData?.results?.length === 0 && (
+                <div className="text-xs text-muted-foreground text-center py-4">"{debouncedSearch}"에 대한 ETF 검색 결과가 없습니다.</div>
+              )}
               {searchData?.results?.length > 0 && (
                 <div className="max-h-48 overflow-y-auto border rounded-md bg-background">
                   {searchData.results.slice(0, 15).map((etf: EtfItem) => (

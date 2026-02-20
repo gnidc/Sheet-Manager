@@ -1450,7 +1450,7 @@ function QuickLinks({ onNavigate }: { onNavigate: (tab: string) => void }) {
     { label: "ETF검색", tab: "etf-search", icon: "🔍" },
     { label: "국내증시", tab: "markets-domestic", icon: "🇰🇷" },
     { label: "해외증시", tab: "markets-global", icon: "🌍" },
-    { label: "일간보고서", tab: "strategy-daily", icon: "📋" },
+    { label: "일일보고서", tab: "strategy-daily", icon: "📋" },
     { label: "즐겨찾기", tab: "bookmarks", icon: "⭐" },
   ];
 
