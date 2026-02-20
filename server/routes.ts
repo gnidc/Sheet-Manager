@@ -3380,15 +3380,22 @@ export async function registerRoutes(
       const { Client } = await import("@notionhq/client");
       const notion = new Client({ auth: config.apiKey });
 
-      // DB 속성 구조를 먼저 조회하여 실제 속성 이름/타입 파악
+      // DB 속성 구조를 먼저 조회 (SDK가 properties를 누락할 수 있어 직접 fetch)
       let dbProps: Record<string, any> = {};
       try {
-        const dbInfo = await notion.databases.retrieve({ database_id: config.databaseId });
-        dbProps = (dbInfo as any).properties || {};
+        const dbResp = await axios.get(`https://api.notion.com/v1/databases/${config.databaseId}`, {
+          headers: {
+            "Authorization": `Bearer ${config.apiKey}`,
+            "Notion-Version": "2022-06-28",
+          },
+          timeout: 10000,
+        });
+        dbProps = dbResp.data?.properties || {};
       } catch (dbErr: any) {
-        console.error("Notion DB retrieve error:", dbErr);
+        const errMsg = dbErr.response?.data?.message || dbErr.message || "알 수 없는 오류";
+        console.error("Notion DB retrieve error:", errMsg);
         return res.status(400).json({
-          message: `Notion 데이터베이스 접근 실패: ${dbErr.message || "알 수 없는 오류"}. Integration이 데이터베이스에 연결되어 있는지 확인해주세요.`,
+          message: `Notion 데이터베이스 접근 실패: ${errMsg}. Integration이 데이터베이스에 연결되어 있는지 확인해주세요.`,
         });
       }
 
