@@ -3275,6 +3275,101 @@ export async function registerRoutes(
     }
   });
 
+  // ========== Notion 연동 ==========
+
+  // Notion 설정 조회
+  app.get("/api/admin/notion-config", requireAdmin, async (_req, res) => {
+    try {
+      const config = await storage.getNotionConfig();
+      if (!config) return res.json({ configured: false });
+      res.json({
+        configured: true,
+        apiKey: config.apiKey.slice(0, 8) + "****",
+        databaseId: config.databaseId,
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Notion 설정 저장
+  app.post("/api/admin/notion-config", requireAdmin, async (req, res) => {
+    try {
+      const { apiKey, databaseId } = req.body;
+      if (!apiKey || !databaseId) {
+        return res.status(400).json({ message: "API Key와 Database ID가 필요합니다." });
+      }
+      await storage.saveNotionConfig(apiKey.trim(), databaseId.trim().replace(/-/g, ""));
+      res.json({ success: true, message: "Notion 설정이 저장되었습니다." });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Notion으로 주요 리서치 내보내기
+  app.post("/api/research/export-notion", requireAdmin, async (req, res) => {
+    try {
+      const config = await storage.getNotionConfig();
+      if (!config) {
+        return res.status(400).json({ message: "Notion 설정이 필요합니다. 관리자 설정에서 Notion API Key와 Database ID를 등록해주세요." });
+      }
+
+      const { items } = req.body;
+      if (!items || !Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ message: "내보낼 리서치 항목이 없습니다." });
+      }
+
+      const { Client } = await import("@notionhq/client");
+      const notion = new Client({ auth: config.apiKey });
+
+      let successCount = 0;
+      let failCount = 0;
+      const errors: string[] = [];
+
+      for (const item of items) {
+        try {
+          await notion.pages.create({
+            parent: { database_id: config.databaseId },
+            properties: {
+              "제목": {
+                title: [{ text: { content: item.title || "" } }],
+              },
+              "증권사": {
+                rich_text: [{ text: { content: item.source || "" } }],
+              },
+              "날짜": {
+                rich_text: [{ text: { content: item.date || "" } }],
+              },
+              "링크": {
+                url: item.link || null,
+              },
+              "PDF": {
+                url: item.file || null,
+              },
+            },
+          });
+          successCount++;
+        } catch (err: any) {
+          failCount++;
+          if (errors.length < 3) {
+            errors.push(err.message?.slice(0, 100) || "Unknown error");
+          }
+        }
+      }
+
+      res.json({
+        success: true,
+        message: `Notion 내보내기 완료: ${successCount}건 성공${failCount > 0 ? `, ${failCount}건 실패` : ""}`,
+        successCount,
+        failCount,
+        errors: errors.length > 0 ? errors : undefined,
+      });
+    } catch (error: any) {
+      console.error("Notion export error:", error);
+      res.status(500).json({ message: error.message || "Notion 내보내기 실패" });
+    }
+  });
+
   // ========== 리서치 AI 분석 ==========
   app.post("/api/research/ai-analyze", requireUser, async (req, res) => {
     try {

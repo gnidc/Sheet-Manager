@@ -109,6 +109,8 @@ import {
   type SystemTradingConfig,
   keyResearch,
   type KeyResearchItem,
+  notionConfig,
+  type NotionConfig,
 } from "../shared/schema.js";
 import { eq, and, or, desc, isNull, inArray, sql } from "drizzle-orm";
 
@@ -210,6 +212,10 @@ export interface IStorage {
   getKeyResearch(limit?: number): Promise<KeyResearchItem[]>;
   saveKeyResearch(items: Array<{ title: string; link: string; source: string; date: string; file: string }>): Promise<void>;
   deleteKeyResearch(id: number): Promise<void>;
+
+  // Notion Config
+  getNotionConfig(): Promise<NotionConfig | null>;
+  saveNotionConfig(apiKey: string, databaseId: string): Promise<void>;
 
   // AI Reports (AI 분석 보고서)
   getAiReports(limit?: number): Promise<AiReport[]>;
@@ -1182,6 +1188,31 @@ export class DatabaseStorage implements IStorage {
       return;
     }
     await db.delete(keyResearch).where(eq(keyResearch.id, id));
+  }
+
+  // ========== Notion Config ==========
+
+  async getNotionConfig(): Promise<NotionConfig | null> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const rows = await db.select().from(notionConfig).limit(1);
+        return rows[0] || null;
+      });
+    }
+    const rows = await db.select().from(notionConfig).limit(1);
+    return rows[0] || null;
+  }
+
+  async saveNotionConfig(apiKey: string, databaseId: string): Promise<void> {
+    if (process.env.VERCEL) {
+      await executeWithClient(async (db) => {
+        await db.delete(notionConfig);
+        await db.insert(notionConfig).values({ apiKey, databaseId });
+      });
+      return;
+    }
+    await db.delete(notionConfig);
+    await db.insert(notionConfig).values({ apiKey, databaseId });
   }
 
   // ========== AI Reports ==========

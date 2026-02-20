@@ -262,6 +262,16 @@ export const keyResearch = pgTable("key_research", {
 export type KeyResearchItem = typeof keyResearch.$inferSelect;
 export type InsertKeyResearch = typeof keyResearch.$inferInsert;
 
+// ========== Notion 연동 설정 ==========
+export const notionConfig = pgTable("notion_config", {
+  id: serial("id").primaryKey(),
+  apiKey: text("api_key").notNull(),
+  databaseId: text("database_id").notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export type NotionConfig = typeof notionConfig.$inferSelect;
+
 // ========== 전략 보고서 (일일/주간/월간/연간) ==========
 
 // 시장 데이터 보고서 (모든 로그인 유저 생성 가능, 공유 가능)

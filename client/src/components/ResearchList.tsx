@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -28,6 +30,8 @@ import {
   BookOpen,
   Trash2,
   X,
+  Settings,
+  Upload,
 } from "lucide-react";
 
 interface ResearchItem {
@@ -74,6 +78,10 @@ export default function ResearchList() {
   const [reportCopied, setReportCopied] = useState(false);
   // AI 분석 시 사용된 항목 추적
   const [lastAnalyzedItems, setLastAnalyzedItems] = useState<ResearchItem[]>([]);
+  // Notion 연동
+  const [showNotionSettings, setShowNotionSettings] = useState(false);
+  const [notionApiKey, setNotionApiKey] = useState("");
+  const [notionDbId, setNotionDbId] = useState("");
 
   // 전체 리서치 조회
   const {
@@ -228,6 +236,66 @@ export default function ResearchList() {
     },
   });
 
+  // Notion 설정 조회
+  const { data: notionConfigData, refetch: refetchNotionConfig } = useQuery<{ configured: boolean; apiKey?: string; databaseId?: string }>({
+    queryKey: ["/api/admin/notion-config"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/notion-config", { credentials: "include" });
+      if (!res.ok) return { configured: false };
+      return res.json();
+    },
+    enabled: isAdmin,
+    staleTime: 60 * 1000,
+  });
+
+  // Notion 설정 저장 뮤테이션
+  const saveNotionConfigMutation = useMutation({
+    mutationFn: async ({ apiKey, databaseId }: { apiKey: string; databaseId: string }) => {
+      const res = await fetch("/api/admin/notion-config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ apiKey, databaseId }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "설정 저장 실패");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      refetchNotionConfig();
+      setShowNotionSettings(false);
+      toast({ title: "Notion 설정 저장 완료" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "설정 저장 실패", description: error.message, variant: "destructive" });
+    },
+  });
+
+  // Notion 내보내기 뮤테이션
+  const notionExportMutation = useMutation({
+    mutationFn: async (items: ResearchItem[]) => {
+      const res = await fetch("/api/research/export-notion", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ items }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "Notion 내보내기 실패");
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast({ title: "Notion 내보내기", description: data.message });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Notion 내보내기 실패", description: error.message, variant: "destructive" });
+    },
+  });
+
   // AI 보고서 삭제 뮤테이션 (admin)
   const deleteReportMutation = useMutation({
     mutationFn: async (id: string) => {
@@ -300,6 +368,20 @@ export default function ResearchList() {
     const selectedItems = Array.from(checkedKeyItems).map(idx => keyResearchItems[idx]).filter(Boolean);
     setLastAnalyzedItems(selectedItems);
     aiMutation.mutate(selectedItems);
+  };
+
+  // Notion으로 내보내기
+  const handleExportToNotion = () => {
+    if (!notionConfigData?.configured) {
+      setShowNotionSettings(true);
+      return;
+    }
+    if (checkedKeyItems.size === 0) {
+      notionExportMutation.mutate(keyResearchItems);
+    } else {
+      const selectedItems = Array.from(checkedKeyItems).map(idx => keyResearchItems[idx]).filter(Boolean);
+      notionExportMutation.mutate(selectedItems);
+    }
   };
 
   // AI 분석 보고서 저장
@@ -614,6 +696,29 @@ export default function ResearchList() {
               </div>
               {isAdmin && (
                 <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs gap-1"
+                    onClick={handleExportToNotion}
+                    disabled={notionExportMutation.isPending}
+                  >
+                    {notionExportMutation.isPending ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <Upload className="w-3 h-3" />
+                    )}
+                    Notion {checkedKeyItems.size > 0 ? `(${checkedKeyItems.size})` : `(전체)`}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 p-0 text-muted-foreground"
+                    onClick={() => setShowNotionSettings(true)}
+                    title="Notion 설정"
+                  >
+                    <Settings className="w-3.5 h-3.5" />
+                  </Button>
                   {checkedKeyItems.size > 0 && (
                     <Button
                       variant="ghost"
@@ -1026,6 +1131,71 @@ export default function ResearchList() {
       <p className="text-xs text-muted-foreground text-center py-2">
         데이터 출처: 네이버 증권 (stock.naver.com/research) | 리포트 원문은 해당 증권사에 저작권이 있습니다
       </p>
+
+      {/* Notion 설정 다이얼로그 */}
+      <Dialog open={showNotionSettings} onOpenChange={setShowNotionSettings}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Settings className="w-4 h-4" /> Notion 연동 설정
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            {notionConfigData?.configured && (
+              <div className="text-xs p-2 bg-green-50 dark:bg-green-950/20 rounded border border-green-200 dark:border-green-800">
+                현재 설정됨: API Key {notionConfigData.apiKey} / DB {notionConfigData.databaseId?.slice(0, 8)}...
+              </div>
+            )}
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">
+                1. <a href="https://www.notion.so/my-integrations" target="_blank" rel="noopener noreferrer" className="text-primary underline">Notion Integrations</a>에서 Internal Integration을 생성하고 API Key를 복사하세요.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                2. Notion에서 데이터베이스를 생성하고 (제목, 증권사, 날짜, 링크, PDF 속성), Integration을 연결하세요.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                3. 데이터베이스 URL에서 ID를 복사하세요. (notion.so/<b>DATABASE_ID</b>?v=...)
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium">Notion API Key (Internal Integration Token)</label>
+              <Input
+                type="password"
+                placeholder="ntn_xxxxx..."
+                value={notionApiKey}
+                onChange={(e) => setNotionApiKey(e.target.value)}
+                className="text-sm"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium">Notion Database ID</label>
+              <Input
+                placeholder="32자리 영숫자 또는 하이픈 포함 ID"
+                value={notionDbId}
+                onChange={(e) => setNotionDbId(e.target.value)}
+                className="text-sm"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowNotionSettings(false)}
+            >
+              취소
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => saveNotionConfigMutation.mutate({ apiKey: notionApiKey, databaseId: notionDbId })}
+              disabled={!notionApiKey || !notionDbId || saveNotionConfigMutation.isPending}
+            >
+              {saveNotionConfigMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+              저장
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
