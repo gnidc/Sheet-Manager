@@ -107,6 +107,8 @@ import {
   type InsertSkillExecutionLog,
   systemTradingConfig,
   type SystemTradingConfig,
+  keyResearch,
+  type KeyResearchItem,
 } from "../shared/schema.js";
 import { eq, and, or, desc, isNull, inArray, sql } from "drizzle-orm";
 
@@ -203,6 +205,11 @@ export interface IStorage {
   createSteemPost(data: InsertSteemPost): Promise<SteemPost>;
   updateSteemPost(id: number, updates: Partial<InsertSteemPost>): Promise<SteemPost>;
   deleteSteemPost(id: number): Promise<void>;
+
+  // Key Research (주요 리서치 - DB 영속)
+  getKeyResearch(limit?: number): Promise<KeyResearchItem[]>;
+  saveKeyResearch(items: Array<{ title: string; link: string; source: string; date: string; file: string }>): Promise<void>;
+  deleteKeyResearch(id: number): Promise<void>;
 
   // AI Reports (AI 분석 보고서)
   getAiReports(limit?: number): Promise<AiReport[]>;
@@ -1126,6 +1133,55 @@ export class DatabaseStorage implements IStorage {
       });
     }
     await db.delete(steemPosts).where(eq(steemPosts.id, id));
+  }
+
+  // ========== Key Research (주요 리서치) ==========
+
+  async getKeyResearch(limit: number = 200): Promise<KeyResearchItem[]> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(keyResearch).orderBy(desc(keyResearch.createdAt)).limit(limit);
+      });
+    }
+    return await db.select().from(keyResearch).orderBy(desc(keyResearch.createdAt)).limit(limit);
+  }
+
+  async saveKeyResearch(items: Array<{ title: string; link: string; source: string; date: string; file: string }>): Promise<void> {
+    if (process.env.VERCEL) {
+      await executeWithClient(async (db) => {
+        await db.delete(keyResearch);
+        if (items.length > 0) {
+          await db.insert(keyResearch).values(items.map(item => ({
+            title: item.title,
+            link: item.link || "",
+            source: item.source || "",
+            date: item.date || "",
+            file: item.file || "",
+          })));
+        }
+      });
+      return;
+    }
+    await db.delete(keyResearch);
+    if (items.length > 0) {
+      await db.insert(keyResearch).values(items.map(item => ({
+        title: item.title,
+        link: item.link || "",
+        source: item.source || "",
+        date: item.date || "",
+        file: item.file || "",
+      })));
+    }
+  }
+
+  async deleteKeyResearch(id: number): Promise<void> {
+    if (process.env.VERCEL) {
+      await executeWithClient(async (db) => {
+        await db.delete(keyResearch).where(eq(keyResearch.id, id));
+      });
+      return;
+    }
+    await db.delete(keyResearch).where(eq(keyResearch.id, id));
   }
 
   // ========== AI Reports ==========

@@ -248,6 +248,20 @@ export const insertAiReportSchema = createInsertSchema(aiReports).omit({ id: tru
 export type AiReport = typeof aiReports.$inferSelect;
 export type InsertAiReport = z.infer<typeof insertAiReportSchema>;
 
+// ========== 주요 리서치 (DB 영속 저장) ==========
+export const keyResearch = pgTable("key_research", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull(),
+  link: text("link").default(""),
+  source: text("source").default(""),
+  date: text("date").default(""),
+  file: text("file").default(""),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export type KeyResearchItem = typeof keyResearch.$inferSelect;
+export type InsertKeyResearch = typeof keyResearch.$inferInsert;
+
 // ========== 전략 보고서 (일일/주간/월간/연간) ==========
 
 // 시장 데이터 보고서 (모든 로그인 유저 생성 가능, 공유 가능)

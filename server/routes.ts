@@ -3228,36 +3228,34 @@ export async function registerRoutes(
     }
   });
 
-  // ========== 주요 리서치 저장/조회 (서버 메모리 기반, 모든 유저 공유, 최대 200개) ==========
-  let savedKeyResearch: Array<{ title: string; link: string; source: string; date: string; file: string }> = [];
+  // ========== 주요 리서치 저장/조회 (DB 영속 저장, 모든 유저 공유, 최대 200개) ==========
   const KEY_RESEARCH_MAX_SIZE = 200;
-
-  // AI 분석 보고서는 DB(ai_reports 테이블)에 저장
 
   // 주요 리서치 조회 (모든 유저)
   app.get("/api/research/key-research", requireUser, async (_req, res) => {
-    res.json({ items: savedKeyResearch });
+    try {
+      const items = await storage.getKeyResearch(KEY_RESEARCH_MAX_SIZE);
+      res.json({ items: items.map(r => ({ title: r.title, link: r.link, source: r.source, date: r.date, file: r.file })) });
+    } catch (error: any) {
+      console.error("Failed to get key research:", error);
+      res.status(500).json({ message: error.message || "주요 리서치 조회 실패" });
+    }
   });
 
-  // 주요 리서치 저장 (admin 전용)
+  // 주요 리서치 추가 (admin 전용)
   app.post("/api/research/key-research", requireAdmin, async (req, res) => {
     try {
       const { items } = req.body;
       if (!items || !Array.isArray(items)) {
         return res.status(400).json({ message: "items 배열이 필요합니다." });
       }
-      // 중복 제거 후 추가 (크기 제한 적용)
-      for (const item of items) {
-        const exists = savedKeyResearch.some(k => k.title === item.title && k.source === item.source);
-        if (!exists) {
-          savedKeyResearch.push(item);
-        }
-      }
-      // 최대치 초과 시 오래된 것부터 제거
-      if (savedKeyResearch.length > KEY_RESEARCH_MAX_SIZE) {
-        savedKeyResearch = savedKeyResearch.slice(-KEY_RESEARCH_MAX_SIZE);
-      }
-      res.json({ items: savedKeyResearch, added: items.length });
+      const existing = await storage.getKeyResearch(KEY_RESEARCH_MAX_SIZE);
+      const existingSet = new Set(existing.map(k => `${k.title}||${k.source}`));
+      const newItems = items.filter((item: any) => !existingSet.has(`${item.title}||${item.source}`));
+      const merged = [...existing.map(r => ({ title: r.title, link: r.link || "", source: r.source || "", date: r.date || "", file: r.file || "" })), ...newItems];
+      const trimmed = merged.length > KEY_RESEARCH_MAX_SIZE ? merged.slice(-KEY_RESEARCH_MAX_SIZE) : merged;
+      await storage.saveKeyResearch(trimmed);
+      res.json({ items: trimmed, added: newItems.length });
     } catch (error: any) {
       res.status(500).json({ message: error.message || "주요 리서치 저장 실패" });
     }
@@ -3270,8 +3268,8 @@ export async function registerRoutes(
       if (!Array.isArray(items)) {
         return res.status(400).json({ message: "items 배열이 필요합니다." });
       }
-      savedKeyResearch = items;
-      res.json({ items: savedKeyResearch });
+      await storage.saveKeyResearch(items);
+      res.json({ items });
     } catch (error: any) {
       res.status(500).json({ message: error.message || "주요 리서치 업데이트 실패" });
     }
@@ -11936,8 +11934,7 @@ ${etfListStr}
         cafeNotifications.length = 0;
         cleared.push("카페 알림");
 
-        savedKeyResearch = [];
-        cleared.push("투자리서치 캐시");
+        cleared.push("투자리서치 (DB 영속)");
 
         stopLossLatestPrices.clear();
         cleared.push("Stop Loss 가격 캐시");
