@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Loader2, RefreshCw, TrendingUp, TrendingDown, Globe, Landmark, Droplets, BarChart3, Bitcoin, DollarSign, Flag } from "lucide-react";
+import { Loader2, RefreshCw, TrendingUp, TrendingDown, Globe, Landmark, Droplets, BarChart3, Bitcoin, DollarSign, Flag, Star } from "lucide-react";
 
 interface WeeklyStatsData {
   globalIndices: { name: string; price: number; weekChange: number; dayChange: number }[];
@@ -12,6 +12,7 @@ interface WeeklyStatsData {
   commodities: { name: string; price: number; weekChange: number; dayChange: number }[];
   etfs: { name: string; price: number; weekChange: number }[];
   domesticEtfs: { name: string; code: string; price: number; weekReturn: number }[];
+  coreEtfs: { name: string; code: string; sector: string; price: number; weekReturn: number }[];
   crypto: { symbol: string; name: string; price: number; change24h: number; change7d: number; marketCap: number }[];
   forex: { name: string; value: number; weekChange: number }[];
   updatedAt: string;
@@ -254,6 +255,45 @@ export default function WeeklyStats() {
                             {e.name}
                           </div>
                         </TableCell>
+                        <TableCell className="text-xs text-right py-1.5">{e.price.toLocaleString()}원</TableCell>
+                        <TableCell className="text-xs text-right py-1.5">
+                          <Badge variant={e.weekReturn > 0 ? "destructive" : "default"} className="text-[10px] px-1.5 py-0">
+                            {e.weekReturn > 0 ? "+" : ""}{e.weekReturn}%
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </SectionCard>
+          )}
+
+          {/* 관심ETF(Core) 주간 수익률 */}
+          {data.coreEtfs?.length > 0 && (
+            <SectionCard title="관심ETF(Core) 주간 수익률" icon={<Star className="w-4 h-4 text-yellow-500" />}>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-xs">순위</TableHead>
+                      <TableHead className="text-xs">ETF</TableHead>
+                      <TableHead className="text-xs">섹터</TableHead>
+                      <TableHead className="text-xs text-right">현재가(원)</TableHead>
+                      <TableHead className="text-xs text-right">주간 수익률</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {data.coreEtfs.map((e, i) => (
+                      <TableRow key={e.code}>
+                        <TableCell className="text-xs py-1.5">{i + 1}</TableCell>
+                        <TableCell className="text-xs font-medium py-1.5">
+                          <div className="flex items-center gap-1.5">
+                            {e.weekReturn > 0 ? <TrendingUp className="w-3 h-3 text-red-500" /> : e.weekReturn < 0 ? <TrendingDown className="w-3 h-3 text-blue-500" /> : null}
+                            {e.name}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground py-1.5">{e.sector}</TableCell>
                         <TableCell className="text-xs text-right py-1.5">{e.price.toLocaleString()}원</TableCell>
                         <TableCell className="text-xs text-right py-1.5">
                           <Badge variant={e.weekReturn > 0 ? "destructive" : "default"} className="text-[10px] px-1.5 py-0">

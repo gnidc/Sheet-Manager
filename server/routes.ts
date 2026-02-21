@@ -4093,7 +4093,7 @@ ${researchList}
       };
 
       // 병렬 수집
-      const [globalIndices, domesticIndices, bonds, commodities, etfs, domesticEtfs, cryptoData, fxData] = await Promise.all([
+      const [globalIndices, domesticIndices, bonds, commodities, etfs, domesticEtfs, coreEtfs, cryptoData, fxData] = await Promise.all([
         // 글로벌 지수
         (async () => {
           const syms = [
@@ -4229,6 +4229,30 @@ ${researchList}
             return results.slice(0, 10);
           } catch { return []; }
         })(),
+        // 관심ETF(Core) 주간 수익률
+        (async () => {
+          try {
+            const watchlist = await storage.getWatchlistEtfs();
+            if (!watchlist.length) return [];
+            const results: any[] = [];
+            await Promise.all(watchlist.map(async (etf) => {
+              try {
+                const pr = await axios.get(`https://m.stock.naver.com/api/stock/${etf.etfCode}/price`, {
+                  params: { pageSize: 6, page: 1 }, headers: { "User-Agent": UA }, timeout: 5000,
+                });
+                const data = pr.data;
+                if (!data || data.length < 2) return;
+                const latest = parseInt(data[0].closePrice.replace(/,/g, ""));
+                const oldest = parseInt(data[data.length - 1].closePrice.replace(/,/g, ""));
+                if (oldest <= 0) return;
+                const weekReturn = +((latest - oldest) / oldest * 100).toFixed(2);
+                results.push({ name: etf.etfName, code: etf.etfCode, sector: etf.sector || "기본", price: latest, weekReturn });
+              } catch {}
+            }));
+            results.sort((a, b) => b.weekReturn - a.weekReturn);
+            return results;
+          } catch { return []; }
+        })(),
         // 크립토
         (async () => {
           try {
@@ -4266,7 +4290,7 @@ ${researchList}
       ]);
 
       res.json({
-        globalIndices, domesticIndices, bonds, commodities, etfs, domesticEtfs, crypto: cryptoData, forex: fxData,
+        globalIndices, domesticIndices, bonds, commodities, etfs, domesticEtfs, coreEtfs, crypto: cryptoData, forex: fxData,
         updatedAt: new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }),
       });
     } catch (error: any) {
