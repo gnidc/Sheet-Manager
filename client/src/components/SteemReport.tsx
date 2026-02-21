@@ -699,6 +699,7 @@ export default function SteemReport() {
     createdAt: string;
     prompt: string;
     source: string;
+    period: string;
     result: { analysis: string; analyzedAt?: string; dataPoints?: any };
     createdBy: string;
   }[]>([]);
@@ -708,13 +709,23 @@ export default function SteemReport() {
     setReportPickerOpen(true);
     setIsLoadingReportList(true);
     try {
-      const res = await fetch("/api/strategy-analyses/daily", { credentials: "include" });
-      if (res.ok) {
-        const data = await res.json();
-        setReportList(data.analyses || []);
-      } else {
-        setReportList([]);
-      }
+      const periods = ["daily", "weekly", "monthly", "yearly"] as const;
+      const results = await Promise.all(
+        periods.map(async (period) => {
+          try {
+            const res = await fetch(`/api/strategy-analyses/${period}`, { credentials: "include" });
+            if (res.ok) {
+              const data = await res.json();
+              return (data.analyses || []).map((a: any) => ({ ...a, period }));
+            }
+          } catch {}
+          return [];
+        })
+      );
+      const all = results.flat().sort((a: any, b: any) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+      setReportList(all);
     } catch {
       setReportList([]);
     } finally {
@@ -722,13 +733,16 @@ export default function SteemReport() {
     }
   }, []);
 
+  const periodLabelMap: Record<string, string> = { daily: "일간", weekly: "주간", monthly: "월간", yearly: "연간" };
+
   const handleSelectReport = useCallback((report: typeof reportList[number]) => {
     const analysis = report.result?.analysis || "";
     if (!analysis) {
       toast({ title: "본문 없음", description: "이 보고서에는 분석 내용이 없습니다.", variant: "destructive" });
       return;
     }
-    const sourceLabel = report.source === "etf-realtime" ? "AI 트렌드 분석 보고서" : "AI 일간 분석 보고서";
+    const pLabel = periodLabelMap[report.period] || "일간";
+    const sourceLabel = report.source === "etf-realtime" ? "AI 트렌드 분석 보고서" : `AI ${pLabel} 분석 보고서`;
     const lines: string[] = [];
     lines.push("# Comment");
     lines.push(""); lines.push(""); lines.push("");
@@ -743,8 +757,8 @@ export default function SteemReport() {
     lines.push("*데이터 출처: 네이버 금융, Yahoo Finance, CoinGecko, 한국투자증권 API 등*");
 
     setPostBody(lines.join("\n"));
-    const periodLabel = report.source === "etf-realtime" ? "실시간ETF" : "일간";
-    setPostTitle(getDefaultTitle(periodLabel));
+    const titleLabel = report.source === "etf-realtime" ? "실시간ETF" : pLabel;
+    setPostTitle(getDefaultTitle(titleLabel));
     setReportPickerOpen(false);
     toast({ title: `✅ ${sourceLabel}를 불러왔습니다`, description: `작성일: ${report.createdAt}` });
   }, [toast]);
@@ -1327,7 +1341,7 @@ export default function SteemReport() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <BrainCircuit className="w-5 h-5 text-purple-600" />
-              일일보고서에서 선택
+              AI 분석 보고서 선택
             </DialogTitle>
           </DialogHeader>
           <div className="overflow-y-auto flex-1 -mx-2 px-2">
@@ -1339,8 +1353,8 @@ export default function SteemReport() {
             ) : reportList.length === 0 ? (
               <div className="text-center py-12">
                 <AlertTriangle className="w-8 h-8 mx-auto text-muted-foreground/50 mb-2" />
-                <p className="text-sm text-muted-foreground">저장된 일일보고서가 없습니다.</p>
-                <p className="text-xs text-muted-foreground mt-1">투자전략 또는 실시간ETF 탭에서 AI 분석을 실행하고 저장해주세요.</p>
+                <p className="text-sm text-muted-foreground">저장된 AI 보고서가 없습니다.</p>
+                <p className="text-xs text-muted-foreground mt-1">투자전략 탭에서 AI 분석을 실행하고 저장해주세요.</p>
               </div>
             ) : (
               <div className="space-y-2">
@@ -1354,6 +1368,9 @@ export default function SteemReport() {
                       <div className="flex items-center gap-2">
                         <Badge variant={report.source === "etf-realtime" ? "default" : "secondary"} className="text-[10px]">
                           {report.source === "etf-realtime" ? "실시간ETF" : "투자전략"}
+                        </Badge>
+                        <Badge variant="outline" className="text-[10px]">
+                          {periodLabelMap[report.period] || "일간"}
                         </Badge>
                         <span className="text-xs text-muted-foreground">{report.createdBy}</span>
                       </div>
