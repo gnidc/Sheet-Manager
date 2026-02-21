@@ -4074,6 +4074,156 @@ ${researchList}
 
   const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 
+  // ========== 주간통계 API ==========
+  app.get("/api/markets/weekly-stats", async (_req, res) => {
+    try {
+      const yChart = async (symbol: string) => {
+        try {
+          const r = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`, {
+            params: { range: "5d", interval: "1d" }, headers: { "User-Agent": UA }, timeout: 8000,
+          });
+          const res0 = r.data?.chart?.result?.[0];
+          const meta = res0?.meta;
+          const closes = res0?.indicators?.quote?.[0]?.close?.filter((v: any) => v != null) || [];
+          const last = meta?.regularMarketPrice || closes[closes.length - 1] || 0;
+          const weekOpen = closes[0] || last;
+          const prev = closes.length >= 2 ? closes[closes.length - 2] : last;
+          return { last, weekOpen, prev };
+        } catch { return null; }
+      };
+
+      // 병렬 수집
+      const [globalIndices, bonds, commodities, etfs, cryptoData, fxData] = await Promise.all([
+        // 글로벌 지수
+        (async () => {
+          const syms = [
+            { s: "^GSPC", n: "S&P 500" }, { s: "^IXIC", n: "나스닥" }, { s: "^DJI", n: "다우존스" },
+            { s: "^STOXX50E", n: "유로스톡스50" }, { s: "^GDAXI", n: "DAX" }, { s: "^FTSE", n: "FTSE 100" },
+            { s: "^N225", n: "닛케이225" }, { s: "^HSI", n: "항셍" }, { s: "000001.SS", n: "상해종합" },
+          ];
+          const results: any[] = [];
+          await Promise.all(syms.map(async (sym) => {
+            const d = await yChart(sym.s);
+            if (d && d.last > 0) {
+              results.push({
+                name: sym.n, price: +d.last.toFixed(2),
+                weekChange: d.weekOpen > 0 ? +((d.last - d.weekOpen) / d.weekOpen * 100).toFixed(2) : 0,
+                dayChange: d.prev > 0 ? +((d.last - d.prev) / d.prev * 100).toFixed(2) : 0,
+              });
+            }
+          }));
+          return results;
+        })(),
+        // 채권/금리
+        (async () => {
+          const syms = [
+            { s: "^IRX", n: "미 T-Bill 3M" }, { s: "^FVX", n: "미 국채 2Y" },
+            { s: "^TNX", n: "미 국채 10Y" }, { s: "^TYX", n: "미 국채 30Y" },
+          ];
+          const results: any[] = [];
+          await Promise.all(syms.map(async (sym) => {
+            const d = await yChart(sym.s);
+            if (d && d.last > 0) {
+              results.push({
+                name: sym.n, value: +d.last.toFixed(3),
+                weekChange: d.weekOpen > 0 ? +(d.last - d.weekOpen).toFixed(3) : 0,
+                dayChange: +(d.last - d.prev).toFixed(3),
+              });
+            }
+          }));
+          const y10 = results.find(b => b.name.includes("10Y"));
+          const y2 = results.find(b => b.name.includes("2Y"));
+          if (y10 && y2) results.push({ name: "10Y-2Y 스프레드", value: +(y10.value - y2.value).toFixed(3), weekChange: 0, dayChange: 0 });
+          return results;
+        })(),
+        // 원자재
+        (async () => {
+          const syms = [
+            { s: "GC=F", n: "금" }, { s: "SI=F", n: "은" },
+            { s: "CL=F", n: "WTI 원유" }, { s: "NG=F", n: "천연가스" }, { s: "HG=F", n: "구리" },
+          ];
+          const results: any[] = [];
+          await Promise.all(syms.map(async (sym) => {
+            const d = await yChart(sym.s);
+            if (d && d.last > 0) {
+              results.push({
+                name: sym.n, price: +d.last.toFixed(2),
+                weekChange: d.weekOpen > 0 ? +((d.last - d.weekOpen) / d.weekOpen * 100).toFixed(2) : 0,
+                dayChange: d.prev > 0 ? +((d.last - d.prev) / d.prev * 100).toFixed(2) : 0,
+              });
+            }
+          }));
+          return results;
+        })(),
+        // 주요 ETF
+        (async () => {
+          const syms = [
+            { s: "SPY", n: "SPY (S&P500)" }, { s: "QQQ", n: "QQQ (나스닥100)" },
+            { s: "IWM", n: "IWM (러셀2000)" }, { s: "EEM", n: "EEM (신흥국)" },
+            { s: "XLK", n: "XLK (기술)" }, { s: "XLF", n: "XLF (금융)" },
+            { s: "XLE", n: "XLE (에너지)" }, { s: "XLV", n: "XLV (헬스케어)" },
+            { s: "ARKK", n: "ARKK (혁신)" }, { s: "GLD", n: "GLD (금)" },
+            { s: "TLT", n: "TLT (미채권)" }, { s: "VWO", n: "VWO (신흥국)" },
+          ];
+          const results: any[] = [];
+          await Promise.all(syms.map(async (sym) => {
+            const d = await yChart(sym.s);
+            if (d && d.last > 0) {
+              results.push({
+                name: sym.n, price: +d.last.toFixed(2),
+                weekChange: d.weekOpen > 0 ? +((d.last - d.weekOpen) / d.weekOpen * 100).toFixed(2) : 0,
+              });
+            }
+          }));
+          results.sort((a, b) => b.weekChange - a.weekChange);
+          return results;
+        })(),
+        // 크립토
+        (async () => {
+          try {
+            const r = await axios.get("https://api.coingecko.com/api/v3/coins/markets", {
+              params: { vs_currency: "usd", order: "market_cap_desc", per_page: 10, page: 1, sparkline: false, price_change_percentage: "24h,7d" },
+              headers: { "User-Agent": UA }, timeout: 10000,
+            });
+            return (r.data || []).map((c: any) => ({
+              symbol: c.symbol?.toUpperCase(), name: c.name,
+              price: c.current_price,
+              change24h: +(c.price_change_percentage_24h || 0).toFixed(2),
+              change7d: +(c.price_change_percentage_7d_in_currency || 0).toFixed(2),
+              marketCap: c.market_cap,
+            }));
+          } catch { return []; }
+        })(),
+        // 환율
+        (async () => {
+          const syms = [
+            { s: "KRW=X", n: "USD/KRW" }, { s: "EURUSD=X", n: "EUR/USD" },
+            { s: "USDJPY=X", n: "USD/JPY" }, { s: "USDCNY=X", n: "USD/CNY" },
+          ];
+          const results: any[] = [];
+          await Promise.all(syms.map(async (sym) => {
+            const d = await yChart(sym.s);
+            if (d && d.last > 0) {
+              results.push({
+                name: sym.n, value: +d.last.toFixed(sym.n === "USD/KRW" ? 2 : 4),
+                weekChange: d.weekOpen > 0 ? +((d.last - d.weekOpen) / d.weekOpen * 100).toFixed(2) : 0,
+              });
+            }
+          }));
+          return results;
+        })(),
+      ]);
+
+      res.json({
+        globalIndices, bonds, commodities, etfs, crypto: cryptoData, forex: fxData,
+        updatedAt: new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }),
+      });
+    } catch (error: any) {
+      console.error("Weekly stats error:", error.message);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // --- 1) 시장 지수 (KOSPI, KOSDAQ, KOSPI200) ---
   app.get("/api/markets/domestic/indices", async (_req: any, res) => {
     try {

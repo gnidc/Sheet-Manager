@@ -43,6 +43,7 @@ const SupabaseMonitor = lazy(() => import("@/components/SupabaseMonitor"));
 const MobilePreview = lazy(() => import("@/components/MobilePreview"));
 const MarketsEtc = lazy(() => import("@/components/MarketsEtc"));
 const MarketCalendar = lazy(() => import("@/components/MarketCalendar"));
+const WeeklyStats = lazy(() => import("@/components/WeeklyStats"));
 const ApiManager = lazy(() => import("@/components/ApiManager"));
 
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -262,6 +263,7 @@ export default function Home() {
                   <DropdownMenuContent side="right" align="start" className="min-w-[140px]">
                     <DropdownMenuItem onClick={() => handleTabChange("markets-domestic")} className="gap-2 cursor-pointer">🇰🇷 국내증시</DropdownMenuItem>
                     <DropdownMenuItem onClick={() => handleTabChange("markets-global")} className="gap-2 cursor-pointer">🌍 해외증시</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleTabChange("markets-weekly")} className="gap-2 cursor-pointer">📊 주간통계</DropdownMenuItem>
                     <DropdownMenuItem onClick={() => handleTabChange("markets-etc")} className="gap-2 cursor-pointer">💹 ETC</DropdownMenuItem>
                     <DropdownMenuItem onClick={() => handleTabChange("markets-news")} className="gap-2 cursor-pointer">📰 주요뉴스</DropdownMenuItem>
                     <DropdownMenuItem onClick={() => handleTabChange("markets-research")} className="gap-2 cursor-pointer">📊 리서치</DropdownMenuItem>
@@ -276,6 +278,7 @@ export default function Home() {
                   items={[
                     { label: "🇰🇷 국내증시", value: "markets-domestic" },
                     { label: "🌍 해외증시", value: "markets-global" },
+                    { label: "📊 주간통계", value: "markets-weekly" },
                     { label: "💹 ETC", value: "markets-etc" },
                     { label: "📰 주요뉴스", value: "markets-news" },
                     { label: "📊 리서치", value: "markets-research" },
@@ -460,6 +463,7 @@ export default function Home() {
                 <DropdownMenuContent align="center" className="min-w-[120px]">
                   <DropdownMenuItem onClick={() => handleTabChange("markets-domestic")} className="gap-2 cursor-pointer text-xs">🇰🇷 국내증시</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => handleTabChange("markets-global")} className="gap-2 cursor-pointer text-xs">🌍 해외증시</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleTabChange("markets-weekly")} className="gap-2 cursor-pointer text-xs">📊 주간통계</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => handleTabChange("markets-etc")} className="gap-2 cursor-pointer text-xs">💹 ETC</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => handleTabChange("markets-news")} className="gap-2 cursor-pointer text-xs">📰 뉴스</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => handleTabChange("markets-research")} className="gap-2 cursor-pointer text-xs">📊 리서치</DropdownMenuItem>
@@ -640,6 +644,13 @@ export default function Home() {
             ) : (
               <LoginRequiredMessage />
             )}
+          </TabsContent>
+
+          {/* 주간통계 */}
+          <TabsContent value="markets-weekly">
+            <Suspense fallback={<ContentSkeleton />}>
+              <WeeklyStats />
+            </Suspense>
           </TabsContent>
 
           {/* ETC (Commodity, Forex, Crypto, Bond) */}
