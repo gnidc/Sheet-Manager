@@ -4093,7 +4093,7 @@ ${researchList}
       };
 
       // 병렬 수집
-      const [globalIndices, domesticIndices, bonds, commodities, etfs, cryptoData, fxData] = await Promise.all([
+      const [globalIndices, domesticIndices, bonds, commodities, etfs, domesticEtfs, cryptoData, fxData] = await Promise.all([
         // 글로벌 지수
         (async () => {
           const syms = [
@@ -4173,7 +4173,7 @@ ${researchList}
           }));
           return results;
         })(),
-        // 주요 ETF
+        // 글로벌 주요 ETF
         (async () => {
           const syms = [
             { s: "SPY", n: "SPY (S&P500)" }, { s: "QQQ", n: "QQQ (나스닥100)" },
@@ -4195,6 +4195,23 @@ ${researchList}
           }));
           results.sort((a, b) => b.weekChange - a.weekChange);
           return results;
+        })(),
+        // 국내 ETF 수익률 TOP 10 (네이버 API, 레버리지/인버스 제외)
+        (async () => {
+          try {
+            const r = await axios.get("https://finance.naver.com/api/sise/etfItemList.nhn", {
+              params: { etfType: 0, targetColumn: "change_rate", sortOrder: "desc" },
+              headers: { "User-Agent": UA }, timeout: 8000,
+            });
+            const items = r.data?.result?.etfItemList || [];
+            const excluded = /레버리지|인버스|2X|Bear|bull|곱버스/i;
+            const filtered = items.filter((x: any) => !excluded.test(x.itemname) && x.changeRate > 0);
+            return filtered.slice(0, 10).map((x: any) => ({
+              name: x.itemname, code: x.itemcode, price: x.nowVal,
+              change: x.risefall === "5" ? -Math.abs(x.changeVal) : Math.abs(x.changeVal),
+              changeRate: x.risefall === "5" ? -Math.abs(x.changeRate) : Math.abs(x.changeRate),
+            }));
+          } catch { return []; }
         })(),
         // 크립토
         (async () => {
@@ -4233,7 +4250,7 @@ ${researchList}
       ]);
 
       res.json({
-        globalIndices, domesticIndices, bonds, commodities, etfs, crypto: cryptoData, forex: fxData,
+        globalIndices, domesticIndices, bonds, commodities, etfs, domesticEtfs, crypto: cryptoData, forex: fxData,
         updatedAt: new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }),
       });
     } catch (error: any) {
