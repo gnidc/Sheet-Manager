@@ -3654,12 +3654,30 @@ export async function registerRoutes(
         return blocks.slice(0, 100);
       };
 
+      // Steem API에서 전체 본문 가져오기
+      const fetchFullBody = async (author: string, permlink: string): Promise<string> => {
+        try {
+          const resp = await axios.post("https://api.steemit.com", {
+            jsonrpc: "2.0",
+            method: "condenser_api.get_content",
+            params: [author, permlink],
+            id: 1,
+          }, { timeout: 10000 });
+          return resp.data?.result?.body || "";
+        } catch {
+          return "";
+        }
+      };
+
       let successCount = 0;
       let failCount = 0;
       const errors: string[] = [];
 
       for (const post of posts) {
         try {
+          // 서버에서 전체 본문 직접 조회
+          const fullBody = await fetchFullBody(post.author, post.permlink);
+
           const properties: Record<string, any> = {
             [titleProp]: { title: [{ text: { content: (post.title || "").slice(0, 2000) } }] },
           };
@@ -3682,7 +3700,7 @@ export async function registerRoutes(
           // 본문 속성에는 요약만 저장 (전체 본문은 페이지 콘텐츠로)
           if (bodyProp) {
             const pt = dbProps[bodyProp]?.type;
-            const summary = (post.bodyPlain || post.body || "").replace(/!\[.*?\]\(.*?\)/g, "").replace(/<[^>]+>/g, "").replace(/\n{2,}/g, " ").trim().slice(0, 200) + "...";
+            const summary = fullBody.replace(/!\[.*?\]\(.*?\)/g, "").replace(/<[^>]+>/g, "").replace(/\n{2,}/g, " ").trim().slice(0, 200) + "...";
             if (pt === "rich_text") properties[bodyProp] = { rich_text: [{ text: { content: summary } }] };
           }
 
@@ -3702,7 +3720,6 @@ export async function registerRoutes(
           }
 
           // 본문 전체를 Notion 페이지 콘텐츠(children blocks)로 저장
-          const bodyContent = post.bodyFull || post.body || "";
           const steemUrl = post.url || `https://steemit.com/@${post.author}/${post.permlink}`;
 
           const headerBlocks: any[] = [
@@ -3714,7 +3731,7 @@ export async function registerRoutes(
             { object: "block", type: "divider", divider: {} },
           ];
 
-          const bodyBlocks = markdownToBlocks(bodyContent);
+          const bodyBlocks = markdownToBlocks(fullBody);
           const children = [...headerBlocks, ...bodyBlocks].slice(0, 100);
 
           await notion.pages.create({

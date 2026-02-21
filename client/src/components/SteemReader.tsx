@@ -442,8 +442,6 @@ export default function SteemReader() {
             title: p.title,
             author: p.author,
             created: p.created,
-            bodyPlain: stripMarkdown(p.body).slice(0, 300),
-            bodyFull: p.body,
             url: p.url || `https://steemit.com/@${p.author}/${p.permlink}`,
             permlink: p.permlink,
             tags: p.tags,
