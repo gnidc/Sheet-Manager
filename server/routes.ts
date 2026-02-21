@@ -4196,25 +4196,37 @@ ${researchList}
           results.sort((a, b) => b.weekChange - a.weekChange);
           return results;
         })(),
-        // 국내 ETF 수익률 TOP 10 (네이버 API, 레버리지/인버스 제외)
+        // 국내 ETF 주간 수익률 TOP 10 (거래량 상위 100개 → 5일 가격 비교)
         (async () => {
           try {
             const iconv = await import("iconv-lite");
-            const r = await axios.get("https://finance.naver.com/api/sise/etfItemList.nhn", {
+            const listRes = await axios.get("https://finance.naver.com/api/sise/etfItemList.nhn", {
               params: { etfType: 0, targetColumn: "change_rate", sortOrder: "desc" },
-              headers: { "User-Agent": UA }, timeout: 8000,
-              responseType: "arraybuffer",
+              headers: { "User-Agent": UA }, timeout: 8000, responseType: "arraybuffer",
             });
-            const decoded = iconv.default.decode(Buffer.from(r.data), "euc-kr");
-            const parsed = JSON.parse(decoded);
-            const items = parsed?.result?.etfItemList || [];
+            const decoded = iconv.default.decode(Buffer.from(listRes.data), "euc-kr");
+            const allItems = JSON.parse(decoded)?.result?.etfItemList || [];
             const excluded = /레버리지|인버스|2X|Bear|bull|곱버스/i;
-            const filtered = items.filter((x: any) => !excluded.test(x.itemname) && x.changeRate > 0);
-            return filtered.slice(0, 10).map((x: any) => ({
-              name: x.itemname, code: x.itemcode, price: x.nowVal,
-              change: x.risefall === "5" ? -Math.abs(x.changeVal) : Math.abs(x.changeVal),
-              changeRate: x.risefall === "5" ? -Math.abs(x.changeRate) : Math.abs(x.changeRate),
+            const filtered = allItems.filter((x: any) => !excluded.test(x.itemname));
+            const byVolume = [...filtered].sort((a: any, b: any) => b.quant - a.quant).slice(0, 100);
+
+            const results: any[] = [];
+            await Promise.all(byVolume.map(async (etf: any) => {
+              try {
+                const pr = await axios.get(`https://m.stock.naver.com/api/stock/${etf.itemcode}/price`, {
+                  params: { pageSize: 6, page: 1 }, headers: { "User-Agent": UA }, timeout: 5000,
+                });
+                const data = pr.data;
+                if (!data || data.length < 2) return;
+                const latest = parseInt(data[0].closePrice.replace(/,/g, ""));
+                const oldest = parseInt(data[data.length - 1].closePrice.replace(/,/g, ""));
+                if (oldest <= 0) return;
+                const weekReturn = +((latest - oldest) / oldest * 100).toFixed(2);
+                results.push({ name: etf.itemname, code: etf.itemcode, price: latest, weekReturn });
+              } catch {}
             }));
+            results.sort((a, b) => b.weekReturn - a.weekReturn);
+            return results.slice(0, 10);
           } catch { return []; }
         })(),
         // 크립토

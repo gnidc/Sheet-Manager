@@ -11,7 +11,7 @@ interface WeeklyStatsData {
   bonds: { name: string; value: number; weekChange: number; dayChange: number }[];
   commodities: { name: string; price: number; weekChange: number; dayChange: number }[];
   etfs: { name: string; price: number; weekChange: number }[];
-  domesticEtfs: { name: string; code: string; price: number; change: number; changeRate: number }[];
+  domesticEtfs: { name: string; code: string; price: number; weekReturn: number }[];
   crypto: { symbol: string; name: string; price: number; change24h: number; change7d: number; marketCap: number }[];
   forex: { name: string; value: number; weekChange: number }[];
   updatedAt: string;
@@ -231,9 +231,9 @@ export default function WeeklyStats() {
             </div>
           </SectionCard>
 
-          {/* 국내 ETF 수익률 TOP 10 */}
+          {/* 국내 ETF 주간 수익률 TOP 10 */}
           {data.domesticEtfs?.length > 0 && (
-            <SectionCard title="국내 ETF 수익률 TOP 10" icon={<Flag className="w-4 h-4 text-red-500" />}>
+            <SectionCard title="국내 ETF 주간 수익률 TOP 10" icon={<Flag className="w-4 h-4 text-red-500" />}>
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
@@ -241,8 +241,7 @@ export default function WeeklyStats() {
                       <TableHead className="text-xs">순위</TableHead>
                       <TableHead className="text-xs">ETF</TableHead>
                       <TableHead className="text-xs text-right">현재가(원)</TableHead>
-                      <TableHead className="text-xs text-right">전일 대비</TableHead>
-                      <TableHead className="text-xs text-right">등락률</TableHead>
+                      <TableHead className="text-xs text-right">주간 수익률</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -251,17 +250,14 @@ export default function WeeklyStats() {
                         <TableCell className="text-xs py-1.5">{i + 1}</TableCell>
                         <TableCell className="text-xs font-medium py-1.5">
                           <div className="flex items-center gap-1.5">
-                            {e.changeRate > 0 ? <TrendingUp className="w-3 h-3 text-red-500" /> : e.changeRate < 0 ? <TrendingDown className="w-3 h-3 text-blue-500" /> : null}
+                            {e.weekReturn > 0 ? <TrendingUp className="w-3 h-3 text-red-500" /> : <TrendingDown className="w-3 h-3 text-blue-500" />}
                             {e.name}
                           </div>
                         </TableCell>
                         <TableCell className="text-xs text-right py-1.5">{e.price.toLocaleString()}원</TableCell>
                         <TableCell className="text-xs text-right py-1.5">
-                          <ChangeCell value={e.change} suffix="원" />
-                        </TableCell>
-                        <TableCell className="text-xs text-right py-1.5">
-                          <Badge variant={e.changeRate > 0 ? "destructive" : "default"} className="text-[10px] px-1.5 py-0">
-                            {e.changeRate > 0 ? "+" : ""}{e.changeRate}%
+                          <Badge variant={e.weekReturn > 0 ? "destructive" : "default"} className="text-[10px] px-1.5 py-0">
+                            {e.weekReturn > 0 ? "+" : ""}{e.weekReturn}%
                           </Badge>
                         </TableCell>
                       </TableRow>
