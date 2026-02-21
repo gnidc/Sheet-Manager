@@ -189,7 +189,7 @@ export default function Home() {
                       className="gap-1 border-amber-300 text-amber-600 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-400 dark:hover:bg-amber-950 btn-hover-lift"
                     >
                       <Zap className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline text-xs">자동매매(조회용)</span>
+                      <span className="hidden sm:inline text-xs">매매B(Backup)</span>
                     </Button>
                   </Link>
                   <Button
@@ -199,7 +199,7 @@ export default function Home() {
                     onClick={() => window.open("https://lifefit2.vercel.app", "_blank", "noopener,noreferrer")}
                   >
                     <Zap className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline text-xs">자동매매(A)</span>
+                    <span className="hidden sm:inline text-xs">매매A(Active)</span>
                   </Button>
                 </>
               )}

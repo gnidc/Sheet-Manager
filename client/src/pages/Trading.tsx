@@ -91,8 +91,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import GapStrategyPanel from "@/components/GapStrategyPanel";
-import MultiFactorPanel from "@/components/MultiFactorPanel";
-
 // ========== Types ==========
 interface TradingStatus {
   configured: boolean;
@@ -2474,7 +2472,7 @@ function SkillsSection() {
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [checkingAll, setCheckingAll] = useState(false);
   const [expandedInstance, setExpandedInstance] = useState<number | null>(null);
-  const [strategyView, setStrategyView] = useState<"registry" | "gap-strategy" | "multi-factor">("registry");
+  const [strategyView, setStrategyView] = useState<"registry" | "gap-strategy">("registry");
 
   const { data: skills = [] } = useQuery<TradingSkillDef[]>({
     queryKey: ["/api/trading/skills"],
@@ -2562,7 +2560,6 @@ function SkillsSection() {
   const activeCount = instances.filter(i => i.isActive && i.status === "active").length;
   const triggeredCount = instances.filter(i => i.status === "triggered").length;
 
-  // 전략 패널이 선택된 경우 해당 패널만 렌더링
   if (strategyView === "gap-strategy") {
     return (
       <div className="space-y-4">
@@ -2573,46 +2570,20 @@ function SkillsSection() {
           <Button variant="default" size="sm" className="text-xs gap-1.5">
             <span>🚀</span> 시가급등 추세추종
           </Button>
-          <Button variant="outline" size="sm" className="text-xs gap-1.5" onClick={() => setStrategyView("multi-factor")}>
-            <span>🧠</span> 멀티팩터 전략
-          </Button>
         </div>
         <GapStrategyPanel />
       </div>
     );
   }
 
-  if (strategyView === "multi-factor") {
-    return (
-      <div className="space-y-4">
-        <div className="flex gap-2 flex-wrap">
-          <Button variant="outline" size="sm" className="text-xs gap-1.5" onClick={() => setStrategyView("registry")}>
-            <Sparkles className="w-3 h-3" /> 스킬 레지스트리
-          </Button>
-          <Button variant="outline" size="sm" className="text-xs gap-1.5" onClick={() => setStrategyView("gap-strategy")}>
-            <span>🚀</span> 시가급등 추세추종
-          </Button>
-          <Button variant="default" size="sm" className="text-xs gap-1.5">
-            <span>🧠</span> 멀티팩터 전략
-          </Button>
-        </div>
-        <MultiFactorPanel />
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6">
-      {/* 전략 전환 탭 */}
       <div className="flex gap-2 flex-wrap">
         <Button variant="default" size="sm" className="text-xs gap-1.5">
           <Sparkles className="w-3 h-3" /> 스킬 레지스트리
         </Button>
         <Button variant="outline" size="sm" className="text-xs gap-1.5" onClick={() => setStrategyView("gap-strategy")}>
           <span>🚀</span> 시가급등 추세추종
-        </Button>
-        <Button variant="outline" size="sm" className="text-xs gap-1.5" onClick={() => setStrategyView("multi-factor")}>
-          <span>🧠</span> 멀티팩터 전략
         </Button>
       </div>
 
@@ -2800,13 +2771,6 @@ function ManualSkillsSection() {
       description: "장 시작 시 갭 상승 종목을 감지하고 추세를 추종하여 분할매수/매도",
       isBuiltin: true,
     },
-    {
-      id: "multi-factor",
-      name: "멀티팩터 전략",
-      icon: "🧠",
-      description: "MA·RSI·볼린저·거래량·갭 5개 팩터 종합점수로 자동매매",
-      isBuiltin: true,
-    },
   ];
 
   const defaultActiveSkill = builtinSkills.length > 0 ? "gap-strategy" : "";
@@ -2923,8 +2887,6 @@ function ManualSkillsSection() {
       {/* 선택된 스킬 콘텐츠 */}
       {activeSkill === "gap-strategy" ? (
         <GapStrategyPanel />
-      ) : activeSkill === "multi-factor" ? (
-        <MultiFactorPanel />
       ) : activeSkill ? (
         <CustomSkillContent
           skill={allSkills.find(s => s.id === activeSkill)}
