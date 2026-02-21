@@ -64,8 +64,8 @@ async function callAI(prompt: string, userKey?: UserAiKeyOption): Promise<string
       try {
         const res = await axios.post(url, {
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { maxOutputTokens: 8192 },
-        }, { timeout: 90000 });
+          generationConfig: { maxOutputTokens: 65536 },
+        }, { timeout: 180000 });
         
         // gemini-2.5-flash는 thinking 파트와 text 파트를 분리하여 반환할 수 있음
         const parts = res.data?.candidates?.[0]?.content?.parts || [];
@@ -100,7 +100,7 @@ async function callAI(prompt: string, userKey?: UserAiKeyOption): Promise<string
     const completion = await client.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [{ role: "user", content: prompt }],
-      max_tokens: 2000,
+      max_tokens: 16384,
       temperature: 0.7,
     });
     return completion.choices[0]?.message?.content || "분석 생성에 실패했습니다.";
@@ -114,14 +114,14 @@ async function callAI(prompt: string, userKey?: UserAiKeyOption): Promise<string
         const res = await axios.post("https://api.groq.com/openai/v1/chat/completions", {
           model: "llama-3.3-70b-versatile",
           messages: [{ role: "user", content: prompt }],
-          max_tokens: 4096,
+          max_tokens: 16384,
           temperature: 0.7,
         }, {
           headers: {
             "Authorization": `Bearer ${groqKey}`,
             "Content-Type": "application/json",
           },
-          timeout: 60000,
+          timeout: 180000,
         });
         const content = res.data?.choices?.[0]?.message?.content;
         if (!content) throw new Error("Groq AI 응답이 비어있습니다.");
