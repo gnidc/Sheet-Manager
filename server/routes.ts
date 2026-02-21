@@ -4253,11 +4253,12 @@ ${researchList}
             return results;
           } catch { return []; }
         })(),
-        // 크립토
+        // 암호화폐(관심)
         (async () => {
           try {
+            const ids = "bitcoin,ethereum,solana,ripple,binancecoin,tron,hyperliquid,sui";
             const r = await axios.get("https://api.coingecko.com/api/v3/coins/markets", {
-              params: { vs_currency: "usd", order: "market_cap_desc", per_page: 10, page: 1, sparkline: false, price_change_percentage: "24h,7d" },
+              params: { vs_currency: "usd", ids, order: "market_cap_desc", sparkline: false, price_change_percentage: "24h,7d" },
               headers: { "User-Agent": UA }, timeout: 10000,
             });
             return (r.data || []).map((c: any) => ({

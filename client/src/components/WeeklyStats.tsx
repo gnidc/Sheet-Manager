@@ -308,8 +308,8 @@ export default function WeeklyStats() {
             </SectionCard>
           )}
 
-          {/* 크립토 */}
-          <SectionCard title="암호화폐 TOP 10" icon={<Bitcoin className="w-4 h-4 text-yellow-500" />}>
+          {/* 암호화폐(관심) */}
+          <SectionCard title="암호화폐(관심)" icon={<Bitcoin className="w-4 h-4 text-yellow-500" />}>
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
