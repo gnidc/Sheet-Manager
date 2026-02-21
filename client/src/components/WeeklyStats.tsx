@@ -4,8 +4,33 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Loader2, RefreshCw, TrendingUp, TrendingDown, Globe, Landmark, Droplets, BarChart3, Bitcoin, DollarSign, Flag, Star, Sparkles, X } from "lucide-react";
+import { Loader2, RefreshCw, TrendingUp, TrendingDown, Globe, Landmark, Droplets, BarChart3, Bitcoin, DollarSign, Flag, Star, Sparkles, X, Copy, ClipboardPaste, Save } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+
+async function copyAsRichText(markdown: string): Promise<boolean> {
+  try {
+    let html = markdown
+      .replace(/^#### (.+)$/gm, '<h4 style="font-size:14px;font-weight:bold;margin:12px 0 4px;">$1</h4>')
+      .replace(/^### (.+)$/gm, '<h3 style="font-size:16px;font-weight:bold;margin:14px 0 6px;">$1</h3>')
+      .replace(/^## (.+)$/gm, '<h2 style="font-size:18px;font-weight:bold;margin:16px 0 6px;">$1</h2>')
+      .replace(/^# (.+)$/gm, '<h1 style="font-size:20px;font-weight:bold;margin:18px 0 8px;">$1</h1>')
+      .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+      .replace(/\*(.+?)\*/g, '<i>$1</i>')
+      .replace(/^---+$/gm, '<hr style="border:none;border-top:1px solid #ccc;margin:12px 0;">')
+      .replace(/^(\d+)\. (.+)$/gm, '<div style="margin-left:16px;">$1. $2</div>')
+      .replace(/^[-*] (.+)$/gm, '<div style="margin-left:16px;">• $1</div>')
+      .replace(/`(.+?)`/g, '<code style="background:#f1f1f1;padding:1px 4px;border-radius:3px;font-size:13px;">$1</code>')
+      .replace(/\n\n/g, '</p><p style="margin:8px 0;">')
+      .replace(/\n/g, '<br>');
+    html = `<div style="font-family:'Malgun Gothic','맑은 고딕',sans-serif;font-size:14px;line-height:1.7;color:#333;"><p style="margin:8px 0;">${html}</p></div>`;
+    const htmlBlob = new Blob([html], { type: "text/html" });
+    const textBlob = new Blob([markdown], { type: "text/plain" });
+    await navigator.clipboard.write([new ClipboardItem({ "text/html": htmlBlob, "text/plain": textBlob })]);
+    return true;
+  } catch {
+    try { await navigator.clipboard.writeText(markdown); return true; } catch { return false; }
+  }
+}
 
 interface WeeklyStatsData {
   globalIndices: { name: string; price: number; weekChange: number; dayChange: number }[];
@@ -78,6 +103,37 @@ export default function WeeklyStats() {
     },
   });
 
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      if (!aiResult) throw new Error("저장할 분석 결과가 없습니다.");
+      const res = await fetch("/api/strategy-analyses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          period: "weekly",
+          prompt: "주간통계 AI 분석",
+          urls: [],
+          fileNames: [],
+          source: "weekly-stats",
+          result: { analysis: aiResult, analyzedAt: new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }) },
+          isShared: true,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "저장 실패");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "저장 완료", description: "주간보고서가 저장되었습니다." });
+    },
+    onError: (error: Error) => {
+      toast({ title: "저장 실패", description: error.message, variant: "destructive" });
+    },
+  });
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -108,9 +164,32 @@ export default function WeeklyStats() {
               <CardTitle className="text-sm font-semibold flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-primary" /> AI 주간통계 분석 보고서
               </CardTitle>
-              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setAiResult(null)}>
-                <X className="w-3.5 h-3.5" />
-              </Button>
+              <div className="flex items-center gap-1">
+                <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => {
+                  navigator.clipboard.writeText(aiResult).then(() => {
+                    toast({ title: "복사 완료", description: "텍스트가 클립보드에 복사되었습니다." });
+                  }).catch(() => {
+                    toast({ title: "복사 실패", variant: "destructive" });
+                  });
+                }}>
+                  <Copy className="w-3 h-3" /> 복사
+                </Button>
+                <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => {
+                  copyAsRichText(aiResult).then((ok) => {
+                    if (ok) toast({ title: "서식 복사 완료", description: "서식이 포함된 텍스트가 복사되었습니다." });
+                    else toast({ title: "서식 복사 실패", variant: "destructive" });
+                  });
+                }}>
+                  <ClipboardPaste className="w-3 h-3" /> 서식복사
+                </Button>
+                <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
+                  {saveMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                  주간보고서 저장
+                </Button>
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setAiResult(null)}>
+                  <X className="w-3.5 h-3.5" />
+                </Button>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="px-4 pb-4">
