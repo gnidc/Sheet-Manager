@@ -14,6 +14,7 @@ interface WeeklyStatsData {
   domesticEtfs: { name: string; code: string; price: number; weekReturn: number }[];
   coreEtfs: { name: string; code: string; sector: string; price: number; weekReturn: number }[];
   crypto: { symbol: string; name: string; price: number; change24h: number; change7d: number; marketCap: number }[];
+  cryptoTop10: { symbol: string; name: string; price: number; change7d: number; marketCap: number }[];
   forex: { name: string; value: number; weekChange: number }[];
   updatedAt: string;
 }
@@ -339,6 +340,42 @@ export default function WeeklyStats() {
               </Table>
             </div>
           </SectionCard>
+
+          {/* 암호화폐 주간상승률 TOP 10 */}
+          {data.cryptoTop10?.length > 0 && (
+            <SectionCard title="암호화폐 주간상승률 TOP 10" icon={<TrendingUp className="w-4 h-4 text-orange-500" />}>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-xs">순위</TableHead>
+                      <TableHead className="text-xs">코인</TableHead>
+                      <TableHead className="text-xs text-right">현재가($)</TableHead>
+                      <TableHead className="text-xs text-right">7일 등락</TableHead>
+                      <TableHead className="text-xs text-right">시가총액</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {data.cryptoTop10.map((c, i) => (
+                      <TableRow key={c.symbol}>
+                        <TableCell className="text-xs py-1.5">{i + 1}</TableCell>
+                        <TableCell className="text-xs font-medium py-1.5">
+                          {c.name} <span className="text-muted-foreground">({c.symbol})</span>
+                        </TableCell>
+                        <TableCell className="text-xs text-right py-1.5">${c.price.toLocaleString(undefined, { maximumFractionDigits: 2 })}</TableCell>
+                        <TableCell className="text-xs text-right py-1.5">
+                          <Badge variant={c.change7d > 0 ? "destructive" : "default"} className="text-[10px] px-1.5 py-0">
+                            {c.change7d > 0 ? "+" : ""}{c.change7d}%
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-xs text-right py-1.5">${(c.marketCap / 1e9).toFixed(1)}B</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </SectionCard>
+          )}
         </div>
       ) : (
         <div className="text-center py-16 text-muted-foreground">데이터를 불러올 수 없습니다.</div>

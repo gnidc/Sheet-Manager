@@ -4093,7 +4093,7 @@ ${researchList}
       };
 
       // 병렬 수집
-      const [globalIndices, domesticIndices, bonds, commodities, etfs, domesticEtfs, coreEtfs, cryptoData, fxData] = await Promise.all([
+      const [globalIndices, domesticIndices, bonds, commodities, etfs, domesticEtfs, coreEtfs, cryptoData, cryptoTop10, fxData] = await Promise.all([
         // 글로벌 지수
         (async () => {
           const syms = [
@@ -4270,6 +4270,25 @@ ${researchList}
             }));
           } catch { return []; }
         })(),
+        // 암호화폐 주간상승률 TOP 10
+        (async () => {
+          try {
+            const r = await axios.get("https://api.coingecko.com/api/v3/coins/markets", {
+              params: { vs_currency: "usd", order: "market_cap_desc", per_page: 100, page: 1, sparkline: false, price_change_percentage: "7d" },
+              headers: { "User-Agent": UA }, timeout: 10000,
+            });
+            const sorted = (r.data || [])
+              .filter((c: any) => c.price_change_percentage_7d_in_currency != null)
+              .sort((a: any, b: any) => (b.price_change_percentage_7d_in_currency || 0) - (a.price_change_percentage_7d_in_currency || 0))
+              .slice(0, 10);
+            return sorted.map((c: any) => ({
+              symbol: c.symbol?.toUpperCase(), name: c.name,
+              price: c.current_price,
+              change7d: +(c.price_change_percentage_7d_in_currency || 0).toFixed(2),
+              marketCap: c.market_cap,
+            }));
+          } catch { return []; }
+        })(),
         // 환율
         (async () => {
           const syms = [
@@ -4291,7 +4310,7 @@ ${researchList}
       ]);
 
       res.json({
-        globalIndices, domesticIndices, bonds, commodities, etfs, domesticEtfs, coreEtfs, crypto: cryptoData, forex: fxData,
+        globalIndices, domesticIndices, bonds, commodities, etfs, domesticEtfs, coreEtfs, crypto: cryptoData, cryptoTop10, forex: fxData,
         updatedAt: new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }),
       });
     } catch (error: any) {
