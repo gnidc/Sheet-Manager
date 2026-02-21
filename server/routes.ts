@@ -4093,13 +4093,31 @@ ${researchList}
       };
 
       // 병렬 수집
-      const [globalIndices, bonds, commodities, etfs, cryptoData, fxData] = await Promise.all([
+      const [globalIndices, domesticIndices, bonds, commodities, etfs, cryptoData, fxData] = await Promise.all([
         // 글로벌 지수
         (async () => {
           const syms = [
             { s: "^GSPC", n: "S&P 500" }, { s: "^IXIC", n: "나스닥" }, { s: "^DJI", n: "다우존스" },
             { s: "^STOXX50E", n: "유로스톡스50" }, { s: "^GDAXI", n: "DAX" }, { s: "^FTSE", n: "FTSE 100" },
             { s: "^N225", n: "닛케이225" }, { s: "^HSI", n: "항셍" }, { s: "000001.SS", n: "상해종합" },
+          ];
+          const results: any[] = [];
+          await Promise.all(syms.map(async (sym) => {
+            const d = await yChart(sym.s);
+            if (d && d.last > 0) {
+              results.push({
+                name: sym.n, price: +d.last.toFixed(2),
+                weekChange: d.weekOpen > 0 ? +((d.last - d.weekOpen) / d.weekOpen * 100).toFixed(2) : 0,
+                dayChange: d.prev > 0 ? +((d.last - d.prev) / d.prev * 100).toFixed(2) : 0,
+              });
+            }
+          }));
+          return results;
+        })(),
+        // 국내 지수
+        (async () => {
+          const syms = [
+            { s: "^KS11", n: "KOSPI" }, { s: "^KQ11", n: "KOSDAQ" }, { s: "^KS200", n: "KOSPI 200" },
           ];
           const results: any[] = [];
           await Promise.all(syms.map(async (sym) => {
@@ -4215,7 +4233,7 @@ ${researchList}
       ]);
 
       res.json({
-        globalIndices, bonds, commodities, etfs, crypto: cryptoData, forex: fxData,
+        globalIndices, domesticIndices, bonds, commodities, etfs, crypto: cryptoData, forex: fxData,
         updatedAt: new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }),
       });
     } catch (error: any) {

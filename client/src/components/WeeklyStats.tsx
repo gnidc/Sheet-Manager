@@ -3,10 +3,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Loader2, RefreshCw, TrendingUp, TrendingDown, Globe, Landmark, Droplets, BarChart3, Bitcoin, DollarSign } from "lucide-react";
+import { Loader2, RefreshCw, TrendingUp, TrendingDown, Globe, Landmark, Droplets, BarChart3, Bitcoin, DollarSign, Flag } from "lucide-react";
 
 interface WeeklyStatsData {
   globalIndices: { name: string; price: number; weekChange: number; dayChange: number }[];
+  domesticIndices: { name: string; price: number; weekChange: number; dayChange: number }[];
   bonds: { name: string; value: number; weekChange: number; dayChange: number }[];
   commodities: { name: string; price: number; weekChange: number; dayChange: number }[];
   etfs: { name: string; price: number; weekChange: number }[];
@@ -89,6 +90,34 @@ export default function WeeklyStats() {
               </Table>
             </div>
           </SectionCard>
+
+          {/* 국내 주요 지수 */}
+          {data.domesticIndices?.length > 0 && (
+            <SectionCard title="국내 주요 지수" icon={<Flag className="w-4 h-4 text-red-500" />}>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-xs w-[130px]">지수</TableHead>
+                      <TableHead className="text-xs text-right">현재가</TableHead>
+                      <TableHead className="text-xs text-right">주간 등락</TableHead>
+                      <TableHead className="text-xs text-right">전일 대비</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {data.domesticIndices.map((idx) => (
+                      <TableRow key={idx.name}>
+                        <TableCell className="text-xs font-medium py-1.5">{idx.name}</TableCell>
+                        <TableCell className="text-xs text-right py-1.5">{idx.price.toLocaleString()}</TableCell>
+                        <TableCell className="text-xs text-right py-1.5"><ChangeCell value={idx.weekChange} /></TableCell>
+                        <TableCell className="text-xs text-right py-1.5"><ChangeCell value={idx.dayChange} /></TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </SectionCard>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* 채권/금리 */}
