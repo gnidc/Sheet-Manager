@@ -3275,28 +3275,49 @@ export async function registerRoutes(
     }
   });
 
-  // ========== Notion 연동 (사용자별) ==========
+  // ========== Notion 연동 (사용자별, 용도별) ==========
 
   const getNotionUserId = (req: any): number => {
     if (req.session?.isAdmin && !req.session?.userId) return -1;
     return req.session?.userId || -1;
   };
 
-  // Notion 설정 조회
+  const maskNotionKey = (key: string) => {
+    const keyLen = key.length;
+    return keyLen > 12
+      ? key.slice(0, 12) + "****" + key.slice(-4) + ` (${keyLen}자)`
+      : key.slice(0, 4) + "****";
+  };
+
+  // Notion 설정 조회 (purpose별)
   app.get("/api/user/notion-config", requireUser, async (req, res) => {
     try {
       const userId = getNotionUserId(req);
-      const config = await storage.getNotionConfig(userId);
-      if (!config) return res.json({ configured: false });
-      const keyLen = config.apiKey.length;
-      const masked = keyLen > 12
-        ? config.apiKey.slice(0, 12) + "****" + config.apiKey.slice(-4) + ` (${keyLen}자)`
-        : config.apiKey.slice(0, 4) + "****";
+      const purpose = (req.query.purpose as string) || "research";
+      const config = await storage.getNotionConfig(userId, purpose);
+      if (!config) return res.json({ configured: false, purpose });
       res.json({
         configured: true,
-        apiKey: masked,
+        purpose,
+        apiKey: maskNotionKey(config.apiKey),
         databaseId: config.databaseId,
       });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // 모든 용도의 Notion 설정 조회
+  app.get("/api/user/notion-configs", requireUser, async (req, res) => {
+    try {
+      const userId = getNotionUserId(req);
+      const configs = await storage.getAllNotionConfigs(userId);
+      const result = configs.map(c => ({
+        purpose: c.purpose,
+        apiKey: maskNotionKey(c.apiKey),
+        databaseId: c.databaseId,
+      }));
+      res.json({ configs: result });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
@@ -3306,31 +3327,25 @@ export async function registerRoutes(
   app.get("/api/admin/notion-config", requireAdmin, async (req, res) => {
     try {
       const userId = getNotionUserId(req);
-      const config = await storage.getNotionConfig(userId);
+      const purpose = (req.query.purpose as string) || "research";
+      const config = await storage.getNotionConfig(userId, purpose);
       if (!config) return res.json({ configured: false });
-      const keyLen = config.apiKey.length;
-      const masked = keyLen > 12
-        ? config.apiKey.slice(0, 12) + "****" + config.apiKey.slice(-4) + ` (${keyLen}자)`
-        : config.apiKey.slice(0, 4) + "****";
-      res.json({
-        configured: true,
-        apiKey: masked,
-        databaseId: config.databaseId,
-      });
+      res.json({ configured: true, apiKey: maskNotionKey(config.apiKey), databaseId: config.databaseId });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
   });
 
-  // Notion 설정 저장
+  // Notion 설정 저장 (purpose별)
   app.post("/api/user/notion-config", requireUser, async (req, res) => {
     try {
       const userId = getNotionUserId(req);
-      const { apiKey, databaseId } = req.body;
+      const { apiKey, databaseId, purpose } = req.body;
+      const p = purpose || "research";
       if (!apiKey || !databaseId) {
         return res.status(400).json({ message: "API Key와 Database ID가 필요합니다." });
       }
-      await storage.saveNotionConfig(userId, apiKey.trim(), databaseId.trim().replace(/-/g, ""));
+      await storage.saveNotionConfig(userId, apiKey.trim(), databaseId.trim().replace(/-/g, ""), p);
       res.json({ success: true, message: "Notion 설정이 저장되었습니다." });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -3341,22 +3356,24 @@ export async function registerRoutes(
   app.post("/api/admin/notion-config", requireAdmin, async (req, res) => {
     try {
       const userId = getNotionUserId(req);
-      const { apiKey, databaseId } = req.body;
+      const { apiKey, databaseId, purpose } = req.body;
+      const p = purpose || "research";
       if (!apiKey || !databaseId) {
         return res.status(400).json({ message: "API Key와 Database ID가 필요합니다." });
       }
-      await storage.saveNotionConfig(userId, apiKey.trim(), databaseId.trim().replace(/-/g, ""));
+      await storage.saveNotionConfig(userId, apiKey.trim(), databaseId.trim().replace(/-/g, ""), p);
       res.json({ success: true, message: "Notion 설정이 저장되었습니다." });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
   });
 
-  // Notion 설정 삭제
+  // Notion 설정 삭제 (purpose별)
   app.delete("/api/user/notion-config", requireUser, async (req, res) => {
     try {
       const userId = getNotionUserId(req);
-      await storage.deleteNotionConfig(userId);
+      const purpose = (req.query.purpose as string) || undefined;
+      await storage.deleteNotionConfig(userId, purpose);
       res.json({ success: true, message: "Notion 설정이 삭제되었습니다." });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -3367,7 +3384,7 @@ export async function registerRoutes(
   app.post("/api/research/export-notion", requireUser, async (req, res) => {
     try {
       const userId = getNotionUserId(req);
-      const config = await storage.getNotionConfig(userId);
+      const config = await storage.getNotionConfig(userId, "research");
       if (!config) {
         return res.status(400).json({ message: "Notion 설정이 필요합니다. 관리자 설정에서 Notion API Key와 Database ID를 등록해주세요." });
       }
@@ -3519,6 +3536,132 @@ export async function registerRoutes(
       });
     } catch (error: any) {
       console.error("Notion export error:", error);
+      res.status(500).json({ message: error.message || "Notion 내보내기 실패" });
+    }
+  });
+
+  // Notion으로 스팀글 내보내기
+  app.post("/api/steem/export-notion", requireUser, async (req, res) => {
+    try {
+      const userId = getNotionUserId(req);
+      const config = await storage.getNotionConfig(userId, "steem");
+      if (!config) {
+        return res.status(400).json({ message: "스팀글용 Notion 설정이 필요합니다. API 관리 > Notion API에서 스팀글 DB ID를 등록해주세요." });
+      }
+
+      const { posts } = req.body;
+      if (!posts || !Array.isArray(posts) || posts.length === 0) {
+        return res.status(400).json({ message: "내보낼 스팀글이 없습니다." });
+      }
+
+      const { Client } = await import("@notionhq/client");
+      const notion = new Client({ auth: config.apiKey });
+
+      // DB 속성 조회
+      let dbProps: Record<string, any> = {};
+      try {
+        const dbResp = await axios.get(`https://api.notion.com/v1/databases/${config.databaseId}`, {
+          headers: { "Authorization": `Bearer ${config.apiKey}`, "Notion-Version": "2022-06-28" },
+          timeout: 10000,
+        });
+        dbProps = dbResp.data?.properties || {};
+      } catch (dbErr: any) {
+        const errMsg = dbErr.response?.data?.message || dbErr.message || "알 수 없는 오류";
+        return res.status(400).json({ message: `Notion DB 접근 실패: ${errMsg}. Integration이 DB에 연결되어 있는지 확인하세요.` });
+      }
+
+      const propNames = Object.keys(dbProps);
+      const findProp = (keywords: string[], type?: string) => {
+        for (const kw of keywords) {
+          const exact = propNames.find(p => p === kw && (!type || dbProps[p]?.type === type));
+          if (exact) return exact;
+        }
+        for (const kw of keywords) {
+          const ci = propNames.find(p => p.toLowerCase() === kw.toLowerCase() && (!type || dbProps[p]?.type === type));
+          if (ci) return ci;
+        }
+        for (const kw of keywords) {
+          const partial = propNames.find(p => p.toLowerCase().includes(kw.toLowerCase()) && (!type || dbProps[p]?.type === type));
+          if (partial) return partial;
+        }
+        return null;
+      };
+
+      const titleProp = propNames.find(p => dbProps[p]?.type === "title") || "제목";
+      const authorProp = findProp(["작성자", "author", "Author"]);
+      const dateProp = findProp(["날짜", "date", "Date"]);
+      const bodyProp = findProp(["본문", "body", "Body", "내용", "content"]);
+      const linkProp = findProp(["링크", "link", "Link", "URL", "url"]);
+      const tagsProp = findProp(["태그", "tags", "Tags"]);
+
+      let successCount = 0;
+      let failCount = 0;
+      const errors: string[] = [];
+
+      for (const post of posts) {
+        try {
+          const properties: Record<string, any> = {
+            [titleProp]: { title: [{ text: { content: (post.title || "").slice(0, 2000) } }] },
+          };
+
+          if (authorProp) {
+            const pt = dbProps[authorProp]?.type;
+            if (pt === "rich_text") properties[authorProp] = { rich_text: [{ text: { content: post.author || "" } }] };
+          }
+
+          if (dateProp) {
+            const pt = dbProps[dateProp]?.type;
+            if (pt === "date" && post.created) {
+              const d = new Date(post.created);
+              if (!isNaN(d.getTime())) properties[dateProp] = { date: { start: d.toISOString().slice(0, 10) } };
+            } else if (pt === "rich_text") {
+              properties[dateProp] = { rich_text: [{ text: { content: post.created ? new Date(post.created).toLocaleDateString("ko-KR") : "" } }] };
+            }
+          }
+
+          if (bodyProp) {
+            const pt = dbProps[bodyProp]?.type;
+            const bodyText = (post.body || "").slice(0, 2000);
+            if (pt === "rich_text") properties[bodyProp] = { rich_text: [{ text: { content: bodyText } }] };
+          }
+
+          if (linkProp) {
+            const url = post.url && post.url.startsWith("http") ? post.url : (post.author && post.permlink ? `https://steemit.com/@${post.author}/${post.permlink}` : null);
+            properties[linkProp] = { url };
+          }
+
+          if (tagsProp) {
+            const pt = dbProps[tagsProp]?.type;
+            const tags = post.tags || [];
+            if (pt === "multi_select" && tags.length > 0) {
+              properties[tagsProp] = { multi_select: tags.slice(0, 10).map((t: string) => ({ name: t.slice(0, 100) })) };
+            } else if (pt === "rich_text") {
+              properties[tagsProp] = { rich_text: [{ text: { content: tags.join(", ") } }] };
+            }
+          }
+
+          await notion.pages.create({
+            parent: { database_id: config.databaseId },
+            properties,
+          });
+          successCount++;
+        } catch (err: any) {
+          failCount++;
+          const errMsg = err.body ? JSON.stringify(err.body).slice(0, 200) : (err.message?.slice(0, 200) || "Unknown error");
+          console.error(`Notion steem export error [${post.title?.slice(0,30)}]:`, errMsg);
+          if (errors.length < 5) errors.push(errMsg);
+        }
+      }
+
+      res.json({
+        success: successCount > 0,
+        message: `Notion 내보내기 완료: ${successCount}건 성공${failCount > 0 ? `, ${failCount}건 실패` : ""}`,
+        successCount,
+        failCount,
+        errors: errors.length > 0 ? errors : undefined,
+      });
+    } catch (error: any) {
+      console.error("Notion steem export error:", error);
       res.status(500).json({ message: error.message || "Notion 내보내기 실패" });
     }
   });

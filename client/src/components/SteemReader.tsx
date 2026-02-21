@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Slider } from "@/components/ui/slider";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Loader2,
   Plus,
@@ -24,6 +25,8 @@ import {
   Type,
   MessageSquare,
   Reply,
+  BookOpen,
+  Upload,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -400,6 +403,80 @@ export default function SteemReader() {
     return post.author === selectedAuthorFilter;
   }) || [];
 
+  // ===== Notion 저장 기능 =====
+  const [selectedForNotion, setSelectedForNotion] = useState<Set<string>>(new Set());
+
+  const toggleNotionSelect = useCallback((key: string) => {
+    setSelectedForNotion(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }, []);
+
+  const toggleSelectAll = useCallback(() => {
+    if (selectedForNotion.size === filteredPosts.length) {
+      setSelectedForNotion(new Set());
+    } else {
+      setSelectedForNotion(new Set(filteredPosts.map(p => `${p.author}/${p.permlink}`)));
+    }
+  }, [filteredPosts, selectedForNotion.size]);
+
+  const { data: notionSteemConfig } = useQuery<{ configured: boolean }>({
+    queryKey: ["/api/user/notion-config", "steem"],
+    queryFn: async () => {
+      const res = await fetch("/api/user/notion-config?purpose=steem", { credentials: "include" });
+      if (!res.ok) return { configured: false };
+      return res.json();
+    },
+  });
+
+  const notionExportMutation = useMutation({
+    mutationFn: async (posts: SteemPost[]) => {
+      const res = await fetch("/api/steem/export-notion", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          posts: posts.map(p => ({
+            title: p.title,
+            author: p.author,
+            created: p.created,
+            body: stripMarkdown(p.body).slice(0, 2000),
+            url: p.url || `https://steemit.com/@${p.author}/${p.permlink}`,
+            permlink: p.permlink,
+            tags: p.tags,
+          })),
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "Notion 내보내기 실패");
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      setSelectedForNotion(new Set());
+      toast({ title: data.message || "Notion 내보내기 완료" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Notion 내보내기 실패", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const handleNotionExport = useCallback(() => {
+    const selected = filteredPosts.filter(p => selectedForNotion.has(`${p.author}/${p.permlink}`));
+    if (selected.length === 0) {
+      toast({ title: "선택된 글이 없습니다", variant: "destructive" });
+      return;
+    }
+    notionExportMutation.mutate(selected);
+  }, [filteredPosts, selectedForNotion, notionExportMutation, toast]);
+
+  const handleSingleNotionExport = useCallback((post: SteemPost) => {
+    notionExportMutation.mutate([post]);
+  }, [notionExportMutation]);
+
   return (
     <div className="space-y-4">
       {/* 사용자 ID 관리 + 보팅 설정 */}
@@ -608,13 +685,42 @@ export default function SteemReader() {
       </Card>
 
       {/* 피드 헤더 */}
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium text-muted-foreground">
-          {selectedAuthorFilter === "all"
-            ? `최근 3일 전체글 (${filteredPosts.length}건)`
-            : `@${selectedAuthorFilter}의 글 (${filteredPosts.length}건)`}
-        </h3>
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-2">
+          {filteredPosts.length > 0 && (
+            <Checkbox
+              checked={selectedForNotion.size === filteredPosts.length && filteredPosts.length > 0}
+              onCheckedChange={toggleSelectAll}
+              className="h-4 w-4"
+            />
+          )}
+          <h3 className="text-sm font-medium text-muted-foreground">
+            {selectedAuthorFilter === "all"
+              ? `최근 3일 전체글 (${filteredPosts.length}건)`
+              : `@${selectedAuthorFilter}의 글 (${filteredPosts.length}건)`}
+            {selectedForNotion.size > 0 && (
+              <span className="text-primary ml-1">({selectedForNotion.size}건 선택)</span>
+            )}
+          </h3>
+        </div>
+        <div className="flex items-center gap-2">
+          {selectedForNotion.size > 0 && notionSteemConfig?.configured && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1 text-xs h-7 text-purple-600 border-purple-300 hover:bg-purple-50"
+              onClick={handleNotionExport}
+              disabled={notionExportMutation.isPending}
+            >
+              {notionExportMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <BookOpen className="h-3 w-3" />}
+              Notion ({selectedForNotion.size})
+            </Button>
+          )}
+          {selectedForNotion.size > 0 && (
+            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setSelectedForNotion(new Set())}>
+              선택해제
+            </Button>
+          )}
           <div className="flex items-center gap-1">
             <Button
               variant="outline"
@@ -683,6 +789,11 @@ export default function SteemReader() {
               <CardContent className="p-3">
                 {/* 글 헤더 */}
                 <div className="flex items-start gap-2">
+                  <Checkbox
+                    checked={selectedForNotion.has(key)}
+                    onCheckedChange={() => toggleNotionSelect(key)}
+                    className="mt-1 h-4 w-4 shrink-0"
+                  />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 mb-1 flex-wrap">
                       <Badge variant="outline" className="text-xs py-0 px-1.5 shrink-0">
@@ -842,7 +953,7 @@ export default function SteemReader() {
                     )}
                   </div>
 
-                  {/* 외부 링크 & 접기/펼치기 */}
+                  {/* 외부 링크 & Notion 저장 & 접기/펼치기 */}
                   <div className="flex flex-col gap-1 shrink-0">
                     <a
                       href={post.url}
@@ -853,6 +964,16 @@ export default function SteemReader() {
                     >
                       <ExternalLink className="h-4 w-4" />
                     </a>
+                    {notionSteemConfig?.configured && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleSingleNotionExport(post); }}
+                        className="text-muted-foreground hover:text-purple-600"
+                        title="Notion에 저장"
+                        disabled={notionExportMutation.isPending}
+                      >
+                        <BookOpen className="h-4 w-4" />
+                      </button>
+                    )}
                     <button
                       onClick={() => setExpandedPost(isExpanded ? null : key)}
                       className="text-muted-foreground hover:text-primary"

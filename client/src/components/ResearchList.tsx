@@ -236,11 +236,11 @@ export default function ResearchList() {
     },
   });
 
-  // Notion 설정 조회 (사용자별)
+  // Notion 설정 조회 (리서치용)
   const { data: notionConfigData, refetch: refetchNotionConfig } = useQuery<{ configured: boolean; apiKey?: string; databaseId?: string }>({
-    queryKey: ["/api/user/notion-config"],
+    queryKey: ["/api/user/notion-config", "research"],
     queryFn: async () => {
-      const res = await fetch("/api/user/notion-config", { credentials: "include" });
+      const res = await fetch("/api/user/notion-config?purpose=research", { credentials: "include" });
       if (!res.ok) return { configured: false };
       return res.json();
     },
@@ -254,7 +254,7 @@ export default function ResearchList() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ apiKey, databaseId }),
+        body: JSON.stringify({ apiKey, databaseId, purpose: "research" }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));

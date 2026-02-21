@@ -262,12 +262,13 @@ export const keyResearch = pgTable("key_research", {
 export type KeyResearchItem = typeof keyResearch.$inferSelect;
 export type InsertKeyResearch = typeof keyResearch.$inferInsert;
 
-// ========== Notion 연동 설정 (사용자별) ==========
+// ========== Notion 연동 설정 (사용자별, 용도별) ==========
 export const notionConfig = pgTable("notion_config", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull().default(-1),
   apiKey: text("api_key").notNull(),
   databaseId: text("database_id").notNull(),
+  purpose: text("purpose").notNull().default("research"),
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 

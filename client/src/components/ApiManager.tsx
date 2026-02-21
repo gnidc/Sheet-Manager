@@ -821,30 +821,40 @@ function GoogleAccountSection() {
   );
 }
 
-// ========== Notion API Section ==========
+// ========== Notion API Section (용도별 DB 관리) ==========
+const NOTION_PURPOSES = [
+  { key: "research", label: "리서치 리포트", desc: "증권사 주요 리서치를 Notion으로 내보내기", dbHint: "속성: 제목(Title), 증권사(Text), 날짜(Date), 링크(URL), PDF(URL)" },
+  { key: "steem", label: "스팀글 저장", desc: "스팀 포스트를 Notion에 저장", dbHint: "속성: 제목(Title), 작성자(Text), 날짜(Date), 본문(Text), 링크(URL), 태그(Multi-select)" },
+] as const;
+
 function NotionApiSection() {
   const { toast } = useToast();
-  const [editing, setEditing] = useState(false);
+  const [activePurpose, setActivePurpose] = useState<string>("research");
+  const [editing, setEditing] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [databaseId, setDatabaseId] = useState("");
   const [showKey, setShowKey] = useState(false);
 
-  const { data: config, isLoading, refetch } = useQuery<{ configured: boolean; apiKey?: string; databaseId?: string }>({
-    queryKey: ["/api/user/notion-config"],
+  const { data: allConfigs, isLoading, refetch } = useQuery<{ configs: { purpose: string; apiKey: string; databaseId: string }[] }>({
+    queryKey: ["/api/user/notion-configs"],
     queryFn: async () => {
-      const res = await fetch("/api/user/notion-config", { credentials: "include" });
-      if (!res.ok) return { configured: false };
+      const res = await fetch("/api/user/notion-configs", { credentials: "include" });
+      if (!res.ok) return { configs: [] };
       return res.json();
     },
   });
 
+  const configs = allConfigs?.configs || [];
+  const getConfig = (purpose: string) => configs.find(c => c.purpose === purpose);
+  const anyApiKey = configs.length > 0 ? configs[0].apiKey : null;
+
   const saveMutation = useMutation({
-    mutationFn: async ({ apiKey, databaseId }: { apiKey: string; databaseId: string }) => {
+    mutationFn: async ({ apiKey, databaseId, purpose }: { apiKey: string; databaseId: string; purpose: string }) => {
       const res = await fetch("/api/user/notion-config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ apiKey, databaseId }),
+        body: JSON.stringify({ apiKey, databaseId, purpose }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -854,7 +864,7 @@ function NotionApiSection() {
     },
     onSuccess: () => {
       refetch();
-      setEditing(false);
+      setEditing(null);
       setApiKey("");
       setDatabaseId("");
       toast({ title: "Notion 설정 저장 완료" });
@@ -865,8 +875,8 @@ function NotionApiSection() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetch("/api/user/notion-config", {
+    mutationFn: async (purpose: string) => {
+      const res = await fetch(`/api/user/notion-config?purpose=${purpose}`, {
         method: "DELETE",
         credentials: "include",
       });
@@ -882,6 +892,17 @@ function NotionApiSection() {
     },
   });
 
+  const startEditing = (purpose: string) => {
+    setEditing(purpose);
+    setDatabaseId("");
+    const existing = getConfig(purpose);
+    if (!existing && anyApiKey) {
+      setApiKey("");
+    } else {
+      setApiKey("");
+    }
+  };
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -890,7 +911,7 @@ function NotionApiSection() {
           Notion Integration
         </CardTitle>
         <CardDescription className="text-xs">
-          주요 리서치를 나의 Notion 데이터베이스로 내보내기 위한 설정
+          하나의 Notion Integration(API Key)으로 용도별 데이터베이스를 연결합니다
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -898,101 +919,132 @@ function NotionApiSection() {
           <div className="flex items-center justify-center py-4">
             <Loader2 className="w-5 h-5 animate-spin text-primary" />
           </div>
-        ) : config?.configured && !editing ? (
-          <div className="space-y-3">
-            <div className="p-3 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg space-y-2">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-green-600" />
-                <span className="text-sm font-medium text-green-700 dark:text-green-400">연동 완료</span>
-              </div>
-              <div className="grid gap-1.5 text-xs">
-                <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground w-20">API Key</span>
-                  <code className="bg-muted px-1.5 py-0.5 rounded">{config.apiKey}</code>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground w-20">Database ID</span>
-                  <code className="bg-muted px-1.5 py-0.5 rounded">{config.databaseId}</code>
-                </div>
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={() => setEditing(true)}>
-                <Pencil className="w-3 h-3" />
-                설정 변경
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1.5 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
-                onClick={() => { if (confirm("Notion 설정을 삭제하시겠습니까?")) deleteMutation.mutate(); }}
-                disabled={deleteMutation.isPending}
-              >
-                <Trash2 className="w-3 h-3" />
-                삭제
-              </Button>
-            </div>
-          </div>
         ) : (
-          <div className="space-y-4">
-            {!config?.configured && (
+          <>
+            {configs.length === 0 && !editing && (
               <div className="p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-lg">
-                <p className="text-xs text-amber-700 dark:text-amber-400 font-medium mb-2">설정 방법</p>
+                <p className="text-xs text-amber-700 dark:text-amber-400 font-medium mb-2">시작하기</p>
                 <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
                   <li><a href="https://www.notion.so/my-integrations" target="_blank" rel="noopener noreferrer" className="text-primary underline">Notion Integrations</a>에서 Internal Integration 생성 → API Key 복사</li>
-                  <li>Notion에서 데이터베이스 생성 (속성: 제목, 증권사, 날짜, 링크, PDF)</li>
-                  <li>데이터베이스 ··· → 연결(Connections)에서 Integration 연결</li>
-                  <li>데이터베이스 URL에서 Database ID (32자리) 복사</li>
+                  <li>용도별 Notion DB 생성 후 Integration 연결</li>
+                  <li>아래에서 용도별로 DB ID 등록</li>
                 </ol>
               </div>
             )}
-            <div className="space-y-1.5">
-              <Label className="text-xs">Notion API Key</Label>
-              <div className="relative">
-                <Input
-                  type={showKey ? "text" : "password"}
-                  placeholder="ntn_xxxxx..."
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  className="text-sm pr-10"
-                />
+
+            <div className="flex gap-1.5">
+              {NOTION_PURPOSES.map(p => (
                 <Button
-                  type="button"
-                  variant="ghost"
+                  key={p.key}
+                  variant={activePurpose === p.key ? "default" : "outline"}
                   size="sm"
-                  className="absolute right-0 top-0 h-full px-3 text-muted-foreground hover:text-foreground"
-                  onClick={() => setShowKey(!showKey)}
+                  className="text-xs h-7"
+                  onClick={() => { setActivePurpose(p.key); setEditing(null); }}
                 >
-                  {showKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  {p.label}
+                  {getConfig(p.key) && <CheckCircle2 className="w-3 h-3 ml-1 text-green-400" />}
                 </Button>
-              </div>
+              ))}
             </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">Notion Database ID</Label>
-              <Input
-                placeholder="32자리 영숫자 (URL에서 복사)"
-                value={databaseId}
-                onChange={(e) => setDatabaseId(e.target.value)}
-                className="text-sm"
-              />
-            </div>
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                className="gap-1.5"
-                onClick={() => saveMutation.mutate({ apiKey, databaseId })}
-                disabled={!apiKey || !databaseId || saveMutation.isPending}
-              >
-                {saveMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
-                저장
-              </Button>
-              {editing && (
-                <Button variant="ghost" size="sm" onClick={() => { setEditing(false); setApiKey(""); setDatabaseId(""); }}>
-                  취소
-                </Button>
-              )}
-            </div>
-          </div>
+
+            {NOTION_PURPOSES.filter(p => p.key === activePurpose).map(purpose => {
+              const cfg = getConfig(purpose.key);
+              const isEditing = editing === purpose.key;
+
+              return (
+                <div key={purpose.key} className="space-y-3">
+                  <p className="text-xs text-muted-foreground">{purpose.desc}</p>
+
+                  {cfg && !isEditing ? (
+                    <div className="space-y-3">
+                      <div className="p-3 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg space-y-2">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4 text-green-600" />
+                          <span className="text-sm font-medium text-green-700 dark:text-green-400">연동 완료</span>
+                        </div>
+                        <div className="grid gap-1.5 text-xs">
+                          <div className="flex items-center gap-2">
+                            <span className="text-muted-foreground w-20">API Key</span>
+                            <code className="bg-muted px-1.5 py-0.5 rounded">{cfg.apiKey}</code>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-muted-foreground w-20">Database ID</span>
+                            <code className="bg-muted px-1.5 py-0.5 rounded">{cfg.databaseId}</code>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={() => startEditing(purpose.key)}>
+                          <Pencil className="w-3 h-3" /> 설정 변경
+                        </Button>
+                        <Button
+                          variant="outline" size="sm"
+                          className="gap-1.5 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
+                          onClick={() => { if (confirm(`${purpose.label} Notion 설정을 삭제하시겠습니까?`)) deleteMutation.mutate(purpose.key); }}
+                          disabled={deleteMutation.isPending}
+                        >
+                          <Trash2 className="w-3 h-3" /> 삭제
+                        </Button>
+                      </div>
+                    </div>
+                  ) : isEditing ? (
+                    <div className="space-y-4 p-3 border rounded-lg">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Notion API Key {anyApiKey && !cfg && <span className="text-muted-foreground">(기존 키 재사용 가능)</span>}</Label>
+                        <div className="relative">
+                          <Input
+                            type={showKey ? "text" : "password"}
+                            placeholder="ntn_xxxxx..."
+                            value={apiKey}
+                            onChange={(e) => setApiKey(e.target.value)}
+                            className="text-sm pr-10"
+                          />
+                          <Button
+                            type="button" variant="ghost" size="sm"
+                            className="absolute right-0 top-0 h-full px-3 text-muted-foreground hover:text-foreground"
+                            onClick={() => setShowKey(!showKey)}
+                          >
+                            {showKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Database ID ({purpose.label}용)</Label>
+                        <Input
+                          placeholder="32자리 영숫자 (URL에서 복사)"
+                          value={databaseId}
+                          onChange={(e) => setDatabaseId(e.target.value)}
+                          className="text-sm"
+                        />
+                        <p className="text-[10px] text-muted-foreground">{purpose.dbHint}</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm" className="gap-1.5"
+                          onClick={() => saveMutation.mutate({ apiKey, databaseId, purpose: purpose.key })}
+                          disabled={!apiKey || !databaseId || saveMutation.isPending}
+                        >
+                          {saveMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
+                          저장
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => { setEditing(null); setApiKey(""); setDatabaseId(""); }}>
+                          취소
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-3 border border-dashed rounded-lg text-center">
+                      <p className="text-xs text-muted-foreground mb-2">미설정</p>
+                      <p className="text-[10px] text-muted-foreground mb-3">{purpose.dbHint}</p>
+                      <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={() => startEditing(purpose.key)}>
+                        <Plus className="w-3 h-3" /> DB 연결 추가
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </>
         )}
       </CardContent>
     </Card>

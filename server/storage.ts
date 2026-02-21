@@ -213,10 +213,11 @@ export interface IStorage {
   saveKeyResearch(items: Array<{ title: string; link: string; source: string; date: string; file: string }>): Promise<void>;
   deleteKeyResearch(id: number): Promise<void>;
 
-  // Notion Config (사용자별)
-  getNotionConfig(userId: number): Promise<NotionConfig | null>;
-  saveNotionConfig(userId: number, apiKey: string, databaseId: string): Promise<void>;
-  deleteNotionConfig(userId: number): Promise<void>;
+  // Notion Config (사용자별, 용도별)
+  getNotionConfig(userId: number, purpose?: string): Promise<NotionConfig | null>;
+  getAllNotionConfigs(userId: number): Promise<NotionConfig[]>;
+  saveNotionConfig(userId: number, apiKey: string, databaseId: string, purpose?: string): Promise<void>;
+  deleteNotionConfig(userId: number, purpose?: string): Promise<void>;
 
   // AI Reports (AI 분석 보고서)
   getAiReports(limit?: number): Promise<AiReport[]>;
@@ -1191,39 +1192,54 @@ export class DatabaseStorage implements IStorage {
     await db.delete(keyResearch).where(eq(keyResearch.id, id));
   }
 
-  // ========== Notion Config ==========
+  // ========== Notion Config (용도별) ==========
 
-  async getNotionConfig(userId: number): Promise<NotionConfig | null> {
+  async getNotionConfig(userId: number, purpose: string = "research"): Promise<NotionConfig | null> {
+    const cond = and(eq(notionConfig.userId, userId), eq(notionConfig.purpose, purpose));
     if (process.env.VERCEL) {
       return await executeWithClient(async (db) => {
-        const rows = await db.select().from(notionConfig).where(eq(notionConfig.userId, userId)).limit(1);
+        const rows = await db.select().from(notionConfig).where(cond).limit(1);
         return rows[0] || null;
       });
     }
-    const rows = await db.select().from(notionConfig).where(eq(notionConfig.userId, userId)).limit(1);
+    const rows = await db.select().from(notionConfig).where(cond).limit(1);
     return rows[0] || null;
   }
 
-  async saveNotionConfig(userId: number, apiKey: string, databaseId: string): Promise<void> {
+  async getAllNotionConfigs(userId: number): Promise<NotionConfig[]> {
+    const cond = eq(notionConfig.userId, userId);
     if (process.env.VERCEL) {
-      await executeWithClient(async (db) => {
-        await db.delete(notionConfig).where(eq(notionConfig.userId, userId));
-        await db.insert(notionConfig).values({ userId, apiKey, databaseId });
+      return await executeWithClient(async (db) => {
+        return await db.select().from(notionConfig).where(cond);
       });
-      return;
     }
-    await db.delete(notionConfig).where(eq(notionConfig.userId, userId));
-    await db.insert(notionConfig).values({ userId, apiKey, databaseId });
+    return await db.select().from(notionConfig).where(cond);
   }
 
-  async deleteNotionConfig(userId: number): Promise<void> {
+  async saveNotionConfig(userId: number, apiKey: string, databaseId: string, purpose: string = "research"): Promise<void> {
+    const cond = and(eq(notionConfig.userId, userId), eq(notionConfig.purpose, purpose));
     if (process.env.VERCEL) {
       await executeWithClient(async (db) => {
-        await db.delete(notionConfig).where(eq(notionConfig.userId, userId));
+        await db.delete(notionConfig).where(cond);
+        await db.insert(notionConfig).values({ userId, apiKey, databaseId, purpose });
       });
       return;
     }
-    await db.delete(notionConfig).where(eq(notionConfig.userId, userId));
+    await db.delete(notionConfig).where(cond);
+    await db.insert(notionConfig).values({ userId, apiKey, databaseId, purpose });
+  }
+
+  async deleteNotionConfig(userId: number, purpose?: string): Promise<void> {
+    const cond = purpose
+      ? and(eq(notionConfig.userId, userId), eq(notionConfig.purpose, purpose))
+      : eq(notionConfig.userId, userId);
+    if (process.env.VERCEL) {
+      await executeWithClient(async (db) => {
+        await db.delete(notionConfig).where(cond);
+      });
+      return;
+    }
+    await db.delete(notionConfig).where(cond);
   }
 
   // ========== AI Reports ==========

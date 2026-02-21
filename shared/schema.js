@@ -219,6 +219,23 @@ const aiReports = pgTable("ai_reports", {
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull()
 });
 const insertAiReportSchema = createInsertSchema(aiReports).omit({ id: true, createdAt: true });
+const keyResearch = pgTable("key_research", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull(),
+  link: text("link").default(""),
+  source: text("source").default(""),
+  date: text("date").default(""),
+  file: text("file").default(""),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+});
+const notionConfig = pgTable("notion_config", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().default(-1),
+  apiKey: text("api_key").notNull(),
+  databaseId: text("database_id").notNull(),
+  purpose: text("purpose").notNull().default("research"),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+});
 const strategyReports = pgTable("strategy_reports", {
   id: serial("id").primaryKey(),
   period: text("period").notNull(),
@@ -663,7 +680,9 @@ export {
   insertUserTradingConfigSchema,
   insertWatchlistEtfSchema,
   insertWatchlistStockSchema,
+  keyResearch,
   notices,
+  notionConfig,
   qnaPosts,
   qnaReplies,
   satelliteEtfs,
