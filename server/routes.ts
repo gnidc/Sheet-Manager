@@ -4093,7 +4093,7 @@ ${researchList}
       };
 
       // 병렬 수집
-      const [globalIndices, domesticIndices, bonds, commodities, etfs, domesticEtfs, coreEtfs, cryptoData, cryptoTop10, fxData] = await Promise.all([
+      const [globalIndices, domesticIndices, bonds, commodities, etfs, domesticEtfAll, coreEtfs, cryptoData, cryptoTop10, fxData, marketSentiment, investorTrends] = await Promise.all([
         // 글로벌 지수
         (async () => {
           const syms = [
@@ -4151,7 +4151,7 @@ ${researchList}
           }));
           const y10 = results.find(b => b.name.includes("10Y"));
           const y2 = results.find(b => b.name.includes("2Y"));
-          if (y10 && y2) results.push({ name: "10Y-2Y 스프레드", value: +(y10.value - y2.value).toFixed(3), weekChange: 0, dayChange: 0 });
+          if (y10 && y2) results.push({ name: "10Y-2Y 스프레드", value: +(y10.value - y2.value).toFixed(3), weekChange: +(y10.weekChange - y2.weekChange).toFixed(3), dayChange: +(y10.dayChange - y2.dayChange).toFixed(3) });
           return results;
         })(),
         // 원자재
@@ -4226,8 +4226,8 @@ ${researchList}
               } catch {}
             }));
             results.sort((a, b) => b.weekReturn - a.weekReturn);
-            return results.slice(0, 10);
-          } catch { return []; }
+            return { top10: results.slice(0, 10), worst10: results.slice(-10).reverse() };
+          } catch { return { top10: [], worst10: [] }; }
         })(),
         // 관심ETF(Core) 주간 수익률
         (async () => {
@@ -4307,10 +4307,91 @@ ${researchList}
           }));
           return results;
         })(),
+        // 시장 심리 지표 (VIX, DXY, Fear & Greed)
+        (async () => {
+          const sentiment: any = {};
+          try {
+            const vix = await yChart("^VIX");
+            if (vix && vix.last > 0) {
+              sentiment.vix = {
+                value: +vix.last.toFixed(2),
+                weekChange: vix.weekOpen > 0 ? +((vix.last - vix.weekOpen) / vix.weekOpen * 100).toFixed(2) : 0,
+                dayChange: vix.prev > 0 ? +((vix.last - vix.prev) / vix.prev * 100).toFixed(2) : 0,
+              };
+            }
+          } catch {}
+          try {
+            const dxy = await yChart("DX-Y.NYB");
+            if (dxy && dxy.last > 0) {
+              sentiment.dxy = {
+                value: +dxy.last.toFixed(2),
+                weekChange: dxy.weekOpen > 0 ? +((dxy.last - dxy.weekOpen) / dxy.weekOpen * 100).toFixed(2) : 0,
+                dayChange: dxy.prev > 0 ? +((dxy.last - dxy.prev) / dxy.prev * 100).toFixed(2) : 0,
+              };
+            }
+          } catch {}
+          try {
+            const fgRes = await axios.get("https://production.dataviz.cnn.io/index/fearandgreed/graphdata", {
+              headers: { "User-Agent": UA }, timeout: 8000,
+            });
+            const fg = fgRes.data?.fear_and_greed;
+            if (fg) {
+              sentiment.fearGreed = {
+                value: Math.round(fg.score),
+                label: fg.rating || "",
+                previousClose: Math.round(fg.previous_close || 0),
+                weekAgo: Math.round(fg.previous_1_week || 0),
+              };
+            }
+          } catch {}
+          return Object.keys(sentiment).length > 0 ? sentiment : null;
+        })(),
+        // 외국인/기관 순매수 동향 (HTML 파싱)
+        (async () => {
+          try {
+            const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+            const fetchTrend = async (sosok: string) => {
+              try {
+                const r = await axios.get("https://finance.naver.com/sise/investorDealTrendDay.naver", {
+                  params: { bizdate: today, sosok },
+                  headers: { "User-Agent": UA, "Referer": "https://finance.naver.com/sise/sise_deal.naver" },
+                  timeout: 8000, responseType: "text",
+                });
+                const html = r.data as string;
+                const tdRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+                const cells: string[] = [];
+                let m;
+                while ((m = tdRegex.exec(html)) !== null) {
+                  cells.push(m[1].replace(/<[^>]+>/g, "").trim());
+                }
+                const rows: any[] = [];
+                const nonEmpty = cells.filter(c => c !== "");
+                for (let i = 0; i + 10 < nonEmpty.length; i += 11) {
+                  const dateStr = nonEmpty[i];
+                  if (!/\d{2}\.\d{2}\.\d{2}/.test(dateStr)) continue;
+                  const parse = (v: string) => parseInt(v.replace(/,/g, "")) || 0;
+                  rows.push({
+                    date: "20" + dateStr.replace(/\./g, "-"),
+                    individual: parse(nonEmpty[i + 1]),
+                    foreign: parse(nonEmpty[i + 2]),
+                    institution: parse(nonEmpty[i + 3]),
+                  });
+                }
+                return rows.slice(0, 5);
+              } catch { return []; }
+            };
+            const [kospi, kosdaq] = await Promise.all([fetchTrend("01"), fetchTrend("02")]);
+            if (kospi.length === 0 && kosdaq.length === 0) return null;
+            return { kospi, kosdaq };
+          } catch { return null; }
+        })(),
       ]);
 
+      const domesticEtfs = (domesticEtfAll as any)?.top10 || [];
+      const domesticEtfWorst = (domesticEtfAll as any)?.worst10 || [];
+
       res.json({
-        globalIndices, domesticIndices, bonds, commodities, etfs, domesticEtfs, coreEtfs, crypto: cryptoData, cryptoTop10, forex: fxData,
+        globalIndices, domesticIndices, bonds, commodities, etfs, domesticEtfs, domesticEtfWorst, coreEtfs, crypto: cryptoData, cryptoTop10, forex: fxData, marketSentiment, investorTrends,
         updatedAt: new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }),
       });
     } catch (error: any) {
@@ -4368,21 +4449,60 @@ ${researchList}
       if (d.cryptoTop10?.length) {
         sections.push("## 암호화폐 주간상승률 TOP 10\n" + d.cryptoTop10.map((x: any, i: number) => `${i + 1}. ${x.name} (${x.symbol}): $${x.price} (7d ${x.change7d > 0 ? "+" : ""}${x.change7d}%)`).join("\n"));
       }
+      if (d.domesticEtfWorst?.length) {
+        sections.push("## 국내 ETF 주간 하락률 WORST 10\n" + d.domesticEtfWorst.map((x: any, i: number) => `${i + 1}. ${x.name}: ${x.price.toLocaleString()}원 (주간 ${x.weekReturn > 0 ? "+" : ""}${x.weekReturn}%)`).join("\n"));
+      }
+      if (d.marketSentiment) {
+        const ms = d.marketSentiment;
+        const lines: string[] = [];
+        if (ms.vix) lines.push(`- VIX 공포지수: ${ms.vix.value} (주간 ${ms.vix.weekChange > 0 ? "+" : ""}${ms.vix.weekChange}%, 전일 ${ms.vix.dayChange > 0 ? "+" : ""}${ms.vix.dayChange}%)`);
+        if (ms.dxy) lines.push(`- 달러인덱스(DXY): ${ms.dxy.value} (주간 ${ms.dxy.weekChange > 0 ? "+" : ""}${ms.dxy.weekChange}%, 전일 ${ms.dxy.dayChange > 0 ? "+" : ""}${ms.dxy.dayChange}%)`);
+        if (ms.fearGreed) lines.push(`- Fear & Greed Index: ${ms.fearGreed.value} (${ms.fearGreed.label}), 전일: ${ms.fearGreed.previousClose}, 1주전: ${ms.fearGreed.weekAgo}`);
+        if (lines.length) sections.push("## 시장 심리 지표\n" + lines.join("\n"));
+      }
+      if (d.investorTrends) {
+        const lines: string[] = [];
+        if (d.investorTrends.kospi?.length) {
+          lines.push("KOSPI 투자자별 순매수(최근 5일):");
+          d.investorTrends.kospi.forEach((x: any) => lines.push(`  ${x.date} - 외국인: ${x.foreign.toLocaleString()}주, 기관: ${x.institution.toLocaleString()}주, 개인: ${x.individual.toLocaleString()}주`));
+        }
+        if (d.investorTrends.kosdaq?.length) {
+          lines.push("KOSDAQ 투자자별 순매수(최근 5일):");
+          d.investorTrends.kosdaq.forEach((x: any) => lines.push(`  ${x.date} - 외국인: ${x.foreign.toLocaleString()}주, 기관: ${x.institution.toLocaleString()}주, 개인: ${x.individual.toLocaleString()}주`));
+        }
+        if (lines.length) sections.push("## 외국인/기관 순매수 동향\n" + lines.join("\n"));
+      }
 
       const dataText = sections.join("\n\n");
-      const fullPrompt = `당신은 글로벌 금융시장 전문 애널리스트입니다. 아래 주간 시장 통계 데이터를 종합 분석하여 한국어로 투자 인사이트 보고서를 작성해주세요.
+      const fullPrompt = `당신은 글로벌 금융시장 전문 애널리스트입니다. 아래 주간 시장 통계 데이터를 종합 분석하여 한국어로 투자 인사이트 보고서를 **HTML 형식**으로 작성해주세요.
 
-분석 시 다음 구조를 따라주세요:
+## 작성 구조 (10개 섹션)
 1. **📊 주간 시장 요약** - 글로벌/국내 증시 흐름을 3-4문장으로 요약
 2. **🌍 글로벌 시장 분석** - 미국, 유럽, 아시아 증시 동향 및 주요 이슈
-3. **🇰🇷 국내 시장 분석** - KOSPI/KOSDAQ 동향, 주도 섹터/테마 분석
-4. **💰 채권·환율·원자재 동향** - 금리 방향성, 환율 변동, 원자재 시장 분석
-5. **📈 ETF 흐름 분석** - 글로벌/국내 ETF 등락 기반 자금 흐름, 섹터 로테이션
-6. **🪙 암호화폐 동향** - 관심 코인 및 시장 전체 흐름
-7. **⚠️ 리스크 요인** - 주의할 리스크, 변동성 요인
-8. **💡 다음주 투자 전략 제안** - 구체적 액션 아이템 3-5개
+3. **🇰🇷 국내 시장 분석** - KOSPI/KOSDAQ 동향, 투자자별 수급 동향, 주도 섹터/테마 분석
+4. **🧭 시장 심리 분석** - VIX, 달러인덱스(DXY), Fear & Greed Index 기반 시장 센티먼트 진단
+5. **💰 채권·환율·원자재 동향** - 금리 방향성(10Y-2Y 스프레드 포함), 환율 변동, 원자재 시장 분석
+6. **📈 ETF 흐름 분석** - 글로벌/국내 ETF 상승·하락 기반 자금 흐름, 섹터 로테이션
+7. **🪙 암호화폐 동향** - 관심 코인 및 시장 전체 흐름
+8. **⚠️ 리스크 요인** - VIX/F&G 기반 변동성 분석, 주의할 리스크
+9. **💡 다음주 투자 전략 제안** - 구체적 액션 아이템 3-5개
+10. **📋 주간 핵심 수치 요약표** - 주요 지표를 한눈에 볼 수 있는 종합 도표
 
-각 섹션은 구체적 수치를 인용하여 작성하고, 전문적이면서도 이해하기 쉽게 작성해주세요.
+## 서식 규칙 (반드시 준수)
+- 출력은 반드시 **HTML**로 작성 (\`\`\`html 코드블록 없이, 순수 HTML 태그만 사용)
+- 각 섹션 제목은 <h3> 태그 사용
+- **핵심 키워드, 중요 수치, 종목명**은 <strong> + 색상으로 강조:
+  - 상승/긍정/매수 키워드: <strong style="color:#e53935">빨간색</strong>
+  - 하락/부정/매도/리스크 키워드: <strong style="color:#1565c0">파란색</strong>
+  - 중립/핵심 키워드: <strong>굵은 기본색</strong>
+- 비교/순위/등락률 데이터는 반드시 <table> 도표로 정리:
+  - table 스타일: border-collapse:collapse; width:100%; margin:8px 0;
+  - th 스타일: background:#f5f5f5; padding:6px 10px; border:1px solid #ddd; font-size:13px; text-align:center;
+  - td 스타일: padding:6px 10px; border:1px solid #ddd; font-size:13px;
+  - 상승 수치 td: color:#e53935 / 하락 수치 td: color:#1565c0
+- 글로벌 지수 주간 등락, ETF TOP 종목, 암호화폐 등락 등은 도표 필수
+- 일반 분석 문장은 <p> 태그, 목록은 <ul><li> 사용
+- 각 섹션은 구체적 수치를 인용하여 전문적이면서 이해하기 쉽게 작성
 
 ---
 ${dataText}
@@ -10913,9 +11033,9 @@ ${newsContext}`;
       if (!period || !result) {
         return res.status(400).json({ message: "period와 result가 필요합니다." });
       }
-      // 일반 유저는 daily만 생성 가능
-      if (!req.session?.isAdmin && period !== "daily") {
-        return res.status(403).json({ message: "일반 계정은 일일 분석만 생성할 수 있습니다." });
+      // 일반 유저는 daily/weekly만 생성 가능
+      if (!req.session?.isAdmin && period !== "daily" && period !== "weekly") {
+        return res.status(403).json({ message: "일반 계정은 일일/주간 분석만 생성할 수 있습니다." });
       }
       const userId = req.session?.userId || null;
       const userName = req.session?.userName || req.session?.userEmail || (req.session?.isAdmin ? "Admin" : "사용자");

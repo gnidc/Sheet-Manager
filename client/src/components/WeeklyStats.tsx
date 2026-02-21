@@ -5,32 +5,35 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Loader2, RefreshCw, TrendingUp, TrendingDown, Globe, Landmark, Droplets, BarChart3, Bitcoin, DollarSign, Flag, Star, Sparkles, X, Copy, ClipboardPaste, Save, Camera } from "lucide-react";
+import { Loader2, RefreshCw, TrendingUp, TrendingDown, Globe, Landmark, Droplets, BarChart3, Bitcoin, DollarSign, Flag, Star, Sparkles, X, Copy, ClipboardPaste, Save, Camera, Activity, Gauge, ShieldAlert } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
-async function copyAsRichText(markdown: string): Promise<boolean> {
+function htmlToPlainText(html: string): string {
+  return html.replace(/<br\s*\/?>/gi, "\n").replace(/<\/?(p|div|h[1-6]|li|tr)[^>]*>/gi, "\n").replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+async function copyAsRichText(htmlContent: string): Promise<boolean> {
   try {
-    let html = markdown
-      .replace(/^#### (.+)$/gm, '<h4 style="font-size:14px;font-weight:bold;margin:12px 0 4px;">$1</h4>')
-      .replace(/^### (.+)$/gm, '<h3 style="font-size:16px;font-weight:bold;margin:14px 0 6px;">$1</h3>')
-      .replace(/^## (.+)$/gm, '<h2 style="font-size:18px;font-weight:bold;margin:16px 0 6px;">$1</h2>')
-      .replace(/^# (.+)$/gm, '<h1 style="font-size:20px;font-weight:bold;margin:18px 0 8px;">$1</h1>')
-      .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
-      .replace(/\*(.+?)\*/g, '<i>$1</i>')
-      .replace(/^---+$/gm, '<hr style="border:none;border-top:1px solid #ccc;margin:12px 0;">')
-      .replace(/^(\d+)\. (.+)$/gm, '<div style="margin-left:16px;">$1. $2</div>')
-      .replace(/^[-*] (.+)$/gm, '<div style="margin-left:16px;">• $1</div>')
-      .replace(/`(.+?)`/g, '<code style="background:#f1f1f1;padding:1px 4px;border-radius:3px;font-size:13px;">$1</code>')
-      .replace(/\n\n/g, '</p><p style="margin:8px 0;">')
-      .replace(/\n/g, '<br>');
-    html = `<div style="font-family:'Malgun Gothic','맑은 고딕',sans-serif;font-size:14px;line-height:1.7;color:#333;"><p style="margin:8px 0;">${html}</p></div>`;
+    const html = `<div style="font-family:'Malgun Gothic','맑은 고딕',sans-serif;font-size:14px;line-height:1.7;color:#333;">${htmlContent}</div>`;
+    const plainText = htmlToPlainText(htmlContent);
     const htmlBlob = new Blob([html], { type: "text/html" });
-    const textBlob = new Blob([markdown], { type: "text/plain" });
+    const textBlob = new Blob([plainText], { type: "text/plain" });
     await navigator.clipboard.write([new ClipboardItem({ "text/html": htmlBlob, "text/plain": textBlob })]);
     return true;
   } catch {
-    try { await navigator.clipboard.writeText(markdown); return true; } catch { return false; }
+    try { await navigator.clipboard.writeText(htmlToPlainText(htmlContent)); return true; } catch { return false; }
   }
+}
+
+interface MarketSentiment {
+  vix?: { value: number; weekChange: number; dayChange: number };
+  dxy?: { value: number; weekChange: number; dayChange: number };
+  fearGreed?: { value: number; label: string; previousClose: number; weekAgo: number };
+}
+
+interface InvestorTrends {
+  kospi: { date: string; foreign: number; institution: number; individual: number }[];
+  kosdaq: { date: string; foreign: number; institution: number; individual: number }[];
 }
 
 interface WeeklyStatsData {
@@ -40,10 +43,13 @@ interface WeeklyStatsData {
   commodities: { name: string; price: number; weekChange: number; dayChange: number }[];
   etfs: { name: string; price: number; weekChange: number }[];
   domesticEtfs: { name: string; code: string; price: number; weekReturn: number }[];
+  domesticEtfWorst: { name: string; code: string; price: number; weekReturn: number }[];
   coreEtfs: { name: string; code: string; sector: string; price: number; weekReturn: number }[];
   crypto: { symbol: string; name: string; price: number; change24h: number; change7d: number; marketCap: number }[];
   cryptoTop10: { symbol: string; name: string; price: number; change7d: number; marketCap: number }[];
   forex: { name: string; value: number; weekChange: number }[];
+  marketSentiment: MarketSentiment | null;
+  investorTrends: InvestorTrends | null;
   updatedAt: string;
 }
 
@@ -200,7 +206,8 @@ export default function WeeklyStats() {
               </CardTitle>
               <div className="flex items-center gap-1">
                 <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => {
-                  navigator.clipboard.writeText(aiResult).then(() => {
+                  const plainText = htmlToPlainText(aiResult);
+                  navigator.clipboard.writeText(plainText).then(() => {
                     toast({ title: "복사 완료", description: "텍스트가 클립보드에 복사되었습니다." });
                   }).catch(() => {
                     toast({ title: "복사 실패", variant: "destructive" });
@@ -227,9 +234,10 @@ export default function WeeklyStats() {
             </div>
           </CardHeader>
           <CardContent className="px-4 pb-4">
-            <div className="prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed whitespace-pre-wrap">
-              {aiResult}
-            </div>
+            <div
+              className="prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed [&_table]:w-full [&_table]:border-collapse [&_table]:my-2 [&_th]:bg-muted [&_th]:p-1.5 [&_th]:border [&_th]:border-border [&_th]:text-xs [&_th]:font-semibold [&_td]:p-1.5 [&_td]:border [&_td]:border-border [&_td]:text-xs [&_h3]:text-base [&_h3]:font-bold [&_h3]:mt-4 [&_h3]:mb-2 [&_p]:my-1.5 [&_ul]:my-1 [&_li]:my-0.5"
+              dangerouslySetInnerHTML={{ __html: aiResult }}
+            />
           </CardContent>
         </Card>
       )}
@@ -290,6 +298,54 @@ export default function WeeklyStats() {
                     ))}
                   </TableBody>
                 </Table>
+              </div>
+            </SectionCard>
+          )}
+
+          {/* 시장 심리 지표 */}
+          {data.marketSentiment && (
+            <SectionCard title="시장 심리 지표" icon={<Gauge className="w-4 h-4 text-violet-500" />}>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {data.marketSentiment.vix && (
+                  <div className="rounded-lg border p-3 text-center">
+                    <div className="text-xs text-muted-foreground mb-1">VIX 공포지수</div>
+                    <div className={`text-xl font-bold ${data.marketSentiment.vix.value >= 30 ? "text-red-500" : data.marketSentiment.vix.value >= 20 ? "text-yellow-500" : "text-green-500"}`}>
+                      {data.marketSentiment.vix.value}
+                    </div>
+                    <div className="text-[10px] text-muted-foreground mt-1">
+                      주간 <ChangeCell value={data.marketSentiment.vix.weekChange} /> · 전일 <ChangeCell value={data.marketSentiment.vix.dayChange} />
+                    </div>
+                    <Badge variant="outline" className="text-[10px] mt-1">
+                      {data.marketSentiment.vix.value < 15 ? "매우 안정" : data.marketSentiment.vix.value < 20 ? "안정" : data.marketSentiment.vix.value < 25 ? "주의" : data.marketSentiment.vix.value < 30 ? "경계" : "공포"}
+                    </Badge>
+                  </div>
+                )}
+                {data.marketSentiment.dxy && (
+                  <div className="rounded-lg border p-3 text-center">
+                    <div className="text-xs text-muted-foreground mb-1">달러 인덱스 (DXY)</div>
+                    <div className="text-xl font-bold">{data.marketSentiment.dxy.value}</div>
+                    <div className="text-[10px] text-muted-foreground mt-1">
+                      주간 <ChangeCell value={data.marketSentiment.dxy.weekChange} /> · 전일 <ChangeCell value={data.marketSentiment.dxy.dayChange} />
+                    </div>
+                    <Badge variant="outline" className="text-[10px] mt-1">
+                      {data.marketSentiment.dxy.weekChange > 0 ? "달러 강세" : "달러 약세"}
+                    </Badge>
+                  </div>
+                )}
+                {data.marketSentiment.fearGreed && (
+                  <div className="rounded-lg border p-3 text-center">
+                    <div className="text-xs text-muted-foreground mb-1">Fear & Greed Index</div>
+                    <div className={`text-xl font-bold ${data.marketSentiment.fearGreed.value >= 75 ? "text-green-500" : data.marketSentiment.fearGreed.value >= 55 ? "text-green-400" : data.marketSentiment.fearGreed.value >= 45 ? "text-yellow-500" : data.marketSentiment.fearGreed.value >= 25 ? "text-orange-500" : "text-red-500"}`}>
+                      {data.marketSentiment.fearGreed.value}
+                    </div>
+                    <div className="text-[10px] text-muted-foreground mt-1">
+                      전일 {data.marketSentiment.fearGreed.previousClose} · 1주전 {data.marketSentiment.fearGreed.weekAgo}
+                    </div>
+                    <Badge variant="outline" className="text-[10px] mt-1">
+                      {data.marketSentiment.fearGreed.value >= 75 ? "극단적 탐욕" : data.marketSentiment.fearGreed.value >= 55 ? "탐욕" : data.marketSentiment.fearGreed.value >= 45 ? "중립" : data.marketSentiment.fearGreed.value >= 25 ? "공포" : "극단적 공포"}
+                    </Badge>
+                  </div>
+                )}
               </div>
             </SectionCard>
           )}
@@ -442,6 +498,43 @@ export default function WeeklyStats() {
             </SectionCard>
           )}
 
+          {/* 국내 ETF 주간 하락률 WORST 10 */}
+          {data.domesticEtfWorst?.length > 0 && (
+            <SectionCard title="국내 ETF 주간 하락률 WORST 10" icon={<TrendingDown className="w-4 h-4 text-blue-500" />}>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-xs">순위</TableHead>
+                      <TableHead className="text-xs">ETF</TableHead>
+                      <TableHead className="text-xs text-right">현재가(원)</TableHead>
+                      <TableHead className="text-xs text-right">주간 수익률</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {data.domesticEtfWorst.map((e, i) => (
+                      <TableRow key={e.code}>
+                        <TableCell className="text-xs py-1.5">{i + 1}</TableCell>
+                        <TableCell className="text-xs font-medium py-1.5">
+                          <div className="flex items-center gap-1.5">
+                            <TrendingDown className="w-3 h-3 text-blue-500" />
+                            {e.name}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-xs text-right py-1.5">{e.price.toLocaleString()}원</TableCell>
+                        <TableCell className="text-xs text-right py-1.5">
+                          <Badge variant="default" className="text-[10px] px-1.5 py-0">
+                            {e.weekReturn > 0 ? "+" : ""}{e.weekReturn}%
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </SectionCard>
+          )}
+
           {/* 관심ETF(Core) 주간 수익률 */}
           {data.coreEtfs?.length > 0 && (
             <SectionCard title="관심ETF(Core) 주간 수익률" icon={<Star className="w-4 h-4 text-yellow-500" />}>
@@ -545,6 +638,68 @@ export default function WeeklyStats() {
                     ))}
                   </TableBody>
                 </Table>
+              </div>
+            </SectionCard>
+          )}
+
+          {/* 외국인/기관 순매수 동향 */}
+          {data.investorTrends && (data.investorTrends.kospi?.length > 0 || data.investorTrends.kosdaq?.length > 0) && (
+            <SectionCard title="외국인/기관 순매수 동향" icon={<Activity className="w-4 h-4 text-indigo-500" />}>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {data.investorTrends.kospi?.length > 0 && (
+                  <div>
+                    <div className="text-xs font-semibold mb-1.5 flex items-center gap-1"><Flag className="w-3 h-3 text-red-500" /> KOSPI <span className="text-muted-foreground font-normal">(억원)</span></div>
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="text-xs">날짜</TableHead>
+                            <TableHead className="text-xs text-right">외국인</TableHead>
+                            <TableHead className="text-xs text-right">기관</TableHead>
+                            <TableHead className="text-xs text-right">개인</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {data.investorTrends.kospi.map((t) => (
+                            <TableRow key={t.date}>
+                              <TableCell className="text-xs py-1">{t.date}</TableCell>
+                              <TableCell className={`text-xs text-right py-1 ${t.foreign > 0 ? "text-red-500" : t.foreign < 0 ? "text-blue-500" : ""}`}>{t.foreign > 0 ? "+" : ""}{Math.round(t.foreign / 100).toLocaleString()}</TableCell>
+                              <TableCell className={`text-xs text-right py-1 ${t.institution > 0 ? "text-red-500" : t.institution < 0 ? "text-blue-500" : ""}`}>{t.institution > 0 ? "+" : ""}{Math.round(t.institution / 100).toLocaleString()}</TableCell>
+                              <TableCell className={`text-xs text-right py-1 ${t.individual > 0 ? "text-red-500" : t.individual < 0 ? "text-blue-500" : ""}`}>{t.individual > 0 ? "+" : ""}{Math.round(t.individual / 100).toLocaleString()}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                )}
+                {data.investorTrends.kosdaq?.length > 0 && (
+                  <div>
+                    <div className="text-xs font-semibold mb-1.5 flex items-center gap-1"><Flag className="w-3 h-3 text-blue-500" /> KOSDAQ <span className="text-muted-foreground font-normal">(억원)</span></div>
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="text-xs">날짜</TableHead>
+                            <TableHead className="text-xs text-right">외국인</TableHead>
+                            <TableHead className="text-xs text-right">기관</TableHead>
+                            <TableHead className="text-xs text-right">개인</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {data.investorTrends.kosdaq.map((t) => (
+                            <TableRow key={t.date}>
+                              <TableCell className="text-xs py-1">{t.date}</TableCell>
+                              <TableCell className={`text-xs text-right py-1 ${t.foreign > 0 ? "text-red-500" : t.foreign < 0 ? "text-blue-500" : ""}`}>{t.foreign > 0 ? "+" : ""}{Math.round(t.foreign / 100).toLocaleString()}</TableCell>
+                              <TableCell className={`text-xs text-right py-1 ${t.institution > 0 ? "text-red-500" : t.institution < 0 ? "text-blue-500" : ""}`}>{t.institution > 0 ? "+" : ""}{Math.round(t.institution / 100).toLocaleString()}</TableCell>
+                              <TableCell className={`text-xs text-right py-1 ${t.individual > 0 ? "text-red-500" : t.individual < 0 ? "text-blue-500" : ""}`}>{t.individual > 0 ? "+" : ""}{Math.round(t.individual / 100).toLocaleString()}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                )}
               </div>
             </SectionCard>
           )}
