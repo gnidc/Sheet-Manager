@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { toPng } from "html-to-image";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Loader2, RefreshCw, TrendingUp, TrendingDown, Globe, Landmark, Droplets, BarChart3, Bitcoin, DollarSign, Flag, Star, Sparkles, X, Copy, ClipboardPaste, Save } from "lucide-react";
+import { Loader2, RefreshCw, TrendingUp, TrendingDown, Globe, Landmark, Droplets, BarChart3, Bitcoin, DollarSign, Flag, Star, Sparkles, X, Copy, ClipboardPaste, Save, Camera } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 async function copyAsRichText(markdown: string): Promise<boolean> {
@@ -68,6 +69,35 @@ function SectionCard({ title, icon, children }: { title: string; icon: React.Rea
 export default function WeeklyStats() {
   const { toast } = useToast();
   const [aiResult, setAiResult] = useState<string | null>(null);
+  const [isCapturing, setIsCapturing] = useState(false);
+  const statsRef = useRef<HTMLDivElement>(null);
+
+  const captureSnapshot = useCallback(async () => {
+    if (!statsRef.current || isCapturing) return;
+    setIsCapturing(true);
+    try {
+      const dataUrl = await toPng(statsRef.current, {
+        backgroundColor: "#ffffff",
+        pixelRatio: 2,
+        style: { padding: "16px" },
+      });
+      const blob = await (await fetch(dataUrl)).blob();
+      try {
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+        toast({ title: "스냅샷 복사 완료", description: "이미지가 클립보드에 복사되었습니다." });
+      } catch {
+        const link = document.createElement("a");
+        link.download = `주간통계_${new Date().toISOString().slice(0, 10)}.png`;
+        link.href = dataUrl;
+        link.click();
+        toast({ title: "스냅샷 다운로드", description: "이미지가 다운로드되었습니다." });
+      }
+    } catch (e: any) {
+      toast({ title: "스냅샷 실패", description: e.message, variant: "destructive" });
+    } finally {
+      setIsCapturing(false);
+    }
+  }, [isCapturing, toast]);
 
   const { data, isLoading, refetch, isFetching } = useQuery<WeeklyStatsData>({
     queryKey: ["/api/markets/weekly-stats"],
@@ -144,6 +174,10 @@ export default function WeeklyStats() {
             {isFetching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
             새로고침
           </Button>
+          <Button variant="outline" size="sm" className="gap-1" onClick={captureSnapshot} disabled={isCapturing || !data}>
+            {isCapturing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
+            스냅샷
+          </Button>
           <Button
             size="sm"
             className="gap-1"
@@ -205,7 +239,7 @@ export default function WeeklyStats() {
           <Loader2 className="w-8 h-8 animate-spin text-primary" />
         </div>
       ) : data ? (
-        <div className="space-y-4">
+        <div ref={statsRef} className="space-y-4">
           {/* 글로벌 지수 */}
           <SectionCard title="글로벌 주요 지수" icon={<Globe className="w-4 h-4 text-blue-500" />}>
             <div className="overflow-x-auto">
