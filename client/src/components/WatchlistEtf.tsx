@@ -557,7 +557,7 @@ export default function WatchlistEtfComponent({ listType = "core", onCompare }: 
       return;
     }
     const first = selected[0];
-    navigate(`/trading?code=${encodeURIComponent(first.etfCode)}&name=${encodeURIComponent(first.etfName)}`);
+    window.open(`https://lifefit2.vercel.app/trading?code=${encodeURIComponent(first.etfCode)}&name=${encodeURIComponent(first.etfName)}`, "_blank", "noopener,noreferrer");
   }, [checkedIds, allItems, navigate, toast]);
 
   const handleCompareChecked = useCallback(() => {

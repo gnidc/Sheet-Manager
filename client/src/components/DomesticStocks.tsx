@@ -398,7 +398,7 @@ export default function DomesticStocks() {
     const allStocksFlat = [...commonStocks, ...personalStocks];
     const stock = allStocksFlat.find((s) => s.stockCode === firstCode);
     if (stock) {
-      navigate(`/trading?code=${stock.stockCode}&name=${encodeURIComponent(stock.stockName)}`);
+      window.open(`https://lifefit2.vercel.app/trading?code=${stock.stockCode}&name=${encodeURIComponent(stock.stockName)}`, "_blank", "noopener,noreferrer");
     }
   };
 

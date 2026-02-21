@@ -516,18 +516,8 @@ export default function StockDetailPanel({
               variant="outline"
               className="text-xs h-7 px-3 bg-red-50 hover:bg-red-100 text-red-600 border-red-200 hover:border-red-300"
               onClick={() => {
-                const tradingUrl = `/trading?code=${encodeURIComponent(stockCode)}&name=${encodeURIComponent(stockName)}&orderType=buy`;
-                // 부모 창이 있으면 부모 창에서 자동매매 페이지로 이동
-                if (window.opener) {
-                  try {
-                    window.opener.location.href = tradingUrl;
-                    window.opener.focus();
-                  } catch {
-                    window.open(tradingUrl, "_blank");
-                  }
-                } else {
-                  window.open(tradingUrl, "_blank");
-                }
+                const tradingUrl = `https://lifefit2.vercel.app/trading?code=${encodeURIComponent(stockCode)}&name=${encodeURIComponent(stockName)}&orderType=buy`;
+                window.open(tradingUrl, "_blank", "noopener,noreferrer");
               }}
             >
               <ShoppingCart className="h-3 w-3 mr-1" />매수

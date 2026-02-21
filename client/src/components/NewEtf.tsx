@@ -143,7 +143,7 @@ export default function NewEtf() {
     const firstId = Array.from(selectedIds)[0];
     const etf = savedEtfs?.find(e => e.id === firstId);
     if (etf) {
-      window.location.href = `/trading?code=${etf.etfCode}&name=${encodeURIComponent(etf.etfName)}`;
+      window.open(`https://lifefit2.vercel.app/trading?code=${etf.etfCode}&name=${encodeURIComponent(etf.etfName)}`, "_blank", "noopener,noreferrer");
     }
   };
 

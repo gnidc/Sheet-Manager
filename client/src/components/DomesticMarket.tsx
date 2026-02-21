@@ -532,11 +532,10 @@ export default function DomesticMarket() {
                           className="h-6 text-xs px-3 gap-1 bg-red-500 hover:bg-red-600 text-white ml-2"
                           onClick={(e) => {
                             e.stopPropagation();
-                            // 선택된 첫번째 종목으로 자동매매 주문 화면 이동
                             const firstCode = Array.from(checkedStocks)[0];
                             const stock = sectorStocks.find(s => s.code === firstCode);
                             if (stock) {
-                              navigate(`/trading?code=${stock.code}&name=${encodeURIComponent(stock.name)}`);
+                              window.open(`https://lifefit2.vercel.app/trading?code=${stock.code}&name=${encodeURIComponent(stock.name)}`, "_blank", "noopener,noreferrer");
                             }
                           }}
                         >
@@ -699,7 +698,7 @@ export default function DomesticMarket() {
                     const firstCode = Array.from(checkedTopStocks)[0];
                     const stock = topStocks.find(s => s.code === firstCode);
                     if (stock) {
-                      navigate(`/trading?code=${stock.code}&name=${encodeURIComponent(stock.name)}`);
+                      window.open(`https://lifefit2.vercel.app/trading?code=${stock.code}&name=${encodeURIComponent(stock.name)}`, "_blank", "noopener,noreferrer");
                     }
                   }}
                 >

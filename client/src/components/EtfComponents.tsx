@@ -578,14 +578,14 @@ export default function EtfComponents() {
   const handleCoreBuy = useCallback(() => {
     const selected = watchlistItems.filter(e => coreCheckedCodes.has(e.code));
     if (selected.length === 0) return;
-    navigate(`/trading?code=${encodeURIComponent(selected[0].code)}&name=${encodeURIComponent(selected[0].name)}`);
-  }, [coreCheckedCodes, watchlistItems, navigate]);
+    window.open(`https://lifefit2.vercel.app/trading?code=${encodeURIComponent(selected[0].code)}&name=${encodeURIComponent(selected[0].name)}`, "_blank", "noopener,noreferrer");
+  }, [coreCheckedCodes, watchlistItems]);
 
   const handleSatBuy = useCallback(() => {
     const selected = satelliteItems.filter(e => satCheckedCodes.has(e.code));
     if (selected.length === 0) return;
-    navigate(`/trading?code=${encodeURIComponent(selected[0].code)}&name=${encodeURIComponent(selected[0].name)}`);
-  }, [satCheckedCodes, satelliteItems, navigate]);
+    window.open(`https://lifefit2.vercel.app/trading?code=${encodeURIComponent(selected[0].code)}&name=${encodeURIComponent(selected[0].name)}`, "_blank", "noopener,noreferrer");
+  }, [satCheckedCodes, satelliteItems]);
 
   // 카페 전송 핸들러
   const handleCafePost = () => {
@@ -1207,7 +1207,7 @@ export default function EtfComponents() {
                 size="sm"
                 className="gap-1.5 h-8 bg-amber-500 hover:bg-amber-600 text-white"
                 onClick={() => {
-                  navigate(`/trading?code=${encodeURIComponent(selectedEtfCode)}&name=${encodeURIComponent(componentData.etfName || selectedEtfCode)}`);
+                  window.open(`https://lifefit2.vercel.app/trading?code=${encodeURIComponent(selectedEtfCode)}&name=${encodeURIComponent(componentData.etfName || selectedEtfCode)}`, "_blank", "noopener,noreferrer");
                 }}
               >
                 <Zap className="w-3.5 h-3.5" />
