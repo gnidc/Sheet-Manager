@@ -24,7 +24,7 @@ import {
   TrendingUp, Settings, Play, Pause, RefreshCw, Loader2,
   Target, ArrowUpRight, ArrowDownRight, Activity, AlertTriangle,
   Clock, Search, Zap, XCircle, CheckCircle2, BarChart3,
-  ChevronDown, ChevronUp, Layers, Gauge, ShieldCheck,
+  ChevronDown, ChevronUp, Layers, Gauge, ShieldCheck, ShoppingCart,
 } from "lucide-react";
 
 // ========== Types ==========
@@ -474,19 +474,27 @@ function LogList({ logs }: { logs: MFLog[] }) {
 }
 
 // ========== 종목 스코어 조회 ==========
-function StockScoreChecker() {
+function StockScoreChecker({ initialCode, initialName }: { initialCode?: string; initialName?: string }) {
   const { toast } = useToast();
-  const [stockCode, setStockCode] = useState("");
+  const [stockCode, setStockCode] = useState(initialCode || "");
   const [scoreResult, setScoreResult] = useState<any>(null);
+  const [autoChecked, setAutoChecked] = useState(false);
 
   const scoreMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/trading/multi-factor/score", { stockCode, stockName: "" });
+      const res = await apiRequest("POST", "/api/trading/multi-factor/score", { stockCode, stockName: initialName || "" });
       return res.json();
     },
     onSuccess: (data) => setScoreResult(data),
     onError: (error: any) => toast({ title: "조회 실패", description: error.message, variant: "destructive" }),
   });
+
+  React.useEffect(() => {
+    if (initialCode && !autoChecked) {
+      setAutoChecked(true);
+      scoreMutation.mutate();
+    }
+  }, [initialCode, autoChecked]);
 
   return (
     <Card>
@@ -494,6 +502,7 @@ function StockScoreChecker() {
         <CardTitle className="text-base flex items-center gap-2">
           <Gauge className="h-4 w-4 text-purple-500" />
           종목 스코어 조회
+          {initialName && <span className="text-xs font-normal text-muted-foreground ml-1">— {initialName}</span>}
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -546,7 +555,7 @@ function StockScoreChecker() {
 }
 
 // ========== 메인 패널 ==========
-export default function MultiFactorPanel() {
+export default function MultiFactorPanel({ initialCode, initialName }: { initialCode?: string; initialName?: string }) {
   const { toast } = useToast();
   const [closingPosId, setClosingPosId] = useState<number | null>(null);
   const [executingPhase, setExecutingPhase] = useState<string | null>(null);
@@ -658,6 +667,14 @@ export default function MultiFactorPanel() {
 
   return (
     <div className="space-y-6">
+      {initialCode && (
+        <div className="flex items-center gap-2 p-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg">
+          <ShoppingCart className="h-4 w-4 text-blue-500 flex-shrink-0" />
+          <span className="text-sm">
+            <strong>{initialName || initialCode}</strong> ({initialCode}) 종목이 선택되었습니다. 아래 스코어 조회 결과를 확인하세요.
+          </span>
+        </div>
+      )}
       {/* 상단 전략 상태 & 제어 */}
       <Card>
         <CardHeader className="pb-3">
@@ -757,7 +774,7 @@ export default function MultiFactorPanel() {
       />
 
       {/* 종목 스코어 조회 */}
-      <StockScoreChecker />
+      <StockScoreChecker initialCode={initialCode} initialName={initialName} />
 
       {/* 활성 포지션 */}
       <Card>

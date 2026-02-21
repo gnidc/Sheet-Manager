@@ -184,8 +184,8 @@ export default function Trading() {
   const urlCode = urlParams.get("code") || "";
   const urlName = urlParams.get("name") || "";
 
-  // 탭 제어 상태
-  const [activeTab, setActiveTab] = useState(urlCode ? "order" : "account");
+  // 탭 제어 상태 - 종목 코드가 있으면 표준스킬(신규시스템) 탭으로 이동
+  const [activeTab, setActiveTab] = useState(urlCode ? "skills" : "account");
   // 계좌현황에서 주문탭으로 넘기는 종목/주문유형/보유수량/현재가 정보
   const [orderTarget, setOrderTarget] = useState<{ code: string; name: string; orderType: "buy" | "sell"; holdingQty?: number; currentPrice?: number } | null>(null);
 
@@ -340,7 +340,7 @@ export default function Trading() {
               <AutoTradeSection />
             </TabsContent>
             <TabsContent value="skills">
-              <SkillsSection />
+              <SkillsSection initialCode={urlCode} initialName={urlName} />
             </TabsContent>
             <TabsContent value="manual-skills">
               <ManualSkillsSection />
@@ -2468,13 +2468,13 @@ const STATUS_LABELS: Record<string, { label: string; variant: "default" | "secon
   error: { label: "오류", variant: "destructive" },
 };
 
-function SkillsSection() {
+function SkillsSection({ initialCode, initialName }: { initialCode?: string; initialName?: string }) {
   const { toast } = useToast();
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [checkingAll, setCheckingAll] = useState(false);
   const [expandedInstance, setExpandedInstance] = useState<number | null>(null);
-  const [strategyView, setStrategyView] = useState<"registry" | "gap-strategy" | "multi-factor">("registry");
+  const [strategyView, setStrategyView] = useState<"registry" | "gap-strategy" | "multi-factor">(initialCode ? "multi-factor" : "registry");
 
   const { data: skills = [] } = useQuery<TradingSkillDef[]>({
     queryKey: ["/api/trading/skills"],
@@ -2596,7 +2596,7 @@ function SkillsSection() {
             <span>🧠</span> 멀티팩터 전략
           </Button>
         </div>
-        <MultiFactorPanel />
+        <MultiFactorPanel initialCode={initialCode} initialName={initialName} />
       </div>
     );
   }
