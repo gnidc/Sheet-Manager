@@ -308,11 +308,13 @@ export default function Trading() {
               </TabsTrigger>
               <TabsTrigger value="auto" className="gap-1 text-xs sm:text-sm">
                 <Zap className="h-4 w-4" />
-                자동매매
+                <span className="hidden sm:inline">자동매매(조회용)</span>
+                <span className="sm:hidden">조회용</span>
               </TabsTrigger>
               <TabsTrigger value="skills" className="gap-1 text-xs sm:text-sm">
                 <Sparkles className="h-4 w-4" />
-                표준스킬
+                <span className="hidden sm:inline">자동매매(A)</span>
+                <span className="sm:hidden">Active</span>
               </TabsTrigger>
               <TabsTrigger value="manual-skills" className="gap-1 text-xs sm:text-sm">
                 <Rocket className="h-4 w-4" />
@@ -2151,7 +2153,7 @@ function AutoTradeSection() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold">자동매매 규칙</h2>
+        <h2 className="text-lg font-bold">자동매매 규칙 <span className="text-sm font-normal text-muted-foreground">(조회용 · 구시스템)</span></h2>
         <div className="flex gap-2">
           <Button
             variant="outline"
@@ -2622,7 +2624,7 @@ function SkillsSection({ initialCode, initialName }: { initialCode?: string; ini
             <div>
               <CardTitle className="flex items-center gap-2 text-lg">
                 <Sparkles className="w-5 h-5 text-purple-500" />
-                스킬 레지스트리
+                스킬 레지스트리 <span className="text-sm font-normal text-muted-foreground">(Active · 신시스템)</span>
               </CardTitle>
               <CardDescription className="mt-1">
                 기술적 분석 기반 매매 스킬을 등록하고, 조건 충족 시 자동으로 주문을 실행합니다
@@ -2880,7 +2882,7 @@ function ManualSkillsSection() {
             <div>
               <CardTitle className="flex items-center gap-2 text-lg">
                 <Rocket className="w-5 h-5 text-orange-500" />
-                수동스킬
+                수동스킬 <span className="text-sm font-normal text-muted-foreground">(조회용 · 구시스템)</span>
               </CardTitle>
               <CardDescription className="mt-1">
                 사용자가 직접 설정하고 수동으로 실행하는 전략 스킬셋입니다
