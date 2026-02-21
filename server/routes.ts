@@ -9676,49 +9676,152 @@ ${etfListStr}
         }
       }
 
-      // 3) 시장 데이터 수집 (주식 + 채권 + 환율 + 크립토 + 원자재)
-      const [indices, volumeRanking, news, bondsRaw, forexRaw, cryptoRaw, commoditiesRaw] = await Promise.all([
+      // 3) 시장 데이터 수집 (대폭 확장: 글로벌 지수, 투자자동향, 채권, 환율, 크립토, 원자재, ETF, 경제캘린더)
+      const yahooChart = async (symbol: string, range = "5d") => {
+        try {
+          const r = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`, {
+            params: { range, interval: "1d" }, headers: { "User-Agent": UA }, timeout: 8000,
+          });
+          const res0 = r.data?.chart?.result?.[0];
+          const meta = res0?.meta;
+          const closes = res0?.indicators?.quote?.[0]?.close?.filter((v: any) => v != null) || [];
+          const opens = res0?.indicators?.quote?.[0]?.open?.filter((v: any) => v != null) || [];
+          const last = meta?.regularMarketPrice || closes[closes.length - 1] || 0;
+          const weekOpen = opens[0] || closes[0] || last;
+          const prev = closes.length >= 2 ? closes[closes.length - 2] : last;
+          return { last, weekOpen, prev, closes, currency: meta?.currency || "USD" };
+        } catch { return null; }
+      };
+
+      const [
+        indices, volumeRanking, news,
+        globalIndicesRaw, investorTrendsRaw,
+        bondsRaw, krBondsRaw, forexRaw,
+        cryptoRaw, commoditiesRaw,
+        etfTopRaw, etfUsTopRaw, econCalendarRaw,
+      ] = await Promise.all([
         kisApi.getMarketIndices().catch(() => []),
         kisApi.getVolumeRanking().catch(() => []),
+        // === 뉴스 (15건) ===
         (async () => {
           try {
             const newsRes = await axios.get("https://finance.naver.com/news/mainnews.naver", {
-              headers: { "User-Agent": "Mozilla/5.0" }, timeout: 5000,
+              headers: { "User-Agent": UA }, timeout: 5000,
             });
             const $ = cheerio.load(newsRes.data);
             const items: string[] = [];
             $(".mainNewsList li, .news_list li").each((i, el) => {
-              if (i >= 10) return false;
+              if (i >= 15) return false;
               const title = $(el).find("a").first().text().trim();
               if (title) items.push(title);
             });
             return items;
           } catch { return []; }
         })(),
-        // === 채권/금리 ===
+        // === 글로벌 지수 주간 등락률 (Yahoo Finance) ===
+        (async () => {
+          const syms = [
+            { symbol: "^GSPC", name: "S&P 500" }, { symbol: "^IXIC", name: "나스닥 종합" },
+            { symbol: "^DJI", name: "다우존스" }, { symbol: "^STOXX50E", name: "유로스톡스50" },
+            { symbol: "^GDAXI", name: "DAX" }, { symbol: "^FTSE", name: "FTSE 100" },
+            { symbol: "^N225", name: "닛케이 225" }, { symbol: "^HSI", name: "항셍" },
+            { symbol: "000001.SS", name: "상해종합" },
+          ];
+          const results: any[] = [];
+          for (const s of syms) {
+            const d = await yahooChart(s.symbol);
+            if (d && d.last > 0) {
+              const weekChange = d.weekOpen > 0 ? +((d.last - d.weekOpen) / d.weekOpen * 100).toFixed(2) : 0;
+              const dayChange = d.prev > 0 ? +((d.last - d.prev) / d.prev * 100).toFixed(2) : 0;
+              results.push({ name: s.name, price: d.last, weekChange, dayChange });
+            }
+          }
+          return results;
+        })(),
+        // === 외국인/기관 순매수 동향 (네이버) ===
         (async () => {
           try {
-            const bonds: any[] = [];
-            // 국제 금리 (Yahoo Finance)
-            const ySymbols = [
-              { symbol: "^TNX", name: "미국 국채 10년" },
-              { symbol: "^FVX", name: "미국 국채 5년" },
-              { symbol: "^TYX", name: "미국 국채 30년" },
-              { symbol: "^IRX", name: "미국 T-Bill 13주" },
-            ];
-            for (const s of ySymbols) {
+            const trends: any[] = [];
+            for (const market of ["kospi", "kosdaq"]) {
               try {
-                const r = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${s.symbol}`, {
-                  params: { range: "5d", interval: "1d" }, headers: { "User-Agent": UA }, timeout: 8000,
+                const r = await axios.get(`https://finance.naver.com/sise/investorDealTrendDay.naver`, {
+                  params: { bizdate: "", sosession: market === "kospi" ? "01" : "02" },
+                  headers: { "User-Agent": UA }, timeout: 8000, responseType: "arraybuffer",
                 });
-                const meta = r.data?.chart?.result?.[0]?.meta;
-                const closes = r.data?.chart?.result?.[0]?.indicators?.quote?.[0]?.close || [];
-                const last = meta?.regularMarketPrice || closes[closes.length - 1] || 0;
-                const prev = closes.length >= 2 ? closes[closes.length - 2] : last;
-                bonds.push({ name: s.name, value: last, change: +(last - prev).toFixed(3), changeRate: prev ? +((last - prev) / prev * 100).toFixed(2) : 0 });
+                const iconv = await import("iconv-lite");
+                const html = iconv.default.decode(Buffer.from(r.data), "euc-kr");
+                const $ = cheerio.load(html);
+                let foreign = 0, inst = 0, retail = 0, count = 0;
+                $("table.type2 tr").each((_i, el) => {
+                  const tds = $(el).find("td");
+                  if (tds.length >= 5 && count < 5) {
+                    const f = parseFloat($(tds[1]).text().replace(/,/g, "")) || 0;
+                    const ins = parseFloat($(tds[2]).text().replace(/,/g, "")) || 0;
+                    const ret = parseFloat($(tds[3]).text().replace(/,/g, "")) || 0;
+                    foreign += f; inst += ins; retail += ret; count++;
+                  }
+                });
+                if (count > 0) trends.push({ market: market === "kospi" ? "코스피" : "코스닥", foreign, institution: inst, retail, days: count });
               } catch {}
             }
-            return bonds;
+            return trends;
+          } catch { return []; }
+        })(),
+        // === 채권/금리 (미국) ===
+        (async () => {
+          const syms = [
+            { symbol: "^IRX", name: "미국 T-Bill 3개월" },
+            { symbol: "^FVX", name: "미국 국채 2년" },
+            { symbol: "^TNX", name: "미국 국채 10년" },
+            { symbol: "^TYX", name: "미국 국채 30년" },
+          ];
+          const bonds: any[] = [];
+          for (const s of syms) {
+            const d = await yahooChart(s.symbol);
+            if (d && d.last > 0) {
+              const weekChange = d.weekOpen > 0 ? +(d.last - d.weekOpen).toFixed(3) : 0;
+              bonds.push({ name: s.name, value: d.last, weekChange, dayChange: +(d.last - d.prev).toFixed(3) });
+            }
+          }
+          // 장단기 스프레드
+          const y10 = bonds.find(b => b.name.includes("10년"));
+          const y2 = bonds.find(b => b.name.includes("2년"));
+          if (y10 && y2) bonds.push({ name: "미국 10Y-2Y 스프레드", value: +(y10.value - y2.value).toFixed(3), weekChange: 0, dayChange: 0 });
+          return bonds;
+        })(),
+        // === 한국 국고채 (네이버) ===
+        (async () => {
+          try {
+            const r = await axios.get("https://finance.naver.com/marketindex/interestDailyQuote.naver?marketindexCd=IRR_GOVT03Y", {
+              headers: { "User-Agent": UA }, timeout: 5000, responseType: "arraybuffer",
+            });
+            const iconv = await import("iconv-lite");
+            const html = iconv.default.decode(Buffer.from(r.data), "euc-kr");
+            const $ = cheerio.load(html);
+            const krBonds: any[] = [];
+            const rows = $("table.tbl_exchange tbody tr");
+            if (rows.length > 0) {
+              const firstVal = parseFloat($(rows[0]).find("td").first().text().replace(/,/g, "")) || 0;
+              if (firstVal > 0) krBonds.push({ name: "한국 국고채 3년", value: firstVal });
+            }
+            // 10년물도 시도
+            try {
+              const r10 = await axios.get("https://finance.naver.com/marketindex/interestDailyQuote.naver?marketindexCd=IRR_GOVT10Y", {
+                headers: { "User-Agent": UA }, timeout: 5000, responseType: "arraybuffer",
+              });
+              const html10 = iconv.default.decode(Buffer.from(r10.data), "euc-kr");
+              const $10 = cheerio.load(html10);
+              const rows10 = $10("table.tbl_exchange tbody tr");
+              if (rows10.length > 0) {
+                const val10 = parseFloat($10(rows10[0]).find("td").first().text().replace(/,/g, "")) || 0;
+                if (val10 > 0) krBonds.push({ name: "한국 국고채 10년", value: val10 });
+              }
+            } catch {}
+            // 장단기 스프레드
+            const kr3 = krBonds.find(b => b.name.includes("3년"));
+            const kr10 = krBonds.find(b => b.name.includes("10년"));
+            if (kr3 && kr10) krBonds.push({ name: "한국 10Y-3Y 스프레드", value: +(kr10.value - kr3.value).toFixed(3) });
+            return krBonds;
           } catch { return []; }
         })(),
         // === 환율 ===
@@ -9739,24 +9842,29 @@ ${etfListStr}
               const isDown = $fx(el).find(".down, .fall").length > 0;
               if (value > 0) rates.push({ name, value, change: isDown ? -change : change });
             });
+            // 주요 환율 추가 (Yahoo)
+            for (const fx of [{ symbol: "EURUSD=X", name: "EUR/USD" }, { symbol: "USDJPY=X", name: "USD/JPY" }, { symbol: "USDCNY=X", name: "USD/CNY" }]) {
+              const d = await yahooChart(fx.symbol);
+              if (d && d.last > 0) {
+                const wk = d.weekOpen > 0 ? +((d.last - d.weekOpen) / d.weekOpen * 100).toFixed(2) : 0;
+                rates.push({ name: fx.name, value: +d.last.toFixed(4), change: wk, isWeekPct: true });
+              }
+            }
             return rates;
           } catch { return []; }
         })(),
-        // === 크립토 ===
+        // === 크립토 (김치프리미엄 포함) ===
         (async () => {
           try {
             const cgRes = await axios.get("https://api.coingecko.com/api/v3/coins/markets", {
-              params: { vs_currency: "usd", order: "market_cap_desc", per_page: 10, page: 1, sparkline: false },
+              params: { vs_currency: "usd", order: "market_cap_desc", per_page: 10, page: 1, sparkline: false, price_change_percentage: "24h,7d,30d" },
               headers: { "User-Agent": UA }, timeout: 10000,
             });
-            // 업비트 김치프리미엄 조회
             let upbitPrices: Record<string, number> = {};
             let usdKrw = 1440;
             try {
               const iconv = await import("iconv-lite");
-              const fxRes = await axios.get("https://finance.naver.com/marketindex/", {
-                headers: { "User-Agent": UA }, timeout: 5000, responseType: "arraybuffer",
-              });
+              const fxRes = await axios.get("https://finance.naver.com/marketindex/", { headers: { "User-Agent": UA }, timeout: 5000, responseType: "arraybuffer" });
               const fxHtml = iconv.default.decode(Buffer.from(fxRes.data), "euc-kr");
               const $fx = cheerio.load(fxHtml);
               $fx(".market_data .data_lst li").each((_i, el) => {
@@ -9768,96 +9876,252 @@ ${etfListStr}
               });
             } catch {}
             try {
-              const upbitRes = await axios.get("https://api.upbit.com/v1/ticker", {
-                params: { markets: "KRW-BTC,KRW-ETH,KRW-XRP,KRW-USDT,KRW-USDC" },
-                timeout: 5000,
-              });
-              for (const t of upbitRes.data) {
-                const sym = t.market.replace("KRW-", "");
-                upbitPrices[sym] = t.trade_price;
-              }
+              const upbitRes = await axios.get("https://api.upbit.com/v1/ticker", { params: { markets: "KRW-BTC,KRW-ETH,KRW-XRP,KRW-SOL,KRW-USDT" }, timeout: 5000 });
+              for (const t of upbitRes.data) upbitPrices[t.market.replace("KRW-", "")] = t.trade_price;
             } catch {}
             return (cgRes.data || []).map((c: any) => {
               const sym = c.symbol?.toUpperCase();
               const globalKrw = c.current_price * usdKrw;
               const kimchi = upbitPrices[sym] && globalKrw > 0 ? ((upbitPrices[sym] - globalKrw) / globalKrw * 100) : null;
               return {
-                symbol: sym, name: c.name,
-                priceUsd: c.current_price,
+                symbol: sym, name: c.name, priceUsd: c.current_price,
                 change24h: c.price_change_percentage_24h,
                 change7d: c.price_change_percentage_7d_in_currency,
+                change30d: c.price_change_percentage_30d_in_currency,
+                marketCap: c.market_cap, volume24h: c.total_volume,
                 kimchiPremium: kimchi ? +kimchi.toFixed(2) : null,
               };
             });
           } catch { return []; }
         })(),
-        // === 원자재 ===
+        // === 원자재 (주간 등락률 포함) ===
+        (async () => {
+          const syms = [
+            { symbol: "GC=F", name: "금(Gold)" }, { symbol: "SI=F", name: "은(Silver)" },
+            { symbol: "CL=F", name: "WTI 원유" }, { symbol: "NG=F", name: "천연가스" }, { symbol: "HG=F", name: "구리" },
+          ];
+          const items: any[] = [];
+          for (const s of syms) {
+            const d = await yahooChart(s.symbol);
+            if (d && d.last > 0) {
+              const weekPct = d.weekOpen > 0 ? +((d.last - d.weekOpen) / d.weekOpen * 100).toFixed(2) : 0;
+              const dayPct = d.prev > 0 ? +((d.last - d.prev) / d.prev * 100).toFixed(2) : 0;
+              items.push({ name: s.name, value: d.last, weekChange: weekPct, dayChange: dayPct, currency: d.currency });
+            }
+          }
+          return items;
+        })(),
+        // === 국내 ETF 등락률 TOP (네이버) ===
         (async () => {
           try {
-            const ySymbols = [
-              { symbol: "GC=F", name: "금(Gold)" },
-              { symbol: "SI=F", name: "은(Silver)" },
-              { symbol: "CL=F", name: "WTI 원유" },
-              { symbol: "NG=F", name: "천연가스" },
-              { symbol: "HG=F", name: "구리" },
-            ];
-            const items: any[] = [];
-            for (const s of ySymbols) {
+            const etfs: { risers: any[]; fallers: any[] } = { risers: [], fallers: [] };
+            for (const type of ["up", "down"]) {
               try {
-                const r = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${s.symbol}`, {
-                  params: { range: "5d", interval: "1d" }, headers: { "User-Agent": UA }, timeout: 8000,
+                const r = await axios.get(`https://finance.naver.com/api/sise/etfItemList.nhn`, {
+                  params: { sosokCd: "ETF", sort: "changeRate", order: type === "up" ? "desc" : "asc", pageSize: 5, page: 1 },
+                  headers: { "User-Agent": UA }, timeout: 8000,
                 });
-                const meta = r.data?.chart?.result?.[0]?.meta;
-                const closes = r.data?.chart?.result?.[0]?.indicators?.quote?.[0]?.close || [];
-                const last = meta?.regularMarketPrice || closes[closes.length - 1] || 0;
-                const prev = closes.length >= 2 ? closes[closes.length - 2] : last;
-                items.push({
-                  name: s.name, value: last,
-                  change: +(last - prev).toFixed(2),
-                  changeRate: prev ? +((last - prev) / prev * 100).toFixed(2) : 0,
-                  currency: meta?.currency || "USD",
-                });
+                const list = r.data?.result?.etfItemList || [];
+                for (const e of list.slice(0, 5)) {
+                  const item = { name: e.itemname || e.etfTabCode, code: e.itemcode, price: e.nowVal, changeRate: e.changeRate };
+                  if (type === "up") etfs.risers.push(item); else etfs.fallers.push(item);
+                }
               } catch {}
             }
+            return etfs;
+          } catch { return { risers: [], fallers: [] }; }
+        })(),
+        // === 해외 ETF 주간 등락 (Yahoo) ===
+        (async () => {
+          const syms = [
+            { symbol: "SPY", name: "SPY (S&P500)" }, { symbol: "QQQ", name: "QQQ (나스닥100)" },
+            { symbol: "IWM", name: "IWM (러셀2000)" }, { symbol: "EEM", name: "EEM (신흥국)" },
+            { symbol: "XLK", name: "XLK (기술)" }, { symbol: "XLF", name: "XLF (금융)" },
+            { symbol: "XLE", name: "XLE (에너지)" }, { symbol: "ARKK", name: "ARKK (혁신)" },
+            { symbol: "GLD", name: "GLD (금)" }, { symbol: "TLT", name: "TLT (미국채20Y+)" },
+          ];
+          const results: any[] = [];
+          for (const s of syms) {
+            const d = await yahooChart(s.symbol);
+            if (d && d.last > 0) {
+              const weekPct = d.weekOpen > 0 ? +((d.last - d.weekOpen) / d.weekOpen * 100).toFixed(2) : 0;
+              results.push({ name: s.name, price: d.last, weekChange: weekPct });
+            }
+          }
+          results.sort((a, b) => b.weekChange - a.weekChange);
+          return results;
+        })(),
+        // === 경제 캘린더 (Investing.com 대체: 주요 이벤트 텍스트) ===
+        (async () => {
+          try {
+            const r = await axios.get("https://finance.naver.com/news/mainnews.naver?&page=2", {
+              headers: { "User-Agent": UA }, timeout: 5000,
+            });
+            const $ = cheerio.load(r.data);
+            const items: string[] = [];
+            $(".mainNewsList li, .news_list li").each((i, el) => {
+              if (i >= 5) return false;
+              const t = $(el).find("a").first().text().trim();
+              if (t) items.push(t);
+            });
             return items;
           } catch { return []; }
         })(),
       ]);
 
+      // ===== 컨텍스트 생성 =====
       const today = new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric", weekday: "long" });
+
+      // 국내 시장
       const marketContext = indices.length > 0
         ? indices.map((idx: any) => `${idx.name}: ${parseFloat(idx.price).toLocaleString()} (${["1","2"].includes(idx.changeSign) ? "+" : idx.changeSign === "3" ? "" : "-"}${Math.abs(parseFloat(idx.changePercent)).toFixed(2)}%)`).join(", ")
         : "시장 데이터 미수집";
       
+      // 글로벌 지수 주간 등락률
+      const globalContext = (globalIndicesRaw as any[]).length > 0
+        ? (globalIndicesRaw as any[]).map((g: any) => `${g.name}: ${g.price?.toLocaleString(undefined, {maximumFractionDigits:2})} (주간: ${g.weekChange > 0 ? "+" : ""}${g.weekChange}%, 전일: ${g.dayChange > 0 ? "+" : ""}${g.dayChange}%)`).join("\n")
+        : "데이터 없음";
+
+      // 외국인/기관 순매수
+      const investorContext = (investorTrendsRaw as any[]).length > 0
+        ? (investorTrendsRaw as any[]).map((t: any) => `${t.market} (최근 ${t.days}일 누적): 외국인 ${t.foreign > 0 ? "+" : ""}${t.foreign.toLocaleString()}억, 기관 ${t.institution > 0 ? "+" : ""}${t.institution.toLocaleString()}억, 개인 ${t.retail > 0 ? "+" : ""}${t.retail.toLocaleString()}억`).join("\n")
+        : "데이터 없음";
+
       const volumeContext = volumeRanking.length > 0
-        ? volumeRanking.slice(0, 5).map((v: any, i: number) => `${i+1}. ${v.stockName}(${v.stockCode}) ${parseInt(v.price).toLocaleString()}원 ${["1","2"].includes(v.changeSign) ? "+" : v.changeSign === "3" ? "" : "-"}${Math.abs(parseFloat(v.changePercent)).toFixed(2)}%`).join("\n")
+        ? volumeRanking.slice(0, 10).map((v: any, i: number) => `${i+1}. ${v.stockName}(${v.stockCode}) ${parseInt(v.price).toLocaleString()}원 ${["1","2"].includes(v.changeSign) ? "+" : v.changeSign === "3" ? "" : "-"}${Math.abs(parseFloat(v.changePercent)).toFixed(2)}%`).join("\n")
         : "데이터 없음";
 
       const newsContext = news.length > 0
         ? news.map((n: string, i: number) => `${i+1}. ${n}`).join("\n")
         : "뉴스 없음";
 
-      // ETC 마켓 컨텍스트 생성
-      const bondsContext = (bondsRaw as any[]).length > 0
-        ? (bondsRaw as any[]).map((b: any) => `${b.name}: ${b.value?.toFixed(3)}% (${b.change > 0 ? "+" : ""}${b.change}%p, ${b.changeRate > 0 ? "+" : ""}${b.changeRate}%)`).join(", ")
+      // 채권/금리 (미국 + 한국 + 스프레드)
+      const usBondsCtx = (bondsRaw as any[]).length > 0
+        ? (bondsRaw as any[]).map((b: any) => `${b.name}: ${b.value?.toFixed(3)}% (주간: ${b.weekChange > 0 ? "+" : ""}${b.weekChange}%p, 전일: ${b.dayChange > 0 ? "+" : ""}${b.dayChange}%p)`).join("\n")
         : "데이터 없음";
+      const krBondsCtx = (krBondsRaw as any[]).length > 0
+        ? (krBondsRaw as any[]).map((b: any) => `${b.name}: ${b.value?.toFixed(3)}%`).join(", ")
+        : "데이터 없음";
+      // 한미 금리차
+      const us10 = (bondsRaw as any[]).find((b: any) => b.name.includes("10년") && !b.name.includes("스프레드"));
+      const kr10 = (krBondsRaw as any[]).find((b: any) => b.name.includes("10년") && !b.name.includes("스프레드"));
+      const rateGapCtx = us10 && kr10 ? `한미 10년 금리차: ${(us10.value - kr10.value).toFixed(3)}%p (미국 ${us10.value.toFixed(3)}% - 한국 ${kr10.value.toFixed(3)}%)` : "";
 
       const forexContext = (forexRaw as any[]).length > 0
-        ? (forexRaw as any[]).map((r: any) => `${r.name}: ${r.value?.toLocaleString()} (${r.change > 0 ? "+" : ""}${r.change})`).join(", ")
+        ? (forexRaw as any[]).map((r: any) => r.isWeekPct ? `${r.name}: ${r.value} (주간: ${r.change > 0 ? "+" : ""}${r.change}%)` : `${r.name}: ${r.value?.toLocaleString()} (${r.change > 0 ? "+" : ""}${r.change})`).join("\n")
         : "데이터 없음";
 
       const cryptoContext = (cryptoRaw as any[]).length > 0
-        ? (cryptoRaw as any[]).map((c: any) => `${c.symbol}: $${c.priceUsd?.toLocaleString()} (24h: ${c.change24h > 0 ? "+" : ""}${c.change24h?.toFixed(1)}%, 7d: ${c.change7d != null ? (c.change7d > 0 ? "+" : "") + c.change7d?.toFixed(1) + "%" : "N/A"}${c.kimchiPremium != null ? `, 김프: ${c.kimchiPremium > 0 ? "+" : ""}${c.kimchiPremium}%` : ""})`).join("\n")
+        ? (cryptoRaw as any[]).map((c: any) => `${c.symbol}: $${c.priceUsd?.toLocaleString()} (24h: ${c.change24h > 0 ? "+" : ""}${c.change24h?.toFixed(1)}%, 7d: ${c.change7d != null ? (c.change7d > 0 ? "+" : "") + c.change7d?.toFixed(1) + "%" : "N/A"}, 30d: ${c.change30d != null ? (c.change30d > 0 ? "+" : "") + c.change30d?.toFixed(1) + "%" : "N/A"}${c.kimchiPremium != null ? `, 김프: ${c.kimchiPremium > 0 ? "+" : ""}${c.kimchiPremium}%` : ""}, 시총: $${c.marketCap ? (c.marketCap / 1e9).toFixed(1) + "B" : "N/A"})`).join("\n")
         : "데이터 없음";
 
       const commoditiesContext = (commoditiesRaw as any[]).length > 0
-        ? (commoditiesRaw as any[]).map((c: any) => `${c.name}: $${c.value?.toLocaleString()} (${c.changeRate > 0 ? "+" : ""}${c.changeRate}%)`).join(", ")
+        ? (commoditiesRaw as any[]).map((c: any) => `${c.name}: $${c.value?.toLocaleString()} (주간: ${c.weekChange > 0 ? "+" : ""}${c.weekChange}%, 전일: ${c.dayChange > 0 ? "+" : ""}${c.dayChange}%)`).join("\n")
         : "데이터 없음";
 
-      // 4) 최종 프롬프트 구성
-      const systemRole = `당신은 글로벌 금융시장 전문 애널리스트입니다. 제공된 모든 데이터(주식 시장, 채권/금리, 환율, 크립토, 원자재, 첨부 URL, 첨부 파일)를 종합적으로 분석하여 상세한 한국어 보고서를 작성해주세요. 반드시 50줄 이상으로 작성하세요.`;
+      // ETF TOP
+      const etfTop = etfTopRaw as { risers: any[]; fallers: any[] };
+      const etfKrCtx = [
+        etfTop.risers.length > 0 ? "▲ 상승 TOP 5:\n" + etfTop.risers.map((e: any, i: number) => `${i+1}. ${e.name}(${e.code}) ${e.changeRate > 0 ? "+" : ""}${e.changeRate}%`).join("\n") : "",
+        etfTop.fallers.length > 0 ? "▼ 하락 TOP 5:\n" + etfTop.fallers.map((e: any, i: number) => `${i+1}. ${e.name}(${e.code}) ${e.changeRate}%`).join("\n") : "",
+      ].filter(Boolean).join("\n") || "데이터 없음";
 
-      let dataSection = `[자동 수집 데이터]\n📅 날짜: ${today}\n📊 주식 시장 현황: ${marketContext}\n\n🔥 거래량 상위 종목:\n${volumeContext}\n\n📰 주요 뉴스:\n${newsContext}\n\n🏛️ 채권/금리: ${bondsContext}\n\n💱 환율: ${forexContext}\n\n₿ 크립토 (TOP 10):\n${cryptoContext}\n\n🪙 원자재: ${commoditiesContext}`;
+      const etfUsCtx = (etfUsTopRaw as any[]).length > 0
+        ? (etfUsTopRaw as any[]).map((e: any, i: number) => `${i+1}. ${e.name}: $${e.price?.toFixed(2)} (주간: ${e.weekChange > 0 ? "+" : ""}${e.weekChange}%)`).join("\n")
+        : "데이터 없음";
+
+      // 4) 최종 프롬프트 구성 (주간 분석 요청 시 구조화된 섹션 지시 추가)
+      const isWeeklyAnalysis = /주간|weekly|위클리|금주|이번\s*주/i.test(prompt);
+      const baseSystemRole = `당신은 글로벌 금융시장 전문 수석 애널리스트입니다. 제공된 실시간 수집 데이터를 최대한 활용하여 구체적인 수치와 근거가 포함된 상세한 한국어 분석 보고서를 작성하세요. 데이터에 없는 내용은 "데이터 미수집"으로 명시하고, 추정 시 반드시 "추정" 표시를 하세요.`;
+
+      const weeklyStructureGuide = `
+보고서는 반드시 아래 8개 섹션 구조를 따르되, 각 섹션마다 수집된 데이터의 구체적 수치를 인용하고, 해석과 시사점을 함께 서술하세요. 최소 120줄 이상 상세히 작성하세요.
+
+## 📊 1. 글로벌 매크로 주간 요약
+- 미국(S&P500, 나스닥, 다우) 및 유럽(DAX, FTSE), 아시아(닛케이, 항셍, 상해) 지수의 주간 등락률과 핵심 원인
+- 코스피/코스닥 주간 성과 및 외국인·기관·개인 투자자 매매동향 해석
+- 주요 경제지표(CPI, 고용, PMI, GDP 등) 발표 내용과 시장 반응
+
+## 💱 2. 환율·금리 동향
+- USD/KRW, EUR/USD, USD/JPY, USD/CNY 주간 변동 및 핵심 요인
+- 미국 국채(2년/10년/30년) 금리 변화와 장단기 스프레드 추이 해석
+- 한국 국고채(3년/10년) 금리 및 한미 금리차 시사점
+
+## ₿ 3. 크립토 주간 동향
+- BTC/ETH 주간 등락률, 30일 추세, 시가총액 변화
+- 주요 이벤트(ETF 자금흐름, 규제, 온체인 지표 등)
+- 알트코인 동향, 김치프리미엄 수준 및 의미
+
+## 🪙 4. 실물자산(원자재) 동향
+- 금/은 주간 등락률 및 안전자산 수요 분석
+- WTI 원유 동향 및 OPEC+ 이슈
+- 구리, 천연가스 등 산업용 원자재 흐름과 경기 신호
+
+## 📈 5. 주간 핵심 테마 & 섹터 분석
+- 금주 주목할 투자 테마 TOP 3 (뉴스 및 ETF 흐름 기반)
+- 국내 ETF 상승/하락 TOP 5 분석
+- 해외 주요 ETF 주간 등락률 기반 섹터 로테이션 분석
+
+## 🎙️ 6. 주요 인플루언서 & 기관 발언 요약
+- Fed 관계자 발언 요약 (비둘기파/매파 기조)
+- 월가 주요 IB 투자전략 변화
+- 국내 증권사 리서치 핵심 의견
+(수집 데이터에 없는 경우 "데이터 미수집 - 별도 확인 필요" 명시)
+
+## ⚠️ 7. 리스크 요인 & 주목 이벤트
+- 현재 지정학적 리스크 (중동, 미중, 러시아-우크라이나 등)
+- 다음주 주요 경제지표 발표 일정
+- 다음주 주요 기업 실적 발표 일정
+(수집 데이터에 없는 경우 현재 시점 기준으로 일반적으로 알려진 일정을 "추정" 표시와 함께 기술)
+
+## 🎯 8. 다음 주 투자 전략 제안
+- 매크로 기반 자산배분 방향 (주식/채권/원자재/현금 비중 조정 제안)
+- Core ETF (장기 포트폴리오용) 추천 및 근거
+- Satellite ETF (단기 기회용) 추천 및 근거
+- 단기 트레이딩 기회 포착 (기술적 분석 기반)`;
+
+      const systemRole = isWeeklyAnalysis
+        ? `${baseSystemRole}\n${weeklyStructureGuide}`
+        : `${baseSystemRole} 최소 80줄 이상 상세히 작성하세요.`;
+
+      let dataSection = `[자동 수집 시장 데이터 - ${today}]
+
+📊 1. 국내 증시 현황:
+${marketContext}
+
+🌍 2. 글로벌 주요 지수 (주간 등락률 포함):
+${globalContext}
+
+👥 3. 투자자별 매매동향:
+${investorContext}
+
+🔥 4. 거래량 상위 종목 TOP 10:
+${volumeContext}
+
+🏛️ 5. 채권/금리 (미국):
+${usBondsCtx}
+
+🇰🇷 6. 채권/금리 (한국):
+${krBondsCtx}
+${rateGapCtx}
+
+💱 7. 환율:
+${forexContext}
+
+₿ 8. 크립토 (TOP 10):
+${cryptoContext}
+
+🪙 9. 원자재 (주간 등락률 포함):
+${commoditiesContext}
+
+📈 10. 국내 ETF 등락률:
+${etfKrCtx}
+
+🇺🇸 11. 해외 주요 ETF 주간 등락률:
+${etfUsCtx}
+
+📰 12. 주요 금융 뉴스:
+${newsContext}`;
 
       if (urlContents.length > 0) {
         dataSection += `\n\n[참고 URL 내용]\n${urlContents.join("")}`;
