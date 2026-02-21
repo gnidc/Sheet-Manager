@@ -4199,11 +4199,15 @@ ${researchList}
         // 국내 ETF 수익률 TOP 10 (네이버 API, 레버리지/인버스 제외)
         (async () => {
           try {
+            const iconv = await import("iconv-lite");
             const r = await axios.get("https://finance.naver.com/api/sise/etfItemList.nhn", {
               params: { etfType: 0, targetColumn: "change_rate", sortOrder: "desc" },
               headers: { "User-Agent": UA }, timeout: 8000,
+              responseType: "arraybuffer",
             });
-            const items = r.data?.result?.etfItemList || [];
+            const decoded = iconv.default.decode(Buffer.from(r.data), "euc-kr");
+            const parsed = JSON.parse(decoded);
+            const items = parsed?.result?.etfItemList || [];
             const excluded = /레버리지|인버스|2X|Bear|bull|곱버스/i;
             const filtered = items.filter((x: any) => !excluded.test(x.itemname) && x.changeRate > 0);
             return filtered.slice(0, 10).map((x: any) => ({
