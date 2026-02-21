@@ -153,7 +153,7 @@ const TAB_NAMES: Record<string, string> = {
   "steem-reader": "📖 스팀글읽기",
   "ai-agent": "🤖 AI Agent",
   "bookmarks": "⭐ 즐겨찾기",
-  "/trading": "⚡ 자동매매",
+  "/trading": "⚡ 매매A(Active)",
 };
 
 export default function AiAgent({ isAdmin, onNavigate, compact = false }: { isAdmin: boolean; onNavigate?: (tab: string) => void; compact?: boolean }) {
@@ -359,8 +359,9 @@ export default function AiAgent({ isAdmin, onNavigate, compact = false }: { isAd
       switch (result.type) {
         case "navigate":
           if (result.target) {
-            if (result.target.startsWith("/")) {
-              // 외부 페이지 (예: /trading)
+            if (result.target === "/trading") {
+              window.open("https://lifefit2.vercel.app/trading", "_blank", "noopener,noreferrer");
+            } else if (result.target.startsWith("/")) {
               window.location.href = result.target;
             } else if (onNavigate) {
               onNavigate(result.target);

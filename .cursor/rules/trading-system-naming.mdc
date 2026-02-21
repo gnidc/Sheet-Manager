@@ -1,0 +1,12 @@
+---
+description: 트레이딩 시스템 명칭 규칙 (매매A / 매매B)
+alwaysApply: true
+---
+
+# 트레이딩 시스템 명칭 규칙
+
+- **매매A (Active)** = 신형 트레이딩 시스템 = `https://lifefit2.vercel.app` (외부 별도 서버)
+- **매매B (Backup)** = 구형 트레이딩 시스템 = 현재 Sheet-Manager 내 `/trading` 페이지
+
+향후 매매 전략을 추가할 때는 **매매A** 시스템에만 적용할 것.
+종목 체크 후 매수 버튼은 **매매A** (`lifefit2.vercel.app`)로 새 탭을 열어 이동.

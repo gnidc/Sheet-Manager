@@ -6,10 +6,9 @@ import { Bot, ArrowLeft, Smartphone, Download, BarChart3, Loader2, Zap, Key } fr
 import { Button } from "@/components/ui/button";
 
 const EtfComponents = lazy(() => import("@/components/EtfComponents"));
-const Trading = lazy(() => import("@/pages/Trading"));
 const ApiManager = lazy(() => import("@/components/ApiManager"));
 
-type MobileMode = "select" | "ai-agent" | "etf" | "trading" | "api-manager";
+type MobileMode = "select" | "ai-agent" | "etf" | "api-manager";
 
 export function AiMobileContent() {
   const { isAdmin, isLoggedIn, userName, userEmail, logout, isLoggingOut } = useAuth();
@@ -173,17 +172,17 @@ export function AiMobileContent() {
               </div>
             </button>
 
-            {/* 자동매매 버튼 */}
+            {/* 자동매매 (매매A) 버튼 */}
             <button
-              onClick={() => setMode("trading")}
+              onClick={() => window.open("https://lifefit2.vercel.app/trading", "_blank", "noopener,noreferrer")}
               className="flex flex-col items-center justify-center gap-2.5 p-4 rounded-2xl border-2 border-amber-200 dark:border-amber-800 bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-950/30 dark:to-orange-950/30 hover:border-amber-400 dark:hover:border-amber-600 hover:shadow-lg transition-all duration-200 active:scale-95"
             >
               <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-md">
                 <Zap className="w-7 h-7 text-white" />
               </div>
               <div className="text-center">
-                <p className="text-xs font-bold text-foreground">자동매매</p>
-                <p className="text-[9px] text-muted-foreground mt-0.5">주문 · 잔고 관리</p>
+                <p className="text-xs font-bold text-foreground">매매A(Active)</p>
+                <p className="text-[9px] text-muted-foreground mt-0.5">주문 · 잔고 · 전략</p>
               </div>
             </button>
 
@@ -342,51 +341,7 @@ export function AiMobileContent() {
     );
   }
 
-  // 자동매매 모드
-  return (
-    <div
-      className="flex flex-col bg-background"
-      style={{ height: "calc(var(--vh, 1vh) * 100)" }}
-    >
-      <header className="flex items-center justify-between px-3 py-2 border-b bg-background/95 backdrop-blur-sm shrink-0">
-        <div className="flex items-center gap-2">
-          <button onClick={() => setMode("select")} className="text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="w-4 h-4" />
-          </button>
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center">
-            <Zap className="w-4 h-4 text-white" />
-          </div>
-          <div>
-            <h1 className="text-sm font-bold leading-tight">자동매매</h1>
-            <p className="text-[10px] text-muted-foreground leading-tight">{userName || userEmail || "User"}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 text-[10px] px-2 text-muted-foreground"
-            onClick={() => logout()}
-            disabled={isLoggingOut}
-          >
-            로그아웃
-          </Button>
-        </div>
-      </header>
-
-      <div className="flex-1 overflow-y-auto">
-        <Suspense fallback={
-          <div className="flex items-center justify-center h-full">
-            <Loader2 className="w-8 h-8 animate-spin text-amber-500" />
-          </div>
-        }>
-          <div className="p-2">
-            <Trading />
-          </div>
-        </Suspense>
-      </div>
-    </div>
-  );
+  return null;
 }
 
 export default function AiMobile() {
