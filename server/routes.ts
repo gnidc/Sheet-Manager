@@ -3594,6 +3594,66 @@ export async function registerRoutes(
       const linkProp = findProp(["링크", "link", "Link", "URL", "url"]);
       const tagsProp = findProp(["태그", "tags", "Tags"]);
 
+      // Markdown을 Notion blocks로 변환
+      const markdownToBlocks = (md: string): any[] => {
+        const blocks: any[] = [];
+        const lines = md.split("\n");
+        let i = 0;
+        while (i < lines.length) {
+          const line = lines[i];
+
+          // 빈 줄은 건너뛰기
+          if (!line.trim()) { i++; continue; }
+
+          // 헤더
+          const hMatch = line.match(/^(#{1,3})\s+(.+)/);
+          if (hMatch) {
+            const level = hMatch[1].length;
+            const text = hMatch[2].trim();
+            const type = level === 1 ? "heading_1" : level === 2 ? "heading_2" : "heading_3";
+            blocks.push({ object: "block", type, [type]: { rich_text: [{ type: "text", text: { content: text.slice(0, 2000) } }] } });
+            i++; continue;
+          }
+
+          // 구분선
+          if (/^(-{3,}|_{3,}|\*{3,})\s*$/.test(line)) {
+            blocks.push({ object: "block", type: "divider", divider: {} });
+            i++; continue;
+          }
+
+          // 인용문
+          if (line.startsWith("> ")) {
+            const quoteLines: string[] = [];
+            while (i < lines.length && lines[i].startsWith("> ")) {
+              quoteLines.push(lines[i].replace(/^>\s?/, ""));
+              i++;
+            }
+            blocks.push({ object: "block", type: "quote", quote: { rich_text: [{ type: "text", text: { content: quoteLines.join("\n").slice(0, 2000) } }] } });
+            continue;
+          }
+
+          // 불릿 리스트
+          if (/^[-*+]\s/.test(line)) {
+            const text = line.replace(/^[-*+]\s/, "").trim();
+            blocks.push({ object: "block", type: "bulleted_list_item", bulleted_list_item: { rich_text: [{ type: "text", text: { content: text.slice(0, 2000) } }] } });
+            i++; continue;
+          }
+
+          // 이미지 (![alt](url))
+          const imgMatch = line.match(/!\[([^\]]*)\]\(([^)]+)\)/);
+          if (imgMatch && imgMatch[2].startsWith("http")) {
+            blocks.push({ object: "block", type: "image", image: { type: "external", external: { url: imgMatch[2] } } });
+            i++; continue;
+          }
+
+          // 일반 단락
+          blocks.push({ object: "block", type: "paragraph", paragraph: { rich_text: [{ type: "text", text: { content: line.slice(0, 2000) } }] } });
+          i++;
+        }
+        // Notion API는 한 번에 최대 100 블록
+        return blocks.slice(0, 100);
+      };
+
       let successCount = 0;
       let failCount = 0;
       const errors: string[] = [];
@@ -3619,10 +3679,11 @@ export async function registerRoutes(
             }
           }
 
+          // 본문 속성에는 요약만 저장 (전체 본문은 페이지 콘텐츠로)
           if (bodyProp) {
             const pt = dbProps[bodyProp]?.type;
-            const bodyText = (post.body || "").slice(0, 2000);
-            if (pt === "rich_text") properties[bodyProp] = { rich_text: [{ text: { content: bodyText } }] };
+            const summary = (post.bodyPlain || post.body || "").replace(/!\[.*?\]\(.*?\)/g, "").replace(/<[^>]+>/g, "").replace(/\n{2,}/g, " ").trim().slice(0, 200) + "...";
+            if (pt === "rich_text") properties[bodyProp] = { rich_text: [{ text: { content: summary } }] };
           }
 
           if (linkProp) {
@@ -3640,9 +3701,26 @@ export async function registerRoutes(
             }
           }
 
+          // 본문 전체를 Notion 페이지 콘텐츠(children blocks)로 저장
+          const bodyContent = post.bodyFull || post.body || "";
+          const steemUrl = post.url || `https://steemit.com/@${post.author}/${post.permlink}`;
+
+          const headerBlocks: any[] = [
+            { object: "block", type: "callout", callout: {
+              rich_text: [{ type: "text", text: { content: `작성자: @${post.author}  |  ${post.created ? new Date(post.created).toLocaleDateString("ko-KR") : ""}` } }],
+              icon: { type: "emoji", emoji: "📝" },
+            }},
+            { object: "block", type: "bookmark", bookmark: { url: steemUrl } },
+            { object: "block", type: "divider", divider: {} },
+          ];
+
+          const bodyBlocks = markdownToBlocks(bodyContent);
+          const children = [...headerBlocks, ...bodyBlocks].slice(0, 100);
+
           await notion.pages.create({
             parent: { database_id: config.databaseId },
             properties,
+            children,
           });
           successCount++;
         } catch (err: any) {
