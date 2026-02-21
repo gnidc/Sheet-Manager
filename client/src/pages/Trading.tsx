@@ -91,6 +91,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import GapStrategyPanel from "@/components/GapStrategyPanel";
+import MultiFactorPanel from "@/components/MultiFactorPanel";
 
 // ========== Types ==========
 interface TradingStatus {
@@ -2747,6 +2748,13 @@ function ManualSkillsSection() {
       description: "장 시작 시 갭 상승 종목을 감지하고 추세를 추종하여 분할매수/매도",
       isBuiltin: true,
     },
+    {
+      id: "multi-factor",
+      name: "멀티팩터 전략",
+      icon: "🧠",
+      description: "MA·RSI·볼린저·거래량·갭 5개 팩터 종합점수로 자동매매",
+      isBuiltin: true,
+    },
   ] : [];
 
   const defaultActiveSkill = builtinSkills.length > 0 ? "gap-strategy" : "";
@@ -2864,6 +2872,8 @@ function ManualSkillsSection() {
       {/* 선택된 스킬 콘텐츠 */}
       {activeSkill === "gap-strategy" && isAdmin ? (
         <GapStrategyPanel />
+      ) : activeSkill === "multi-factor" && isAdmin ? (
+        <MultiFactorPanel />
       ) : activeSkill ? (
         <CustomSkillContent
           skill={allSkills.find(s => s.id === activeSkill)}

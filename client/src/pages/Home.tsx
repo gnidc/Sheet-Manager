@@ -1149,8 +1149,60 @@ function MarketsView({ type }: { type: "domestic" | "global" | "etc" | "calendar
   );
 }
 
+// ===== 글로벌 뉴스 섹션 (해외증시 탭과 동일한 데이터) =====
+function GlobalNewsSection({ data, isLoading }: { data?: { news: { title: string; url: string; date: string }[]; updatedAt: string }; isLoading: boolean }) {
+  const news = data?.news || [];
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Globe className="w-4 h-4 text-orange-500" />
+            최신 글로벌 뉴스
+          </CardTitle>
+          {data?.updatedAt && (
+            <span className="text-xs text-muted-foreground">{data.updatedAt}</span>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent className="pt-0">
+        {isLoading && news.length === 0 ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="w-5 h-5 animate-spin text-primary" />
+          </div>
+        ) : news.length > 0 ? (
+          <div className="space-y-0.5">
+            {news.map((item, i) => (
+              <a
+                key={i}
+                href={item.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-start gap-2 py-2 px-2 rounded hover:bg-muted/40 transition-colors group"
+              >
+                <span className="text-xs text-muted-foreground font-mono mt-0.5 shrink-0 w-4">{i + 1}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-foreground group-hover:text-primary line-clamp-2 leading-snug">
+                    {item.title}
+                  </p>
+                  {item.date && (
+                    <span className="text-[10px] text-muted-foreground mt-0.5 block">{item.date}</span>
+                  )}
+                </div>
+                <ExternalLink className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 shrink-0 mt-1" />
+              </a>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-6 text-sm text-muted-foreground">뉴스를 불러올 수 없습니다</div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // ===== 일반 유저용 공개 카페 글 목록 (버튼 클릭 시 로딩) =====
-function PublicCafeView({ showNews, onToggleNews, newsLoading }: { showNews: boolean; onToggleNews: () => void; newsLoading?: boolean }) {
+function PublicCafeView({ showNews, onToggleNews, newsLoading, showGlobalNews, onToggleGlobalNews, globalNewsLoading }: { showNews: boolean; onToggleNews: () => void; newsLoading?: boolean; showGlobalNews?: boolean; onToggleGlobalNews?: () => void; globalNewsLoading?: boolean }) {
   const [showArticles, setShowArticles] = useState(false);
   const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -1220,7 +1272,7 @@ function PublicCafeView({ showNews, onToggleNews, newsLoading }: { showNews: boo
 
   return (
     <div className="space-y-4">
-      {/* 카페 헤더 + 최신뉴스 */}
+      {/* 카페 헤더 + 뉴스 버튼 */}
       <div className="overflow-hidden rounded-lg border">
         <div className="flex items-center justify-between px-4 py-2.5 bg-muted/30">
           <div className="flex items-center gap-2">
@@ -1235,10 +1287,27 @@ function PublicCafeView({ showNews, onToggleNews, newsLoading }: { showNews: boo
               ) : (
                 <Newspaper className="w-3 h-3" />
               )}
-              최신뉴스
+              최신 국내뉴스
               {showNews && <span className="text-[10px] opacity-60">▲</span>}
               {!showNews && <span className="text-[10px] opacity-60">▼</span>}
             </Button>
+            {onToggleGlobalNews && (
+              <Button
+                variant={showGlobalNews ? "default" : "outline"}
+                size="sm"
+                className="gap-1.5 text-xs h-7"
+                onClick={onToggleGlobalNews}
+              >
+                {globalNewsLoading ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <Globe className="w-3 h-3" />
+                )}
+                최신 글로벌뉴스
+                {showGlobalNews && <span className="text-[10px] opacity-60">▲</span>}
+                {!showGlobalNews && <span className="text-[10px] opacity-60">▼</span>}
+              </Button>
+            )}
           </div>
           <div className="flex items-center gap-1.5">
             <Button
@@ -1680,6 +1749,22 @@ const HomeEmbed = memo(function HomeEmbed({ onNavigate }: { onNavigate: (tab: st
 
   // 최신뉴스 토글 상태 (일반 유저용)
   const [showNews, setShowNews] = useState(false);
+  const [showGlobalNews, setShowGlobalNews] = useState(false);
+
+  // 글로벌 뉴스 쿼리
+  const { data: globalNewsData, isLoading: isLoadingGlobalNews } = useQuery<{
+    news: { title: string; url: string; date: string }[];
+    updatedAt: string;
+  }>({
+    queryKey: ["/api/markets/global/news"],
+    queryFn: async () => {
+      const res = await fetch("/api/markets/global/news");
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+    staleTime: 300000,
+    enabled: showGlobalNews,
+  });
 
   // 글쓰기 상태
   const [showWriteDialog, setShowWriteDialog] = useState(false);
@@ -1907,6 +1992,9 @@ const HomeEmbed = memo(function HomeEmbed({ onNavigate }: { onNavigate: (tab: st
         <PublicCafeView
           showNews={showNews}
           onToggleNews={() => setShowNews(prev => !prev)}
+          showGlobalNews={showGlobalNews}
+          onToggleGlobalNews={() => setShowGlobalNews(prev => !prev)}
+          globalNewsLoading={isLoadingGlobalNews}
         />
         {showNews && isLoggedIn && (
           <div className="mt-4">
@@ -1919,6 +2007,11 @@ const HomeEmbed = memo(function HomeEmbed({ onNavigate }: { onNavigate: (tab: st
           <div className="mt-4 py-8 text-center border rounded-lg bg-muted/20">
             <Newspaper className="w-8 h-8 mx-auto text-muted-foreground/40 mb-2" />
             <p className="text-sm text-muted-foreground">먼저 구글계정 로그인을 하시면 주요 뉴스를 로딩합니다...</p>
+          </div>
+        )}
+        {showGlobalNews && (
+          <div className="mt-4">
+            <GlobalNewsSection data={globalNewsData} isLoading={isLoadingGlobalNews} />
           </div>
         )}
       </>
@@ -1979,9 +2072,24 @@ const HomeEmbed = memo(function HomeEmbed({ onNavigate }: { onNavigate: (tab: st
               onClick={() => setShowNews(prev => !prev)}
             >
               <Newspaper className="w-3 h-3" />
-              최신뉴스
+              최신 국내뉴스
               {showNews && <span className="text-[10px] opacity-60">▲</span>}
               {!showNews && <span className="text-[10px] opacity-60">▼</span>}
+            </Button>
+            <Button
+              variant={showGlobalNews ? "default" : "outline"}
+              size="sm"
+              className="gap-1.5 text-xs h-7"
+              onClick={() => setShowGlobalNews(prev => !prev)}
+            >
+              {isLoadingGlobalNews ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : (
+                <Globe className="w-3 h-3" />
+              )}
+              최신 글로벌뉴스
+              {showGlobalNews && <span className="text-[10px] opacity-60">▲</span>}
+              {!showGlobalNews && <span className="text-[10px] opacity-60">▼</span>}
             </Button>
             {isSearchMode && searchQuery && (
               <span className="text-xs text-primary font-medium">"{searchQuery}" 검색결과</span>
@@ -2361,12 +2469,19 @@ const HomeEmbed = memo(function HomeEmbed({ onNavigate }: { onNavigate: (tab: st
         )}
         </div>
 
-      {/* 주요뉴스 (버튼 클릭 시에만 로딩) */}
+      {/* 주요 국내뉴스 (버튼 클릭 시에만 로딩) */}
       {showNews && (
         <div className="mt-4">
           <Suspense fallback={<div className="py-10 text-center"><Loader2 className="w-6 h-6 animate-spin text-primary mx-auto" /></div>}>
             <MarketNews />
           </Suspense>
+        </div>
+      )}
+
+      {/* 글로벌뉴스 (버튼 클릭 시에만 로딩) */}
+      {showGlobalNews && (
+        <div className="mt-4">
+          <GlobalNewsSection data={globalNewsData} isLoading={isLoadingGlobalNews} />
         </div>
       )}
 

@@ -8,6 +8,13 @@
       "when": 1770805350062,
       "tag": "0000_modern_kronos",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1771664065347,
+      "tag": "0001_daily_mojo",
+      "breakpoints": true
     }
   ]
 }

@@ -720,3 +720,96 @@ export const skillExecutionLogs = pgTable("skill_execution_logs", {
 
 export type SkillExecutionLog = typeof skillExecutionLogs.$inferSelect;
 export type InsertSkillExecutionLog = typeof skillExecutionLogs.$inferInsert;
+
+// ========== 멀티팩터 전략 ==========
+
+export const multiFactorStrategy = pgTable("multi_factor_strategy", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  name: text("name").notNull().default("멀티팩터 전략"),
+  isActive: boolean("is_active").default(false),
+  universeType: text("universe_type").default("both"),
+  // 팩터 가중치 (합계 100)
+  weightMa: integer("weight_ma").default(30),
+  weightRsi: integer("weight_rsi").default(20),
+  weightBollinger: integer("weight_bollinger").default(20),
+  weightVolume: integer("weight_volume").default(15),
+  weightGap: integer("weight_gap").default(15),
+  // 팩터 파라미터
+  rsiPeriod: integer("rsi_period").default(14),
+  rsiBuyThreshold: integer("rsi_buy_threshold").default(30),
+  rsiSellThreshold: integer("rsi_sell_threshold").default(70),
+  bollingerPeriod: integer("bollinger_period").default(20),
+  bollingerMult: numeric("bollinger_mult").default("2"),
+  volumeTopN: integer("volume_top_n").default(50),
+  minGapPercent: numeric("min_gap_percent").default("2"),
+  maxGapPercent: numeric("max_gap_percent").default("8"),
+  // 매수/매도 신호 임계값
+  buyScoreThreshold: integer("buy_score_threshold").default(70),
+  sellScoreThreshold: integer("sell_score_threshold").default(30),
+  // 분할매수
+  firstBuyRatio: integer("first_buy_ratio").default(40),
+  addBuyRatio: integer("add_buy_ratio").default(30),
+  addBuyTriggerPercent: numeric("add_buy_trigger_percent").default("2"),
+  // 리스크 관리
+  stopLossPercent: numeric("stop_loss_percent").default("5"),
+  takeProfitPercent: numeric("take_profit_percent").default("10"),
+  maxPositionRatio: integer("max_position_ratio").default(50),
+  maxStocksCount: integer("max_stocks_count").default(5),
+  // 캐시
+  candidates: text("candidates"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const insertMultiFactorStrategySchema = createInsertSchema(multiFactorStrategy).omit({ id: true, createdAt: true, updatedAt: true });
+export type MultiFactorStrategy = typeof multiFactorStrategy.$inferSelect;
+export type InsertMultiFactorStrategy = z.infer<typeof insertMultiFactorStrategySchema>;
+
+export const multiFactorPositions = pgTable("multi_factor_positions", {
+  id: serial("id").primaryKey(),
+  strategyId: integer("strategy_id").notNull(),
+  userId: integer("user_id").notNull(),
+  stockCode: text("stock_code").notNull(),
+  stockName: text("stock_name").notNull(),
+  status: text("status").default("signal_detected"),
+  signalScore: numeric("signal_score"),
+  targetAmount: numeric("target_amount"),
+  totalBuyQty: integer("total_buy_qty").default(0),
+  totalBuyAmount: numeric("total_buy_amount").default("0"),
+  avgBuyPrice: numeric("avg_buy_price"),
+  buyPhase: integer("buy_phase").default(0),
+  lastBuyPrice: numeric("last_buy_price"),
+  sellPrice: numeric("sell_price"),
+  sellQty: integer("sell_qty"),
+  sellAmount: numeric("sell_amount"),
+  profitLoss: numeric("profit_loss"),
+  profitRate: numeric("profit_rate"),
+  factorDetails: text("factor_details"),
+  ma5: numeric("ma5"),
+  ma20: numeric("ma20"),
+  rsi: numeric("rsi"),
+  bollingerUpper: numeric("bollinger_upper"),
+  bollingerLower: numeric("bollinger_lower"),
+  openedAt: timestamp("opened_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  closedAt: timestamp("closed_at"),
+});
+
+export const insertMultiFactorPositionSchema = createInsertSchema(multiFactorPositions).omit({ id: true, openedAt: true });
+export type MultiFactorPosition = typeof multiFactorPositions.$inferSelect;
+export type InsertMultiFactorPosition = z.infer<typeof insertMultiFactorPositionSchema>;
+
+export const multiFactorLogs = pgTable("multi_factor_logs", {
+  id: serial("id").primaryKey(),
+  strategyId: integer("strategy_id").notNull(),
+  positionId: integer("position_id"),
+  action: text("action").notNull(),
+  stockCode: text("stock_code"),
+  stockName: text("stock_name"),
+  detail: text("detail"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const insertMultiFactorLogSchema = createInsertSchema(multiFactorLogs).omit({ id: true, createdAt: true });
+export type MultiFactorLog = typeof multiFactorLogs.$inferSelect;
+export type InsertMultiFactorLog = z.infer<typeof insertMultiFactorLogSchema>;

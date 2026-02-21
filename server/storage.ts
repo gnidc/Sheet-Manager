@@ -111,6 +111,15 @@ import {
   type KeyResearchItem,
   notionConfig,
   type NotionConfig,
+  multiFactorStrategy,
+  multiFactorPositions,
+  multiFactorLogs,
+  type MultiFactorStrategy,
+  type InsertMultiFactorStrategy,
+  type MultiFactorPosition,
+  type InsertMultiFactorPosition,
+  type MultiFactorLog,
+  type InsertMultiFactorLog,
 } from "../shared/schema.js";
 import { eq, and, or, desc, isNull, inArray, sql } from "drizzle-orm";
 
@@ -262,6 +271,17 @@ export interface IStorage {
   // Gap Strategy Logs
   getGapLogs(strategyId: number, limit?: number): Promise<GapStrategyLog[]>;
   createGapLog(data: InsertGapStrategyLog): Promise<GapStrategyLog>;
+
+  // Multi-Factor Strategy (멀티팩터 전략)
+  getMultiFactorStrategy(userId: number): Promise<MultiFactorStrategy | undefined>;
+  upsertMultiFactorStrategy(data: InsertMultiFactorStrategy): Promise<MultiFactorStrategy>;
+  updateMultiFactorStrategy(id: number, updates: Partial<InsertMultiFactorStrategy>): Promise<MultiFactorStrategy>;
+  getMultiFactorPositions(strategyId: number): Promise<MultiFactorPosition[]>;
+  getActiveMultiFactorPositions(strategyId: number): Promise<MultiFactorPosition[]>;
+  createMultiFactorPosition(data: InsertMultiFactorPosition): Promise<MultiFactorPosition>;
+  updateMultiFactorPosition(id: number, updates: Partial<InsertMultiFactorPosition>): Promise<MultiFactorPosition>;
+  getMultiFactorLogs(strategyId: number, limit?: number): Promise<MultiFactorLog[]>;
+  createMultiFactorLog(data: InsertMultiFactorLog): Promise<MultiFactorLog>;
 
   // Stock Comments (종목 코멘트)
   getStockComments(stockCode: string, market?: string): Promise<StockComment[]>;
@@ -1515,6 +1535,115 @@ export class DatabaseStorage implements IStorage {
       });
     }
     const [created] = await db.insert(gapStrategyLogs).values(data).returning();
+    return created;
+  }
+
+  // ========== Multi-Factor Strategy (멀티팩터 전략) ==========
+
+  async getMultiFactorStrategy(userId: number): Promise<MultiFactorStrategy | undefined> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [s] = await db.select().from(multiFactorStrategy).where(eq(multiFactorStrategy.userId, userId));
+        return s;
+      });
+    }
+    const [s] = await db.select().from(multiFactorStrategy).where(eq(multiFactorStrategy.userId, userId));
+    return s;
+  }
+
+  async upsertMultiFactorStrategy(data: InsertMultiFactorStrategy): Promise<MultiFactorStrategy> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const existing = await db.select().from(multiFactorStrategy).where(eq(multiFactorStrategy.userId, data.userId));
+        if (existing.length > 0) {
+          const [updated] = await db.update(multiFactorStrategy).set({ ...data, updatedAt: new Date() }).where(eq(multiFactorStrategy.id, existing[0].id)).returning();
+          return updated;
+        }
+        const [created] = await db.insert(multiFactorStrategy).values(data).returning();
+        return created;
+      });
+    }
+    const existing = await db.select().from(multiFactorStrategy).where(eq(multiFactorStrategy.userId, data.userId));
+    if (existing.length > 0) {
+      const [updated] = await db.update(multiFactorStrategy).set({ ...data, updatedAt: new Date() }).where(eq(multiFactorStrategy.id, existing[0].id)).returning();
+      return updated;
+    }
+    const [created] = await db.insert(multiFactorStrategy).values(data).returning();
+    return created;
+  }
+
+  async updateMultiFactorStrategy(id: number, updates: Partial<InsertMultiFactorStrategy>): Promise<MultiFactorStrategy> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [updated] = await db.update(multiFactorStrategy).set({ ...updates, updatedAt: new Date() }).where(eq(multiFactorStrategy.id, id)).returning();
+        return updated;
+      });
+    }
+    const [updated] = await db.update(multiFactorStrategy).set({ ...updates, updatedAt: new Date() }).where(eq(multiFactorStrategy.id, id)).returning();
+    return updated;
+  }
+
+  async getMultiFactorPositions(strategyId: number): Promise<MultiFactorPosition[]> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(multiFactorPositions).where(eq(multiFactorPositions.strategyId, strategyId)).orderBy(desc(multiFactorPositions.openedAt));
+      });
+    }
+    return await db.select().from(multiFactorPositions).where(eq(multiFactorPositions.strategyId, strategyId)).orderBy(desc(multiFactorPositions.openedAt));
+  }
+
+  async getActiveMultiFactorPositions(strategyId: number): Promise<MultiFactorPosition[]> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(multiFactorPositions)
+          .where(and(eq(multiFactorPositions.strategyId, strategyId), inArray(multiFactorPositions.status, ["signal_detected", "buying", "holding"])))
+          .orderBy(desc(multiFactorPositions.openedAt));
+      });
+    }
+    return await db.select().from(multiFactorPositions)
+      .where(and(eq(multiFactorPositions.strategyId, strategyId), inArray(multiFactorPositions.status, ["signal_detected", "buying", "holding"])))
+      .orderBy(desc(multiFactorPositions.openedAt));
+  }
+
+  async createMultiFactorPosition(data: InsertMultiFactorPosition): Promise<MultiFactorPosition> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [created] = await db.insert(multiFactorPositions).values(data).returning();
+        return created;
+      });
+    }
+    const [created] = await db.insert(multiFactorPositions).values(data).returning();
+    return created;
+  }
+
+  async updateMultiFactorPosition(id: number, updates: Partial<InsertMultiFactorPosition>): Promise<MultiFactorPosition> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [updated] = await db.update(multiFactorPositions).set(updates).where(eq(multiFactorPositions.id, id)).returning();
+        return updated;
+      });
+    }
+    const [updated] = await db.update(multiFactorPositions).set(updates).where(eq(multiFactorPositions.id, id)).returning();
+    return updated;
+  }
+
+  async getMultiFactorLogs(strategyId: number, limit: number = 50): Promise<MultiFactorLog[]> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        return await db.select().from(multiFactorLogs).where(eq(multiFactorLogs.strategyId, strategyId)).orderBy(desc(multiFactorLogs.createdAt)).limit(limit);
+      });
+    }
+    return await db.select().from(multiFactorLogs).where(eq(multiFactorLogs.strategyId, strategyId)).orderBy(desc(multiFactorLogs.createdAt)).limit(limit);
+  }
+
+  async createMultiFactorLog(data: InsertMultiFactorLog): Promise<MultiFactorLog> {
+    if (process.env.VERCEL) {
+      return await executeWithClient(async (db) => {
+        const [created] = await db.insert(multiFactorLogs).values(data).returning();
+        return created;
+      });
+    }
+    const [created] = await db.insert(multiFactorLogs).values(data).returning();
     return created;
   }
 

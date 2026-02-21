@@ -11,6 +11,7 @@ import {
   Cpu, MemoryStick, CheckCircle2, XCircle, AlertTriangle, Loader2,
   Gauge, Wifi, Lightbulb, ArrowRight, Copy, Check, Trash2,
   Camera, Download, FileSearch, Info, Monitor, TrendingUp,
+  Shield, Lock, FileImage, History, ExternalLink, Zap,
 } from "lucide-react";
 
 interface QueryTiming {
@@ -1460,173 +1461,632 @@ function RecommendationsPanel({ data }: { data: SystemStatus }) {
 
 const TRADING_APP_URL = "https://lifefit2.vercel.app";
 
+interface TradingCheck {
+  name: string;
+  category: "api" | "security" | "resource" | "ssl";
+  status: "ok" | "warning" | "error";
+  responseTime?: number;
+  httpStatus?: number;
+  error?: string;
+  detail?: string;
+}
+
+interface TradingCheckResult {
+  checks: TradingCheck[];
+  securityHeaders: { name: string; value: string | null; required: boolean; status: "ok" | "warning" | "missing" }[];
+  totalMs: number;
+  okCount: number;
+  totalCount: number;
+  checkedAt: string;
+}
+
+interface TradingHistoryEntry {
+  checkedAt: string;
+  okCount: number;
+  totalCount: number;
+  totalMs: number;
+  pingMs: number | null;
+  status: "ok" | "error";
+}
+
 function TradingSystemMonitor() {
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<TradingCheckResult | null>(null);
   const [pingMs, setPingMs] = useState<number | null>(null);
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [checkHistory, setCheckHistory] = useState<TradingHistoryEntry[]>(() => {
+    try {
+      const saved = localStorage.getItem("trading_check_history");
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+  const autoRefreshRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+
+  React.useEffect(() => {
+    if (autoRefresh) {
+      autoRefreshRef.current = setInterval(() => { runCheck(); }, 30000);
+    } else if (autoRefreshRef.current) {
+      clearInterval(autoRefreshRef.current);
+      autoRefreshRef.current = null;
+    }
+    return () => { if (autoRefreshRef.current) clearInterval(autoRefreshRef.current); };
+  }, [autoRefresh]);
 
   const runCheck = async () => {
     setStatus("loading");
-
-    const checks: { name: string; status: string; responseTime?: number; error?: string }[] = [];
+    const checks: TradingCheck[] = [];
     const start = Date.now();
+    let currentPingMs: number | null = null;
 
     // 1. 기본 연결 (ping)
     try {
-      const pingStart = Date.now();
+      const s = Date.now();
       const res = await fetch(`${TRADING_APP_URL}/api/ping`, { mode: "cors" });
-      const pingTime = Date.now() - pingStart;
-      setPingMs(pingTime);
-      checks.push({ name: "서버 연결 (ping)", status: res.ok ? "ok" : "error", responseTime: pingTime, error: res.ok ? undefined : `HTTP ${res.status}` });
+      const t = Date.now() - s;
+      currentPingMs = t;
+      setPingMs(t);
+      checks.push({ name: "서버 연결 (ping)", category: "api", status: res.ok ? "ok" : "error", responseTime: t, httpStatus: res.status, error: res.ok ? undefined : `HTTP ${res.status}` });
     } catch (e: any) {
       setPingMs(null);
-      checks.push({ name: "서버 연결 (ping)", status: "error", error: e.message });
+      checks.push({ name: "서버 연결 (ping)", category: "api", status: "error", error: e.message });
     }
 
     // 2. 인증 API
     try {
       const s = Date.now();
       const res = await fetch(`${TRADING_APP_URL}/api/auth/me`, { mode: "cors" });
-      checks.push({ name: "인증 API (/api/auth/me)", status: res.ok || res.status === 401 ? "ok" : "error", responseTime: Date.now() - s, error: res.ok || res.status === 401 ? undefined : `HTTP ${res.status}` });
+      const isOk = res.ok || res.status === 401;
+      checks.push({ name: "인증 API (/api/auth/me)", category: "api", status: isOk ? "ok" : "error", responseTime: Date.now() - s, httpStatus: res.status, error: isOk ? undefined : `HTTP ${res.status}` });
     } catch (e: any) {
-      checks.push({ name: "인증 API (/api/auth/me)", status: "error", error: e.message });
+      checks.push({ name: "인증 API (/api/auth/me)", category: "api", status: "error", error: e.message });
     }
 
     // 3. 트레이딩 상태 API
     try {
       const s = Date.now();
       const res = await fetch(`${TRADING_APP_URL}/api/trading/status`, { mode: "cors" });
-      checks.push({ name: "트레이딩 API (/api/trading/status)", status: res.ok || res.status === 401 ? "ok" : "error", responseTime: Date.now() - s, error: res.ok || res.status === 401 ? undefined : `HTTP ${res.status}` });
+      const isOk = res.ok || res.status === 401;
+      checks.push({ name: "트레이딩 API (/api/trading/status)", category: "api", status: isOk ? "ok" : "error", responseTime: Date.now() - s, httpStatus: res.status, error: isOk ? undefined : `HTTP ${res.status}` });
     } catch (e: any) {
-      checks.push({ name: "트레이딩 API (/api/trading/status)", status: "error", error: e.message });
+      checks.push({ name: "트레이딩 API (/api/trading/status)", category: "api", status: "error", error: e.message });
     }
+
+    // 4. 홈페이지 접근 점검
+    let homepageResponse: Response | null = null;
+    try {
+      const s = Date.now();
+      const res = await fetch(TRADING_APP_URL, { mode: "cors", redirect: "follow" });
+      homepageResponse = res;
+      const t = Date.now() - s;
+      checks.push({ name: "홈페이지 접근", category: "resource", status: res.ok ? "ok" : "warning", responseTime: t, httpStatus: res.status, detail: res.ok ? `${t}ms 로드 완료` : `HTTP ${res.status}` });
+    } catch (e: any) {
+      try {
+        const s = Date.now();
+        const res = await fetch(TRADING_APP_URL, { mode: "no-cors" });
+        checks.push({ name: "홈페이지 접근", category: "resource", status: "ok", responseTime: Date.now() - s, detail: "접근 가능 (CORS 제한으로 상세 확인 불가)" });
+      } catch (e2: any) {
+        checks.push({ name: "홈페이지 접근", category: "resource", status: "error", error: e2.message });
+      }
+    }
+
+    // 5. 추가 API 엔드포인트
+    const extraApis = [
+      { path: "/api/health", name: "Health Check API" },
+      { path: "/api/system/status", name: "System Status API" },
+    ];
+    for (const api of extraApis) {
+      try {
+        const s = Date.now();
+        const res = await fetch(`${TRADING_APP_URL}${api.path}`, { mode: "cors" });
+        const t = Date.now() - s;
+        const isOk = res.ok || res.status === 401 || res.status === 404;
+        checks.push({
+          name: `${api.name} (${api.path})`,
+          category: "api",
+          status: res.status === 404 ? "warning" : isOk ? "ok" : "error",
+          responseTime: t,
+          httpStatus: res.status,
+          detail: res.status === 404 ? "엔드포인트 미구현" : undefined,
+          error: !isOk ? `HTTP ${res.status}` : undefined,
+        });
+      } catch (e: any) {
+        checks.push({ name: `${api.name} (${api.path})`, category: "api", status: "warning", error: e.message, detail: "CORS 또는 네트워크 오류" });
+      }
+    }
+
+    // 6. HTTPS/SSL 점검
+    const isHttps = TRADING_APP_URL.startsWith("https://");
+    checks.push({
+      name: "HTTPS 보안 연결",
+      category: "ssl",
+      status: isHttps ? "ok" : "error",
+      detail: isHttps ? "TLS/SSL 암호화 통신 사용 중" : "HTTP 비암호화 연결 - 보안 위험",
+    });
+
+    // 7. 정적 자원 점검 (favicon)
+    try {
+      const s = Date.now();
+      const res = await fetch(`${TRADING_APP_URL}/favicon.ico`, { mode: "no-cors" });
+      checks.push({ name: "Favicon 리소스", category: "resource", status: "ok", responseTime: Date.now() - s, detail: "정적 자원 정상 제공" });
+    } catch (e: any) {
+      checks.push({ name: "Favicon 리소스", category: "resource", status: "warning", error: e.message, detail: "정적 자원 접근 불가" });
+    }
+
+    // 8. 응답 헤더 보안 점검
+    const securityHeaders: TradingCheckResult["securityHeaders"] = [];
+    const headerChecks = [
+      { name: "X-Frame-Options", required: true, desc: "클릭재킹 방지" },
+      { name: "X-Content-Type-Options", required: true, desc: "MIME 스니핑 방지" },
+      { name: "Strict-Transport-Security", required: true, desc: "HTTPS 강제" },
+      { name: "Content-Security-Policy", required: false, desc: "XSS 방지 정책" },
+      { name: "X-XSS-Protection", required: false, desc: "XSS 필터" },
+      { name: "Referrer-Policy", required: false, desc: "리퍼러 정보 제한" },
+      { name: "Permissions-Policy", required: false, desc: "기능 권한 제한" },
+    ];
+
+    if (homepageResponse) {
+      for (const hc of headerChecks) {
+        const val = homepageResponse.headers.get(hc.name);
+        securityHeaders.push({
+          name: hc.name,
+          value: val,
+          required: hc.required,
+          status: val ? "ok" : hc.required ? "warning" : "missing",
+        });
+      }
+    } else {
+      for (const hc of headerChecks) {
+        securityHeaders.push({ name: hc.name, value: null, required: hc.required, status: "missing" });
+      }
+    }
+
+    const secOk = securityHeaders.filter(h => h.status === "ok").length;
+    const secTotal = securityHeaders.length;
+    checks.push({
+      name: "보안 헤더 점검",
+      category: "security",
+      status: secOk === secTotal ? "ok" : secOk >= Math.ceil(secTotal / 2) ? "warning" : "error",
+      detail: `${secOk}/${secTotal} 헤더 설정됨`,
+    });
 
     const totalMs = Date.now() - start;
     const okCount = checks.filter(c => c.status === "ok").length;
+    const checkedAt = new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
 
-    setData({ checks, totalMs, okCount, totalCount: checks.length, checkedAt: new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }) });
+    const result: TradingCheckResult = { checks, securityHeaders, totalMs, okCount, totalCount: checks.length, checkedAt };
+    setData(result);
     setStatus(okCount === checks.length ? "success" : "error");
+
+    const historyEntry: TradingHistoryEntry = { checkedAt, okCount, totalCount: checks.length, totalMs, pingMs: currentPingMs, status: okCount === checks.length ? "ok" : "error" };
+    setCheckHistory(prev => {
+      const updated = [historyEntry, ...prev].slice(0, 20);
+      try { localStorage.setItem("trading_check_history", JSON.stringify(updated)); } catch {}
+      return updated;
+    });
   };
 
   if (status === "idle") {
     return (
-      <Card>
-        <CardContent className="py-16 text-center">
-          <TrendingUp className="w-14 h-14 mx-auto text-emerald-400/60 mb-4" />
-          <h3 className="text-lg font-bold">Trading App 시스템 점검</h3>
-          <p className="text-sm text-muted-foreground mt-2 mb-1">
-            배포 URL: <a href={TRADING_APP_URL} target="_blank" rel="noreferrer" className="text-primary hover:underline">{TRADING_APP_URL}</a>
-          </p>
-          <p className="text-sm text-muted-foreground mb-6">
-            Trading App의 서버 연결, 인증 API, 트레이딩 API 상태를 확인합니다.
-          </p>
-          <Button size="lg" className="gap-2 px-8" onClick={runCheck}>
-            <Activity className="w-5 h-5" />
-            시스템 점검 실행
-          </Button>
-        </CardContent>
-      </Card>
+      <div className="space-y-6">
+        <Card>
+          <CardContent className="py-16 text-center">
+            <TrendingUp className="w-14 h-14 mx-auto text-emerald-400/60 mb-4" />
+            <h3 className="text-lg font-bold">Trading App 시스템 점검</h3>
+            <p className="text-sm text-muted-foreground mt-2 mb-1">
+              배포 URL: <a href={TRADING_APP_URL} target="_blank" rel="noreferrer" className="text-primary hover:underline inline-flex items-center gap-1">{TRADING_APP_URL} <ExternalLink className="w-3 h-3" /></a>
+            </p>
+            <p className="text-sm text-muted-foreground mb-6">
+              서버 연결, API 상태, 보안 헤더, 정적 자원, SSL 등 종합 점검을 수행합니다.
+            </p>
+            <Button size="lg" className="gap-2 px-8" onClick={runCheck}>
+              <Activity className="w-5 h-5" />
+              시스템 점검 실행
+            </Button>
+            <p className="text-[11px] text-muted-foreground mt-3">
+              API 연결, 보안 헤더, 정적 자원, SSL 등 종합 점검 (약 3~8초 소요)
+            </p>
+          </CardContent>
+        </Card>
+        {checkHistory.length > 0 && <TradingCheckHistory history={checkHistory} onClear={() => { setCheckHistory([]); localStorage.removeItem("trading_check_history"); }} />}
+      </div>
     );
   }
 
-  if (status === "loading") {
+  if (status === "loading" && !data) {
     return (
       <div className="flex justify-center items-center h-60">
         <Loader2 className="h-6 w-6 animate-spin text-primary" />
-        <span className="ml-2 text-sm text-muted-foreground">Trading App 점검 중...</span>
+        <span className="ml-2 text-sm text-muted-foreground">Trading App 종합 점검 중...</span>
       </div>
     );
   }
 
-  const overallOk = data?.okCount === data?.totalCount;
+  if (!data) return null;
+
+  const overallOk = data.okCount === data.totalCount;
+  const apiChecks = data.checks.filter(c => c.category === "api");
+  const apiOk = apiChecks.filter(c => c.status === "ok").length;
+  const resourceChecks = data.checks.filter(c => c.category === "resource");
+  const resOk = resourceChecks.filter(c => c.status === "ok").length;
+  const sslCheck = data.checks.find(c => c.category === "ssl");
+  const secCheck = data.checks.find(c => c.category === "security");
+  const headerOk = data.securityHeaders.filter(h => h.status === "ok").length;
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <Card>
-          <CardContent className="py-4 flex items-center gap-3">
-            <div className={`p-2 rounded-lg ${overallOk ? "bg-green-100 dark:bg-green-950/40" : "bg-red-100 dark:bg-red-950/40"}`}>
-              {overallOk ? <CheckCircle2 className="w-5 h-5 text-green-600" /> : <XCircle className="w-5 h-5 text-red-500" />}
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">종합 상태</p>
-              <p className={`text-sm font-bold ${overallOk ? "text-green-600" : "text-red-500"}`}>
-                {overallOk ? "정상" : "이상 감지"}
-              </p>
-            </div>
+      {/* 헤더 */}
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h2 className="text-lg font-bold flex items-center gap-2">
+            <TrendingUp className="w-5 h-5 text-emerald-500" />
+            Trading App 종합 점검
+          </h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            마지막 점검: {data.checkedAt}
+            <a href={TRADING_APP_URL} target="_blank" rel="noreferrer" className="ml-2 text-primary hover:underline inline-flex items-center gap-0.5">
+              <ExternalLink className="w-3 h-3" /> 사이트 열기
+            </a>
+          </p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            variant={autoRefresh ? "default" : "outline"}
+            size="sm"
+            className="text-xs gap-1"
+            onClick={() => setAutoRefresh(!autoRefresh)}
+          >
+            <Clock className="w-3 h-3" />
+            {autoRefresh ? "자동갱신 ON (30s)" : "자동갱신 OFF"}
+          </Button>
+          <Button
+            variant="default"
+            size="sm"
+            className="text-xs gap-1"
+            onClick={runCheck}
+            disabled={status === "loading"}
+          >
+            {status === "loading" ? <Loader2 className="w-3 h-3 animate-spin" /> : <Activity className="w-3 h-3" />}
+            {status === "loading" ? "점검 중..." : "새 점검 실행"}
+          </Button>
+        </div>
+      </div>
+
+      {status === "loading" && (
+        <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-3 flex items-center gap-2">
+          <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+          <span className="text-sm text-blue-700 dark:text-blue-300">새로운 점검을 실행 중입니다... 아래는 이전 점검 결과입니다.</span>
+        </div>
+      )}
+
+      {/* 종합 상태 카드 */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <Card className="col-span-2 md:col-span-1">
+          <CardContent className="p-4 text-center">
+            <StatusDot status={overallOk ? "ok" : "error"} />
+            <p className={`text-xl font-bold mt-1 ${overallOk ? "text-green-600" : "text-red-500"}`}>
+              {overallOk ? "정상" : "이상 감지"}
+            </p>
+            <p className="text-[10px] text-muted-foreground">종합 상태</p>
           </CardContent>
         </Card>
         <Card>
-          <CardContent className="py-4 flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-950/40">
-              <Wifi className="w-5 h-5 text-blue-600" />
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <Wifi className="w-3.5 h-3.5 text-blue-500" />
+              <span className="text-xs font-medium">서버 응답</span>
             </div>
-            <div>
-              <p className="text-xs text-muted-foreground">서버 응답</p>
-              <p className="text-sm font-bold">{pingMs !== null ? `${pingMs}ms` : "N/A"}</p>
-            </div>
+            <p className="text-sm font-bold">{pingMs !== null ? `${pingMs}ms` : "N/A"}</p>
+            <p className="text-[10px] text-muted-foreground">
+              {pingMs !== null ? (pingMs < 200 ? "양호" : pingMs < 500 ? "보통" : "느림") : "측정 불가"}
+            </p>
           </CardContent>
         </Card>
         <Card>
-          <CardContent className="py-4 flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-purple-100 dark:bg-purple-950/40">
-              <Clock className="w-5 h-5 text-purple-600" />
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <Globe className="w-3.5 h-3.5 text-cyan-500" />
+              <span className="text-xs font-medium">API</span>
             </div>
-            <div>
-              <p className="text-xs text-muted-foreground">총 점검 시간</p>
-              <p className="text-sm font-bold">{data?.totalMs}ms</p>
+            <p className="text-sm font-bold">{apiOk}/{apiChecks.length}</p>
+            <p className="text-[10px] text-muted-foreground">정상 응답</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <Shield className="w-3.5 h-3.5 text-orange-500" />
+              <span className="text-xs font-medium">보안</span>
             </div>
+            <p className="text-sm font-bold">{headerOk}/{data.securityHeaders.length}</p>
+            <p className="text-[10px] text-muted-foreground">보안 헤더</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <Gauge className="w-3.5 h-3.5 text-purple-500" />
+              <span className="text-xs font-medium">총 점검</span>
+            </div>
+            <p className="text-sm font-bold">{data.totalMs}ms</p>
+            <p className="text-[10px] text-muted-foreground">{data.okCount}/{data.totalCount} 통과</p>
           </CardContent>
         </Card>
       </div>
 
+      {/* API 연결 상태 */}
       <Card>
         <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Globe className="w-4 h-4" />
-              API 연결 상태 ({data?.okCount}/{data?.totalCount})
-            </CardTitle>
-            <Button variant="outline" size="sm" className="gap-1.5" onClick={runCheck}>
-              <RefreshCw className="w-3.5 h-3.5" />
-              재점검
-            </Button>
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Globe className="w-4 h-4 text-cyan-500" />
+            API 연결 상태
+            <Badge variant="secondary" className="text-[10px] ml-1">{apiOk}/{apiChecks.length} 정상</Badge>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-2">
+            {apiChecks.map((check, idx) => (
+              <div key={idx} className="flex items-center justify-between bg-muted/30 rounded-lg p-3">
+                <div className="flex items-center gap-2">
+                  <StatusDot status={check.status === "ok" ? "ok" : check.status === "warning" ? "warning" : "error"} />
+                  <span className="text-xs font-medium">{check.name}</span>
+                  {check.detail && <span className="text-[10px] text-muted-foreground">({check.detail})</span>}
+                </div>
+                <div className="flex items-center gap-3 text-xs">
+                  {check.responseTime !== undefined && (
+                    <span className="font-mono text-muted-foreground">{check.responseTime}ms</span>
+                  )}
+                  {check.httpStatus && (
+                    <Badge variant={check.httpStatus < 400 ? "secondary" : check.httpStatus === 404 ? "outline" : "destructive"} className="text-[10px]">
+                      HTTP {check.httpStatus}
+                    </Badge>
+                  )}
+                  <Badge variant={check.status === "ok" ? "default" : check.status === "warning" ? "outline" : "destructive"} className="text-[10px]">
+                    {check.status === "ok" ? "정상" : check.status === "warning" ? "주의" : "오류"}
+                  </Badge>
+                </div>
+              </div>
+            ))}
           </div>
+        </CardContent>
+      </Card>
+
+      {/* 정적 자원 & SSL 점검 */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <FileImage className="w-4 h-4 text-emerald-500" />
+            정적 자원 & SSL 점검
+            <Badge variant="secondary" className="text-[10px] ml-1">{resOk + (sslCheck?.status === "ok" ? 1 : 0)}/{resourceChecks.length + 1} 정상</Badge>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-2">
+            {sslCheck && (
+              <div className="flex items-center justify-between bg-muted/30 rounded-lg p-3">
+                <div className="flex items-center gap-2">
+                  <StatusDot status={sslCheck.status === "ok" ? "ok" : "error"} />
+                  <Lock className="w-3.5 h-3.5 text-green-600" />
+                  <span className="text-xs font-medium">{sslCheck.name}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-muted-foreground">{sslCheck.detail}</span>
+                  <Badge variant={sslCheck.status === "ok" ? "default" : "destructive"} className="text-[10px]">
+                    {sslCheck.status === "ok" ? "정상" : "위험"}
+                  </Badge>
+                </div>
+              </div>
+            )}
+            {resourceChecks.map((check, idx) => (
+              <div key={idx} className="flex items-center justify-between bg-muted/30 rounded-lg p-3">
+                <div className="flex items-center gap-2">
+                  <StatusDot status={check.status === "ok" ? "ok" : check.status === "warning" ? "warning" : "error"} />
+                  <span className="text-xs font-medium">{check.name}</span>
+                </div>
+                <div className="flex items-center gap-3 text-xs">
+                  {check.responseTime !== undefined && (
+                    <span className="font-mono text-muted-foreground">{check.responseTime}ms</span>
+                  )}
+                  <span className="text-[10px] text-muted-foreground">{check.detail}</span>
+                  <Badge variant={check.status === "ok" ? "default" : check.status === "warning" ? "outline" : "destructive"} className="text-[10px]">
+                    {check.status === "ok" ? "정상" : check.status === "warning" ? "주의" : "오류"}
+                  </Badge>
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 보안 헤더 상세 */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Shield className="w-4 h-4 text-orange-500" />
+            응답 헤더 보안 점검
+            <Badge variant={headerOk >= data.securityHeaders.length ? "default" : "secondary"} className="text-[10px] ml-1">
+              {headerOk}/{data.securityHeaders.length} 설정됨
+            </Badge>
+          </CardTitle>
+          <CardDescription className="text-xs">
+            웹 보안에 중요한 HTTP 응답 헤더 설정 상태를 점검합니다.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>API</TableHead>
-                <TableHead className="w-24 text-center">상태</TableHead>
-                <TableHead className="w-28 text-right">응답시간</TableHead>
+                <TableHead className="text-xs">헤더</TableHead>
+                <TableHead className="text-xs w-16 text-center">필수</TableHead>
+                <TableHead className="text-xs w-24 text-center">상태</TableHead>
+                <TableHead className="text-xs">값</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {data?.checks.map((check: any, i: number) => (
-                <TableRow key={i}>
-                  <TableCell className="text-sm">{check.name}</TableCell>
+              {data.securityHeaders.map((h, idx) => (
+                <TableRow key={idx}>
+                  <TableCell className="text-xs font-mono">{h.name}</TableCell>
                   <TableCell className="text-center">
-                    {check.status === "ok" ? (
-                      <Badge className="bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-400">정상</Badge>
+                    {h.required ? <Badge variant="destructive" className="text-[9px]">필수</Badge> : <Badge variant="outline" className="text-[9px]">권장</Badge>}
+                  </TableCell>
+                  <TableCell className="text-center">
+                    {h.status === "ok" ? (
+                      <Badge className="bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-400 text-[10px]">설정됨</Badge>
+                    ) : h.status === "warning" ? (
+                      <Badge variant="destructive" className="text-[10px]">미설정</Badge>
                     ) : (
-                      <Badge variant="destructive">오류</Badge>
+                      <Badge variant="outline" className="text-[10px]">미설정</Badge>
                     )}
                   </TableCell>
-                  <TableCell className="text-right text-sm font-mono">
-                    {check.responseTime ? `${check.responseTime}ms` : "-"}
-                    {check.error && <p className="text-[10px] text-red-500 mt-0.5">{check.error}</p>}
+                  <TableCell className="text-[10px] font-mono text-muted-foreground max-w-[200px] truncate">
+                    {h.value || "-"}
                   </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
-          <p className="text-[11px] text-muted-foreground mt-3 text-right">
-            점검 시각: {data?.checkedAt}
-          </p>
         </CardContent>
       </Card>
+
+      {/* 조치 권고사항 */}
+      <TradingRecommendations data={data} pingMs={pingMs} />
+
+      {/* 점검 이력 */}
+      {checkHistory.length > 0 && <TradingCheckHistory history={checkHistory} onClear={() => { setCheckHistory([]); localStorage.removeItem("trading_check_history"); }} />}
     </div>
+  );
+}
+
+function TradingRecommendations({ data, pingMs }: { data: TradingCheckResult; pingMs: number | null }) {
+  const recs: { level: "critical" | "warning" | "info" | "good"; title: string; detail: string }[] = [];
+
+  const failedApis = data.checks.filter(c => c.category === "api" && c.status === "error");
+  const warningApis = data.checks.filter(c => c.category === "api" && c.status === "warning");
+  if (failedApis.length > 0) {
+    recs.push({ level: "critical", title: `${failedApis.length}개 API 연결 실패`, detail: `${failedApis.map(c => c.name).join(", ")} — 서버 상태를 즉시 확인하세요.` });
+  }
+  if (warningApis.length > 0) {
+    recs.push({ level: "warning", title: `${warningApis.length}개 API 주의 필요`, detail: `${warningApis.map(c => `${c.name}${c.detail ? `(${c.detail})` : ""}`).join(", ")}` });
+  }
+  if (failedApis.length === 0 && warningApis.length === 0) {
+    recs.push({ level: "good", title: "모든 API 연결 정상", detail: "연동된 모든 API가 정상적으로 응답하고 있습니다." });
+  }
+
+  if (pingMs !== null) {
+    if (pingMs > 2000) recs.push({ level: "critical", title: `서버 응답 매우 느림 (${pingMs}ms)`, detail: "서버 응답이 2초를 초과했습니다. Cold Start 또는 서버 과부하일 수 있습니다." });
+    else if (pingMs > 500) recs.push({ level: "warning", title: `서버 응답 느림 (${pingMs}ms)`, detail: "Vercel Serverless Cold Start일 수 있습니다. 재점검 시 개선되는지 확인하세요." });
+    else recs.push({ level: "good", title: `서버 응답 양호 (${pingMs}ms)`, detail: "서버 연결 상태가 양호합니다." });
+  }
+
+  const headerOk = data.securityHeaders.filter(h => h.status === "ok").length;
+  const requiredMissing = data.securityHeaders.filter(h => h.required && h.status !== "ok");
+  if (requiredMissing.length > 0) {
+    recs.push({ level: "warning", title: `필수 보안 헤더 ${requiredMissing.length}개 미설정`, detail: `${requiredMissing.map(h => h.name).join(", ")} — Vercel 설정 또는 next.config에서 보안 헤더를 추가하세요.` });
+  } else if (headerOk === data.securityHeaders.length) {
+    recs.push({ level: "good", title: "모든 보안 헤더 설정됨", detail: "웹 보안 헤더가 적절히 구성되어 있습니다." });
+  } else {
+    recs.push({ level: "info", title: `권장 보안 헤더 ${data.securityHeaders.length - headerOk}개 미설정`, detail: "선택적이지만 설정하면 보안이 강화됩니다." });
+  }
+
+  const sslCheck = data.checks.find(c => c.category === "ssl");
+  if (sslCheck && sslCheck.status !== "ok") {
+    recs.push({ level: "critical", title: "HTTPS 미사용", detail: "SSL/TLS가 활성화되지 않았습니다. 모든 통신이 암호화 없이 전송됩니다." });
+  }
+
+  const resChecks = data.checks.filter(c => c.category === "resource");
+  const resFailed = resChecks.filter(c => c.status === "error");
+  if (resFailed.length > 0) {
+    recs.push({ level: "warning", title: `정적 자원 ${resFailed.length}개 접근 불가`, detail: `${resFailed.map(c => c.name).join(", ")} — 빌드/배포 상태를 확인하세요.` });
+  }
+
+  const levelOrder = { critical: 0, warning: 1, info: 2, good: 3 };
+  recs.sort((a, b) => levelOrder[a.level] - levelOrder[b.level]);
+
+  const colors = { critical: "bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800", warning: "bg-yellow-50 dark:bg-yellow-950/30 border-yellow-200 dark:border-yellow-800", info: "bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800", good: "bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800" };
+  const icons = { critical: <XCircle className="w-4 h-4 text-red-500 flex-shrink-0" />, warning: <AlertTriangle className="w-4 h-4 text-yellow-500 flex-shrink-0" />, info: <Info className="w-4 h-4 text-blue-500 flex-shrink-0" />, good: <CheckCircle2 className="w-4 h-4 text-green-500 flex-shrink-0" /> };
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <Lightbulb className="w-4 h-4 text-yellow-500" />
+          조치 권고사항
+          <Badge variant="secondary" className="text-[10px] ml-1">{recs.length}건</Badge>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-2">
+          {recs.map((rec, idx) => (
+            <div key={idx} className={`border rounded-lg p-3 ${colors[rec.level]}`}>
+              <div className="flex items-start gap-2">
+                {icons[rec.level]}
+                <div>
+                  <p className="text-xs font-medium">{rec.title}</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">{rec.detail}</p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function TradingCheckHistory({ history, onClear }: { history: TradingHistoryEntry[]; onClear: () => void }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <History className="w-4 h-4 text-indigo-500" />
+            점검 이력
+            <Badge variant="secondary" className="text-[10px] ml-1">{history.length}건</Badge>
+          </CardTitle>
+          <div className="flex items-center gap-1.5">
+            <Button variant="ghost" size="sm" className="h-6 text-[10px] px-2" onClick={() => setExpanded(!expanded)}>
+              {expanded ? "접기" : "펼치기"}
+            </Button>
+            <Button variant="ghost" size="sm" className="h-6 text-[10px] px-2 text-red-500 hover:text-red-600" onClick={onClear}>
+              <Trash2 className="w-3 h-3 mr-0.5" /> 초기화
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      {expanded && (
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-xs">점검 시각</TableHead>
+                <TableHead className="text-xs w-20 text-center">상태</TableHead>
+                <TableHead className="text-xs w-24 text-center">통과율</TableHead>
+                <TableHead className="text-xs w-20 text-right">Ping</TableHead>
+                <TableHead className="text-xs w-24 text-right">총 시간</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {history.map((h, idx) => (
+                <TableRow key={idx}>
+                  <TableCell className="text-xs">{h.checkedAt}</TableCell>
+                  <TableCell className="text-center">
+                    {h.status === "ok" ? (
+                      <Badge className="bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-400 text-[10px]">정상</Badge>
+                    ) : (
+                      <Badge variant="destructive" className="text-[10px]">이상</Badge>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-center text-xs font-mono">{h.okCount}/{h.totalCount}</TableCell>
+                  <TableCell className="text-right text-xs font-mono">{h.pingMs !== null ? `${h.pingMs}ms` : "-"}</TableCell>
+                  <TableCell className="text-right text-xs font-mono">{h.totalMs}ms</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      )}
+    </Card>
   );
 }
 

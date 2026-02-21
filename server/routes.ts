@@ -2770,6 +2770,123 @@ export async function registerRoutes(
     }
   });
 
+  // ========== 멀티팩터 전략 ==========
+  const multiFactorModule = await import("./multiFactorStrategy.js");
+
+  app.get("/api/trading/multi-factor", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      if (!userId) return res.status(400).json({ message: "로그인 필요" });
+      const strategy = await storage.getMultiFactorStrategy(userId);
+      res.json(strategy || null);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "전략 조회 실패" });
+    }
+  });
+
+  app.post("/api/trading/multi-factor", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      if (!userId) return res.status(400).json({ message: "로그인 필요" });
+      const data = { ...req.body, userId };
+      const strategy = await storage.upsertMultiFactorStrategy(data);
+      res.json(strategy);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "전략 저장 실패" });
+    }
+  });
+
+  app.post("/api/trading/multi-factor/toggle", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      if (!userId) return res.status(400).json({ message: "로그인 필요" });
+      const strategy = await storage.getMultiFactorStrategy(userId);
+      if (!strategy) return res.status(404).json({ message: "전략 설정이 없습니다" });
+      const updated = await storage.updateMultiFactorStrategy(strategy.id, { isActive: !strategy.isActive } as any);
+      res.json(updated);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "전략 토글 실패" });
+    }
+  });
+
+  app.get("/api/trading/multi-factor/positions", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      if (!userId) return res.status(400).json({ message: "로그인 필요" });
+      const strategy = await storage.getMultiFactorStrategy(userId);
+      if (!strategy) return res.json([]);
+      const filter = req.query.filter as string;
+      if (filter === "active") {
+        res.json(await storage.getActiveMultiFactorPositions(strategy.id));
+      } else {
+        res.json(await storage.getMultiFactorPositions(strategy.id));
+      }
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "포지션 조회 실패" });
+    }
+  });
+
+  app.get("/api/trading/multi-factor/logs", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      if (!userId) return res.status(400).json({ message: "로그인 필요" });
+      const strategy = await storage.getMultiFactorStrategy(userId);
+      if (!strategy) return res.json([]);
+      const limit = parseInt(req.query.limit as string) || 50;
+      res.json(await storage.getMultiFactorLogs(strategy.id, limit));
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "로그 조회 실패" });
+    }
+  });
+
+  app.post("/api/trading/multi-factor/execute", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      if (!userId) return res.status(400).json({ message: "로그인 필요" });
+      const { phase } = req.body;
+      if (phase === "auto") {
+        const result = await multiFactorModule.executeMultiFactorStrategy(userId);
+        return res.json(result);
+      }
+      if (!["scan", "score", "buy", "sell"].includes(phase)) {
+        return res.status(400).json({ message: "유효하지 않은 단계 (scan/score/buy/sell/auto)" });
+      }
+      const result = await multiFactorModule.executeMultiFactorPhase(userId, phase);
+      res.json(result);
+    } catch (error: any) {
+      console.error("[MultiFactor] Execute error:", error);
+      res.status(500).json({ message: error.message || "전략 실행 실패" });
+    }
+  });
+
+  app.post("/api/trading/multi-factor/score", requireUser, async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      if (!userId) return res.status(400).json({ message: "로그인 필요" });
+      const { stockCode, stockName } = req.body;
+      const strategy = await storage.getMultiFactorStrategy(userId);
+      if (!strategy) return res.status(404).json({ message: "전략 설정이 없습니다" });
+      const score = await multiFactorModule.computeFactorScores(stockCode, stockName || "", strategy);
+      res.json(score);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "스코어 조회 실패" });
+    }
+  });
+
+  // 멀티팩터 포지션 수동 청산
+  app.post("/api/trading/multi-factor/positions/:id/close", requireUser, async (req, res) => {
+    try {
+      const posId = Number(req.params.id);
+      const updated = await storage.updateMultiFactorPosition(posId, {
+        status: "closed",
+        closedAt: new Date(),
+      });
+      res.json(updated);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "포지션 청산 실패" });
+    }
+  });
+
   // ========== 손절/트레일링 스탑 감시 ==========
 
   // 손절 감시 목록 조회
