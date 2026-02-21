@@ -4319,6 +4319,84 @@ ${researchList}
     }
   });
 
+  // ========== 주간통계 AI 분석 ==========
+  app.post("/api/markets/weekly-stats/ai-analyze", requireUser, async (req, res) => {
+    try {
+      const { statsData } = req.body;
+      if (!statsData) return res.status(400).json({ message: "통계 데이터가 필요합니다." });
+
+      const userId = req.session?.userId;
+      let userKey: UserAiKeyOption | undefined;
+      if (userId) {
+        const userAiConfig = await storage.getUserAiConfig(userId);
+        userKey = decryptUserAiKey(userAiConfig);
+      }
+      if (!req.session?.isAdmin && !userKey) {
+        return res.status(403).json({ message: "AI 분석을 사용하려면 개인 API 키를 등록해주세요." });
+      }
+
+      const d = statsData;
+      const sections: string[] = [];
+
+      if (d.globalIndices?.length) {
+        sections.push("## 글로벌 주요 지수\n" + d.globalIndices.map((x: any) => `- ${x.name}: ${x.price.toLocaleString()} (주간 ${x.weekChange > 0 ? "+" : ""}${x.weekChange}%, 전일 ${x.dayChange > 0 ? "+" : ""}${x.dayChange}%)`).join("\n"));
+      }
+      if (d.domesticIndices?.length) {
+        sections.push("## 국내 주요 지수\n" + d.domesticIndices.map((x: any) => `- ${x.name}: ${x.price.toLocaleString()} (주간 ${x.weekChange > 0 ? "+" : ""}${x.weekChange}%, 전일 ${x.dayChange > 0 ? "+" : ""}${x.dayChange}%)`).join("\n"));
+      }
+      if (d.bonds?.length) {
+        sections.push("## 채권/금리\n" + d.bonds.map((x: any) => `- ${x.name}: ${x.value}% (주간 ${x.weekChange > 0 ? "+" : ""}${x.weekChange}%p)`).join("\n"));
+      }
+      if (d.forex?.length) {
+        sections.push("## 환율\n" + d.forex.map((x: any) => `- ${x.name}: ${x.value} (주간 ${x.weekChange > 0 ? "+" : ""}${x.weekChange}%)`).join("\n"));
+      }
+      if (d.commodities?.length) {
+        sections.push("## 원자재\n" + d.commodities.map((x: any) => `- ${x.name}: $${x.price} (주간 ${x.weekChange > 0 ? "+" : ""}${x.weekChange}%)`).join("\n"));
+      }
+      if (d.etfs?.length) {
+        sections.push("## 글로벌 주요 ETF\n" + d.etfs.map((x: any) => `- ${x.name}: $${x.price} (주간 ${x.weekChange > 0 ? "+" : ""}${x.weekChange}%)`).join("\n"));
+      }
+      if (d.domesticEtfs?.length) {
+        sections.push("## 국내 ETF 수익률 TOP 10\n" + d.domesticEtfs.map((x: any, i: number) => `${i + 1}. ${x.name}: ${x.price.toLocaleString()}원 (주간 ${x.weekReturn > 0 ? "+" : ""}${x.weekReturn}%)`).join("\n"));
+      }
+      if (d.coreEtfs?.length) {
+        sections.push("## 관심ETF(Core) 주간 수익률\n" + d.coreEtfs.map((x: any) => `- ${x.name} [${x.sector}]: ${x.price.toLocaleString()}원 (주간 ${x.weekReturn > 0 ? "+" : ""}${x.weekReturn}%)`).join("\n"));
+      }
+      if (d.crypto?.length) {
+        sections.push("## 암호화폐(관심)\n" + d.crypto.map((x: any) => `- ${x.name} (${x.symbol}): $${x.price} (24h ${x.change24h > 0 ? "+" : ""}${x.change24h}%, 7d ${x.change7d > 0 ? "+" : ""}${x.change7d}%)`).join("\n"));
+      }
+      if (d.cryptoTop10?.length) {
+        sections.push("## 암호화폐 주간상승률 TOP 10\n" + d.cryptoTop10.map((x: any, i: number) => `${i + 1}. ${x.name} (${x.symbol}): $${x.price} (7d ${x.change7d > 0 ? "+" : ""}${x.change7d}%)`).join("\n"));
+      }
+
+      const dataText = sections.join("\n\n");
+      const fullPrompt = `당신은 글로벌 금융시장 전문 애널리스트입니다. 아래 주간 시장 통계 데이터를 종합 분석하여 한국어로 투자 인사이트 보고서를 작성해주세요.
+
+분석 시 다음 구조를 따라주세요:
+1. **📊 주간 시장 요약** - 글로벌/국내 증시 흐름을 3-4문장으로 요약
+2. **🌍 글로벌 시장 분석** - 미국, 유럽, 아시아 증시 동향 및 주요 이슈
+3. **🇰🇷 국내 시장 분석** - KOSPI/KOSDAQ 동향, 주도 섹터/테마 분석
+4. **💰 채권·환율·원자재 동향** - 금리 방향성, 환율 변동, 원자재 시장 분석
+5. **📈 ETF 흐름 분석** - 글로벌/국내 ETF 등락 기반 자금 흐름, 섹터 로테이션
+6. **🪙 암호화폐 동향** - 관심 코인 및 시장 전체 흐름
+7. **⚠️ 리스크 요인** - 주의할 리스크, 변동성 요인
+8. **💡 다음주 투자 전략 제안** - 구체적 액션 아이템 3-5개
+
+각 섹션은 구체적 수치를 인용하여 작성하고, 전문적이면서도 이해하기 쉽게 작성해주세요.
+
+---
+${dataText}
+---
+기준일: ${d.updatedAt || new Date().toLocaleString("ko-KR")}`;
+
+      const result = await callAI(fullPrompt, userKey);
+      res.json({ analysis: result });
+    } catch (error: any) {
+      console.error("Weekly stats AI error:", error.message);
+      res.status(500).json({ message: error.message || "AI 분석 실패" });
+    }
+  });
+
   // --- 1) 시장 지수 (KOSPI, KOSDAQ, KOSPI200) ---
   app.get("/api/markets/domestic/indices", async (_req: any, res) => {
     try {

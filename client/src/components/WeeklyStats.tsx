@@ -1,9 +1,11 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Loader2, RefreshCw, TrendingUp, TrendingDown, Globe, Landmark, Droplets, BarChart3, Bitcoin, DollarSign, Flag, Star } from "lucide-react";
+import { Loader2, RefreshCw, TrendingUp, TrendingDown, Globe, Landmark, Droplets, BarChart3, Bitcoin, DollarSign, Flag, Star, Sparkles, X } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 
 interface WeeklyStatsData {
   globalIndices: { name: string; price: number; weekChange: number; dayChange: number }[];
@@ -39,6 +41,9 @@ function SectionCard({ title, icon, children }: { title: string; icon: React.Rea
 }
 
 export default function WeeklyStats() {
+  const { toast } = useToast();
+  const [aiResult, setAiResult] = useState<string | null>(null);
+
   const { data, isLoading, refetch, isFetching } = useQuery<WeeklyStatsData>({
     queryKey: ["/api/markets/weekly-stats"],
     queryFn: async () => {
@@ -47,6 +52,30 @@ export default function WeeklyStats() {
       return res.json();
     },
     staleTime: 5 * 60 * 1000,
+  });
+
+  const aiMutation = useMutation({
+    mutationFn: async () => {
+      if (!data) throw new Error("통계 데이터가 없습니다.");
+      const res = await fetch("/api/markets/weekly-stats/ai-analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ statsData: data }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "AI 분석 실패");
+      }
+      return res.json() as Promise<{ analysis: string }>;
+    },
+    onSuccess: (result) => {
+      setAiResult(result.analysis);
+      toast({ title: "AI 분석 완료", description: "주간통계 분석 보고서가 생성되었습니다." });
+    },
+    onError: (error: Error) => {
+      toast({ title: "AI 분석 실패", description: error.message, variant: "destructive" });
+    },
   });
 
   return (
@@ -59,8 +88,38 @@ export default function WeeklyStats() {
             {isFetching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
             새로고침
           </Button>
+          <Button
+            size="sm"
+            className="gap-1"
+            onClick={() => aiMutation.mutate()}
+            disabled={aiMutation.isPending || !data || isLoading}
+          >
+            {aiMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+            AI분석
+          </Button>
         </div>
       </div>
+
+      {/* AI 분석 결과 */}
+      {aiResult && (
+        <Card className="border-primary/30 bg-primary/5">
+          <CardHeader className="pb-2 pt-4 px-4">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-primary" /> AI 주간통계 분석 보고서
+              </CardTitle>
+              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setAiResult(null)}>
+                <X className="w-3.5 h-3.5" />
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="px-4 pb-4">
+            <div className="prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed whitespace-pre-wrap">
+              {aiResult}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {isLoading ? (
         <div className="flex items-center justify-center py-16">
