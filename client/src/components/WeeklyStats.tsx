@@ -118,11 +118,11 @@ export default function WeeklyStats() {
         credentials: "include",
         body: JSON.stringify({ statsData: data }),
       });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.message || "AI 분석 실패");
-      }
-      return res.json() as Promise<{ analysis: string }>;
+      const text = await res.text();
+      let json: any;
+      try { json = JSON.parse(text); } catch { throw new Error("서버 응답 오류 - 로그인 상태를 확인하세요."); }
+      if (!res.ok) throw new Error(json.message || "AI 분석 실패");
+      return json as { analysis: string };
     },
     onSuccess: (result) => {
       setAiResult(result.analysis);
@@ -150,11 +150,11 @@ export default function WeeklyStats() {
           isShared: true,
         }),
       });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.message || "저장 실패");
-      }
-      return res.json();
+      const text = await res.text();
+      let json: any;
+      try { json = JSON.parse(text); } catch { throw new Error("서버 응답 오류 - 로그인 상태를 확인하세요."); }
+      if (!res.ok) throw new Error(json.message || "저장 실패");
+      return json;
     },
     onSuccess: () => {
       toast({ title: "저장 완료", description: "주간보고서가 저장되었습니다." });
