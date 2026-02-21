@@ -2739,8 +2739,7 @@ function ManualSkillsSection() {
   const accountKey = isAdmin ? "admin" : (userId ? String(userId) : "guest");
   const storageKey = `manual-custom-skills-${accountKey}`;
 
-  // 내장 스킬은 admin만 표시
-  const builtinSkills: ManualSkillItem[] = isAdmin ? [
+  const builtinSkills: ManualSkillItem[] = [
     {
       id: "gap-strategy",
       name: "시가급등 추세추종",
@@ -2755,7 +2754,7 @@ function ManualSkillsSection() {
       description: "MA·RSI·볼린저·거래량·갭 5개 팩터 종합점수로 자동매매",
       isBuiltin: true,
     },
-  ] : [];
+  ];
 
   const defaultActiveSkill = builtinSkills.length > 0 ? "gap-strategy" : "";
   const [activeSkill, setActiveSkill] = useState<string>(defaultActiveSkill);
@@ -2776,8 +2775,7 @@ function ManualSkillsSection() {
       const saved = localStorage.getItem(storageKey);
       const loaded = saved ? JSON.parse(saved) : [];
       setCustomSkills(loaded);
-      // admin이면 내장 스킬 선택, 일반유저면 첫 번째 커스텀 스킬 또는 빈값
-      setActiveSkill(isAdmin ? "gap-strategy" : (loaded.length > 0 ? loaded[0].id : ""));
+      setActiveSkill("gap-strategy");
     } catch { setCustomSkills([]); }
   }, [storageKey, isAdmin]);
 
@@ -2870,9 +2868,9 @@ function ManualSkillsSection() {
       </div>
 
       {/* 선택된 스킬 콘텐츠 */}
-      {activeSkill === "gap-strategy" && isAdmin ? (
+      {activeSkill === "gap-strategy" ? (
         <GapStrategyPanel />
-      ) : activeSkill === "multi-factor" && isAdmin ? (
+      ) : activeSkill === "multi-factor" ? (
         <MultiFactorPanel />
       ) : activeSkill ? (
         <CustomSkillContent
