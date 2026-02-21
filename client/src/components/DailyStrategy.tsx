@@ -878,6 +878,7 @@ export default function DailyStrategy({ period = "daily" }: DailyStrategyProps) 
 
   // ===== 팝업 폰트 크기 State =====
   const DEFAULT_FONT_SIZE = 14;
+  const [mainReportFontSize, setMainReportFontSize] = useState(DEFAULT_FONT_SIZE);
   const [reportFontSize, setReportFontSize] = useState(DEFAULT_FONT_SIZE);
   const [analysisFontSize, setAnalysisFontSize] = useState(DEFAULT_FONT_SIZE);
 
@@ -1937,7 +1938,7 @@ export default function DailyStrategy({ period = "daily" }: DailyStrategyProps) 
       {displayReport && !isFetching && (
         <>
       {/* 보고서 헤더 */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="space-y-1">
           <h2 className="text-lg font-bold flex items-center gap-2">
             <FileText className="w-5 h-5 text-primary" />
@@ -1950,25 +1951,34 @@ export default function DailyStrategy({ period = "daily" }: DailyStrategyProps) 
             <span>{displayReport.reportTime} 생성</span>
           </div>
         </div>
-        {isLoggedIn && (
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={handleGenerate} disabled={isFetching || (!isAdmin && period !== "daily")} className="gap-2">
-            {isFetching ? <Loader2 className="w-4 h-4 animate-spin" /> : <FilePlus className="w-4 h-4" />}
-            새로 생성
-          </Button>
-          <Button size="sm" onClick={() => openReportHtml(displayReport, periodLabel)} className="gap-2">
-            <FileOutput className="w-4 h-4" />
-            보고서 작성
-          </Button>
+          <FontSizeControl
+            fontSize={mainReportFontSize}
+            onIncrease={() => setMainReportFontSize(s => Math.min(24, s + 2))}
+            onDecrease={() => setMainReportFontSize(s => Math.max(10, s - 2))}
+            onReset={() => setMainReportFontSize(DEFAULT_FONT_SIZE)}
+          />
+          {isLoggedIn && (
+          <>
+            <Button variant="outline" size="sm" onClick={handleGenerate} disabled={isFetching || (!isAdmin && period !== "daily")} className="gap-2">
+              {isFetching ? <Loader2 className="w-4 h-4 animate-spin" /> : <FilePlus className="w-4 h-4" />}
+              새로 생성
+            </Button>
+            <Button size="sm" onClick={() => openReportHtml(displayReport, periodLabel)} className="gap-2">
+              <FileOutput className="w-4 h-4" />
+              보고서 작성
+            </Button>
+          </>
+          )}
         </div>
-        )}
       </div>
 
+      <div style={{ fontSize: `${mainReportFontSize}px` }}>
       {/* 시장 요약 배너 */}
       {displayReport.marketSummary && (
         <Card className="bg-gradient-to-r from-primary/5 to-primary/10 border-primary/20">
           <CardContent className="py-4">
-            <p className="text-sm font-medium text-center">{displayReport.marketSummary}</p>
+            <p className="font-medium text-center">{displayReport.marketSummary}</p>
           </CardContent>
         </Card>
       )}
@@ -2150,6 +2160,7 @@ export default function DailyStrategy({ period = "daily" }: DailyStrategyProps) 
         본 보고서는 참고용이며, 투자 판단의 최종 책임은 투자자 본인에게 있습니다.
         데이터 출처: 한국투자증권 API, 네이버 금융
       </p>
+      </div>
         </>
       )}
 
