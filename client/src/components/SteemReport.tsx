@@ -381,6 +381,7 @@ export default function SteemReport() {
   const [isLoadingReport, setIsLoadingReport] = useState(false);
   const [viewingPost, setViewingPost] = useState<SteemPost | null>(null);
   const [editingDraft, setEditingDraft] = useState<SteemPost | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const initialLoadDone = useRef(false);
@@ -704,6 +705,7 @@ export default function SteemReport() {
     createdBy: string;
   }[]>([]);
   const [isLoadingReportList, setIsLoadingReportList] = useState(false);
+  const [reportFilter, setReportFilter] = useState<"all" | "strategy" | "weekly-stats" | "etf-realtime">("all");
 
   const handleOpenReportPicker = useCallback(async () => {
     setReportPickerOpen(true);
@@ -742,7 +744,34 @@ export default function SteemReport() {
       return;
     }
     const pLabel = periodLabelMap[report.period] || "일간";
-    const sourceLabel = report.source === "etf-realtime" ? "AI 트렌드 분석 보고서" : `AI ${pLabel} 분석 보고서`;
+    const sourceLabel = report.source === "etf-realtime"
+      ? "AI 트렌드 분석 보고서"
+      : report.source === "weekly-stats"
+        ? "AI 주간통계 분석 보고서"
+        : `AI ${pLabel} 분석 보고서`;
+
+    let bodyContent = analysis;
+    if (report.source === "weekly-stats") {
+      bodyContent = analysis
+        .replace(/<br\s*\/?>/gi, "\n")
+        .replace(/<\/p>/gi, "\n\n")
+        .replace(/<\/h[1-6]>/gi, "\n\n")
+        .replace(/<\/tr>/gi, "\n")
+        .replace(/<\/th>/gi, " | ")
+        .replace(/<\/td>/gi, " | ")
+        .replace(/<li>/gi, "- ")
+        .replace(/<\/li>/gi, "\n")
+        .replace(/<hr\s*\/?>/gi, "\n---\n")
+        .replace(/<[^>]+>/g, "")
+        .replace(/&nbsp;/g, " ")
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+    }
+
     const lines: string[] = [];
     lines.push("# Comment");
     lines.push(""); lines.push(""); lines.push("");
@@ -750,14 +779,14 @@ export default function SteemReport() {
     lines.push("");
     lines.push(`> 생성 시간: ${report.createdAt}`);
     lines.push("");
-    lines.push(analysis);
+    lines.push(bodyContent);
     lines.push("");
     lines.push("---");
     lines.push("*이 보고서는 AI가 자동 수집 데이터를 기반으로 생성한 내용입니다.*");
     lines.push("*데이터 출처: 네이버 금융, Yahoo Finance, CoinGecko, 한국투자증권 API 등*");
 
     setPostBody(lines.join("\n"));
-    const titleLabel = report.source === "etf-realtime" ? "실시간ETF" : pLabel;
+    const titleLabel = report.source === "etf-realtime" ? "실시간ETF" : report.source === "weekly-stats" ? "주간통계" : pLabel;
     setPostTitle(getDefaultTitle(titleLabel));
     setReportPickerOpen(false);
     toast({ title: `✅ ${sourceLabel}를 불러왔습니다`, description: `작성일: ${report.createdAt}` });
@@ -1122,6 +1151,16 @@ export default function SteemReport() {
 
             <Button
               variant="outline"
+              onClick={() => setPreviewOpen(true)}
+              disabled={!postTitle.trim() || !postBody.trim()}
+              className="gap-2"
+            >
+              <Eye className="w-4 h-4" />
+              미리보기
+            </Button>
+
+            <Button
+              variant="outline"
               onClick={handleSaveDraft}
               disabled={saveMutation.isPending || updateMutation.isPending || !postTitle.trim() || !postBody.trim()}
               className="gap-2"
@@ -1335,8 +1374,62 @@ export default function SteemReport() {
         </DialogContent>
       </Dialog>
 
+      {/* ===== 미리보기 다이얼로그 ===== */}
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Eye className="w-5 h-5 text-blue-600" />
+              포스팅 미리보기
+            </DialogTitle>
+          </DialogHeader>
+          <div className="overflow-y-auto flex-1 -mx-2 px-2">
+            <div className="border rounded-lg p-6 bg-white dark:bg-slate-950">
+              <div className="mb-4 pb-4 border-b">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-sm text-muted-foreground">@{steemAccount}</span>
+                  <span className="text-xs text-muted-foreground">·</span>
+                  <span className="text-xs text-muted-foreground">{new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}</span>
+                </div>
+                <h1 className="text-2xl font-bold">{postTitle || "(제목 없음)"}</h1>
+                <div className="flex gap-1.5 mt-3 flex-wrap">
+                  {tagsInput.split(",").map(t => t.trim()).filter(Boolean).map((tag) => (
+                    <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
+                  ))}
+                </div>
+              </div>
+              <div
+                className="prose prose-sm dark:prose-invert max-w-none
+                  [&_h1]:text-xl [&_h1]:font-bold [&_h1]:mt-6 [&_h1]:mb-3
+                  [&_h2]:text-lg [&_h2]:font-bold [&_h2]:mt-5 [&_h2]:mb-2
+                  [&_h3]:text-base [&_h3]:font-bold [&_h3]:mt-4 [&_h3]:mb-2
+                  [&_table]:w-full [&_table]:border-collapse [&_table]:text-sm [&_table]:my-3
+                  [&_th]:border [&_th]:px-2 [&_th]:py-1 [&_th]:bg-muted/50 [&_th]:font-medium [&_th]:text-left
+                  [&_td]:border [&_td]:px-2 [&_td]:py-1
+                  [&_blockquote]:border-l-4 [&_blockquote]:border-blue-400 [&_blockquote]:pl-4 [&_blockquote]:italic [&_blockquote]:text-muted-foreground
+                  [&_img]:max-w-full [&_img]:rounded-lg [&_img]:my-3
+                  [&_hr]:my-4
+                  [&_a]:text-blue-600 [&_a]:underline"
+                dangerouslySetInnerHTML={{ __html: steemMarkdownToHtml(postBody) }}
+              />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" size="sm" onClick={() => {
+              navigator.clipboard.writeText(postBody);
+              toast({ title: "본문이 클립보드에 복사되었습니다" });
+            }} className="gap-1">
+              <Copy className="w-3 h-3" /> 본문 복사
+            </Button>
+            <Button size="sm" onClick={() => { setPreviewOpen(false); }} className="gap-1">
+              닫기
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* ===== AI 보고서 선택 다이얼로그 ===== */}
-      <Dialog open={reportPickerOpen} onOpenChange={setReportPickerOpen}>
+      <Dialog open={reportPickerOpen} onOpenChange={(open) => { setReportPickerOpen(open); if (!open) setReportFilter("all"); }}>
         <DialogContent className="max-w-lg max-h-[80vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -1344,6 +1437,29 @@ export default function SteemReport() {
               AI 분석 보고서 선택
             </DialogTitle>
           </DialogHeader>
+          <div className="flex gap-1 mb-2 flex-wrap">
+            {([
+              ["all", "전체"],
+              ["strategy", "투자전략"],
+              ["weekly-stats", "주간통계"],
+              ["etf-realtime", "실시간ETF"],
+            ] as const).map(([key, label]) => {
+              const count = key === "all"
+                ? reportList.length
+                : reportList.filter(r => key === "strategy" ? (r.source !== "weekly-stats" && r.source !== "etf-realtime") : r.source === key).length;
+              return (
+                <Button
+                  key={key}
+                  variant={reportFilter === key ? "default" : "outline"}
+                  size="sm"
+                  className="h-7 text-xs gap-1"
+                  onClick={() => setReportFilter(key)}
+                >
+                  {label} <span className="text-[10px] opacity-70">({count})</span>
+                </Button>
+              );
+            })}
+          </div>
           <div className="overflow-y-auto flex-1 -mx-2 px-2">
             {isLoadingReportList ? (
               <div className="flex items-center justify-center py-12">
@@ -1358,7 +1474,13 @@ export default function SteemReport() {
               </div>
             ) : (
               <div className="space-y-2">
-                {reportList.map((report) => (
+                {reportList
+                  .filter(r => {
+                    if (reportFilter === "all") return true;
+                    if (reportFilter === "strategy") return r.source !== "weekly-stats" && r.source !== "etf-realtime";
+                    return r.source === reportFilter;
+                  })
+                  .map((report) => (
                   <button
                     key={report.id}
                     onClick={() => handleSelectReport(report)}
@@ -1366,8 +1488,8 @@ export default function SteemReport() {
                   >
                     <div className="flex items-center justify-between mb-1">
                       <div className="flex items-center gap-2">
-                        <Badge variant={report.source === "etf-realtime" ? "default" : "secondary"} className="text-[10px]">
-                          {report.source === "etf-realtime" ? "실시간ETF" : "투자전략"}
+                        <Badge variant={report.source === "etf-realtime" ? "default" : report.source === "weekly-stats" ? "default" : "secondary"} className={`text-[10px] ${report.source === "weekly-stats" ? "bg-indigo-600" : ""}`}>
+                          {report.source === "etf-realtime" ? "실시간ETF" : report.source === "weekly-stats" ? "주간통계" : "투자전략"}
                         </Badge>
                         <Badge variant="outline" className="text-[10px]">
                           {periodLabelMap[report.period] || "일간"}
@@ -1383,7 +1505,7 @@ export default function SteemReport() {
                       {report.prompt || "프롬프트 없음"}
                     </p>
                     <p className="text-xs mt-1.5 line-clamp-2 text-foreground/80">
-                      {(report.result?.analysis || "").slice(0, 150)}...
+                      {(report.result?.analysis || "").replace(/<[^>]+>/g, "").slice(0, 150)}...
                     </p>
                   </button>
                 ))}
@@ -1396,3 +1518,25 @@ export default function SteemReport() {
   );
 }
 
+function steemMarkdownToHtml(md: string): string {
+  let html = md
+    .replace(/^---$/gm, '<hr/>')
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" />')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+    .replace(/^> (.*$)/gm, '<blockquote>$1</blockquote>')
+    .replace(/^### (.*$)/gm, '<h3>$1</h3>')
+    .replace(/^## (.*$)/gm, '<h2>$1</h2>')
+    .replace(/^# (.*$)/gm, '<h1>$1</h1>')
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    .replace(/`([^`]+)`/g, '<code class="bg-muted px-1 py-0.5 rounded text-sm">$1</code>')
+    .replace(/^- (.*$)/gm, '<li class="ml-4 list-disc">$1</li>')
+    .replace(/^(\d+)\. (.*$)/gm, '<li class="ml-4 list-decimal">$2</li>')
+    .replace(/(<li[^>]*>.*<\/li>\n?)+/g, (match) => `<ul>${match}</ul>`)
+    .replace(/\n{2,}/g, '<br/><br/>')
+    .replace(/\n/g, '<br/>');
+
+  html = html.replace(/<\/blockquote>(<br\/>)*<blockquote>/g, '<br/>');
+
+  return html;
+}
