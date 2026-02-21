@@ -3590,68 +3590,63 @@ export async function registerRoutes(
       const titleProp = propNames.find(p => dbProps[p]?.type === "title") || "제목";
       const authorProp = findProp(["작성자", "author", "Author"]);
       const dateProp = findProp(["날짜", "date", "Date"]);
-      const bodyProp = findProp(["본문", "body", "Body", "내용", "content"]);
+      const bodyProp = findProp(["본문", "body", "Body", "내용", "content", "키워드", "keyword"]);
       const linkProp = findProp(["링크", "link", "Link", "URL", "url"]);
       const tagsProp = findProp(["태그", "tags", "Tags"]);
 
-      // Markdown을 Notion blocks로 변환
-      const markdownToBlocks = (md: string): any[] => {
-        const blocks: any[] = [];
-        const lines = md.split("\n");
-        let i = 0;
-        while (i < lines.length) {
-          const line = lines[i];
+      // 본문에서 주요 키워드 추출 (해시태그 + 헤더 + 빈도 기반 명사)
+      const extractKeywords = (body: string, tags: string[]): string => {
+        const plain = body
+          .replace(/!\[.*?\]\(.*?\)/g, "")
+          .replace(/\[([^\]]*)\]\(.*?\)/g, "$1")
+          .replace(/<[^>]+>/g, "")
+          .replace(/```[\s\S]*?```/g, "")
+          .replace(/`[^`]*`/g, "");
 
-          // 빈 줄은 건너뛰기
-          if (!line.trim()) { i++; continue; }
+        const keywords: string[] = [];
 
-          // 헤더
-          const hMatch = line.match(/^(#{1,3})\s+(.+)/);
-          if (hMatch) {
-            const level = hMatch[1].length;
-            const text = hMatch[2].trim();
-            const type = level === 1 ? "heading_1" : level === 2 ? "heading_2" : "heading_3";
-            blocks.push({ object: "block", type, [type]: { rich_text: [{ type: "text", text: { content: text.slice(0, 2000) } }] } });
-            i++; continue;
-          }
-
-          // 구분선
-          if (/^(-{3,}|_{3,}|\*{3,})\s*$/.test(line)) {
-            blocks.push({ object: "block", type: "divider", divider: {} });
-            i++; continue;
-          }
-
-          // 인용문
-          if (line.startsWith("> ")) {
-            const quoteLines: string[] = [];
-            while (i < lines.length && lines[i].startsWith("> ")) {
-              quoteLines.push(lines[i].replace(/^>\s?/, ""));
-              i++;
-            }
-            blocks.push({ object: "block", type: "quote", quote: { rich_text: [{ type: "text", text: { content: quoteLines.join("\n").slice(0, 2000) } }] } });
-            continue;
-          }
-
-          // 불릿 리스트
-          if (/^[-*+]\s/.test(line)) {
-            const text = line.replace(/^[-*+]\s/, "").trim();
-            blocks.push({ object: "block", type: "bulleted_list_item", bulleted_list_item: { rich_text: [{ type: "text", text: { content: text.slice(0, 2000) } }] } });
-            i++; continue;
-          }
-
-          // 이미지 (![alt](url))
-          const imgMatch = line.match(/!\[([^\]]*)\]\(([^)]+)\)/);
-          if (imgMatch && imgMatch[2].startsWith("http")) {
-            blocks.push({ object: "block", type: "image", image: { type: "external", external: { url: imgMatch[2] } } });
-            i++; continue;
-          }
-
-          // 일반 단락
-          blocks.push({ object: "block", type: "paragraph", paragraph: { rich_text: [{ type: "text", text: { content: line.slice(0, 2000) } }] } });
-          i++;
+        // 1) Markdown 헤더에서 키워드 추출
+        const headers = body.match(/^#{1,3}\s+(.+)/gm) || [];
+        for (const h of headers) {
+          const text = h.replace(/^#{1,3}\s+/, "").trim();
+          if (text.length >= 2 && text.length <= 30) keywords.push(text);
         }
-        // Notion API는 한 번에 최대 100 블록
-        return blocks.slice(0, 100);
+
+        // 2) 해시태그에서 (tags 배열)
+        for (const t of tags) {
+          if (t.length >= 2 && !["kr", "sct", "zzan", "liv", "palnet", "neoxian"].includes(t.toLowerCase())) {
+            keywords.push(`#${t}`);
+          }
+        }
+
+        // 3) 본문에서 빈도 높은 단어 추출 (2글자 이상 한글/영문 단어)
+        const stopWords = new Set([
+          "있다", "있는", "하는", "하고", "에서", "으로", "이다", "되는", "되고", "것이",
+          "대한", "위한", "통해", "따라", "이번", "하며", "있을", "없는", "같은", "많은",
+          "모든", "다른", "위해", "그리고", "하지만", "그래서", "때문에", "라는", "합니다",
+          "입니다", "습니다", "됩니다", "것은", "수도", "그런", "이런", "저런", "어떤",
+          "the", "and", "for", "that", "this", "with", "from", "are", "was", "has",
+          "not", "but", "have", "will", "can", "all", "been", "more", "also", "its",
+        ]);
+
+        const wordCounts = new Map<string, number>();
+        const words = plain.match(/[가-힣]{2,}|[A-Za-z]{3,}/g) || [];
+        for (const w of words) {
+          const lw = w.toLowerCase();
+          if (stopWords.has(lw) || w.length > 20) continue;
+          wordCounts.set(w, (wordCounts.get(w) || 0) + 1);
+        }
+
+        const sorted = [...wordCounts.entries()]
+          .filter(([, count]) => count >= 2)
+          .sort((a, b) => b[1] - a[1]);
+        for (const [word] of sorted.slice(0, 5)) {
+          if (!keywords.some(k => k.includes(word))) keywords.push(word);
+        }
+
+        // 중복 제거 후 최대 10개
+        const unique = [...new Set(keywords)].slice(0, 10);
+        return unique.join(", ") || "(키워드 없음)";
       };
 
       // Steem API에서 전체 본문 가져오기
@@ -3675,8 +3670,8 @@ export async function registerRoutes(
 
       for (const post of posts) {
         try {
-          // 서버에서 전체 본문 직접 조회
           const fullBody = await fetchFullBody(post.author, post.permlink);
+          const keywordsText = extractKeywords(fullBody, post.tags || []);
 
           const properties: Record<string, any> = {
             [titleProp]: { title: [{ text: { content: (post.title || "").slice(0, 2000) } }] },
@@ -3697,11 +3692,9 @@ export async function registerRoutes(
             }
           }
 
-          // 본문 속성에는 요약만 저장 (전체 본문은 페이지 콘텐츠로)
           if (bodyProp) {
             const pt = dbProps[bodyProp]?.type;
-            const summary = fullBody.replace(/!\[.*?\]\(.*?\)/g, "").replace(/<[^>]+>/g, "").replace(/\n{2,}/g, " ").trim().slice(0, 200) + "...";
-            if (pt === "rich_text") properties[bodyProp] = { rich_text: [{ text: { content: summary } }] };
+            if (pt === "rich_text") properties[bodyProp] = { rich_text: [{ text: { content: keywordsText } }] };
           }
 
           if (linkProp) {
@@ -3719,25 +3712,9 @@ export async function registerRoutes(
             }
           }
 
-          // 본문 전체를 Notion 페이지 콘텐츠(children blocks)로 저장
-          const steemUrl = post.url || `https://steemit.com/@${post.author}/${post.permlink}`;
-
-          const headerBlocks: any[] = [
-            { object: "block", type: "callout", callout: {
-              rich_text: [{ type: "text", text: { content: `작성자: @${post.author}  |  ${post.created ? new Date(post.created).toLocaleDateString("ko-KR") : ""}` } }],
-              icon: { type: "emoji", emoji: "📝" },
-            }},
-            { object: "block", type: "bookmark", bookmark: { url: steemUrl } },
-            { object: "block", type: "divider", divider: {} },
-          ];
-
-          const bodyBlocks = markdownToBlocks(fullBody);
-          const children = [...headerBlocks, ...bodyBlocks].slice(0, 100);
-
           await notion.pages.create({
             parent: { database_id: config.databaseId },
             properties,
-            children,
           });
           successCount++;
         } catch (err: any) {
