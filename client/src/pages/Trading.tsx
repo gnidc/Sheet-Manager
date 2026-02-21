@@ -245,10 +245,10 @@ export default function Trading() {
               </div>
               <div>
                 <h1 className="text-xl font-bold text-foreground tracking-tight">
-                  {status?.broker === "kiwoom" ? "키움 자동매매" : "KIS 자동매매"}
+                  매매B(Backup) — {status?.broker === "kiwoom" ? "키움" : "KIS"}
                 </h1>
                 <p className="text-xs text-muted-foreground">
-                  {status?.broker === "kiwoom" ? "키움증권 REST API 자동매매 시스템" : "한국투자증권 API 자동매매 시스템"}
+                  구형 백업 시스템 · {status?.broker === "kiwoom" ? "키움증권 REST API" : "한국투자증권 API"}
                 </p>
               </div>
             </div>
