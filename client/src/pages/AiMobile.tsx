@@ -4,7 +4,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import AiAgent from "@/components/AiAgent";
 import { LoginDialog } from "@/components/LoginDialog";
-import { Bot, ArrowLeft, Download, BarChart3, Loader2, Zap, Key, TrendingUp, Globe, Newspaper, Star, Mic, Settings2, Info, ExternalLink, Volume2 } from "lucide-react";
+import { Bot, ArrowLeft, Download, BarChart3, Loader2, Zap, Key, TrendingUp, Globe, Newspaper, Star, Mic, Settings2, Info, ExternalLink, Volume2, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
@@ -14,8 +14,9 @@ const DomesticMarket = lazy(() => import("@/components/DomesticMarket"));
 const GlobalMarket = lazy(() => import("@/components/GlobalMarket"));
 const MarketNews = lazy(() => import("@/components/MarketNews"));
 const Bookmarks = lazy(() => import("@/components/Bookmarks"));
+const EtfSearch = lazy(() => import("@/components/EtfSearch"));
 
-type MobileMode = "select" | "ai-agent" | "etf" | "api-manager" | "domestic-market" | "global-market" | "domestic-news" | "global-news" | "bookmarks";
+type MobileMode = "select" | "ai-agent" | "etf" | "api-manager" | "domestic-market" | "global-market" | "domestic-news" | "global-news" | "bookmarks" | "etf-search";
 
 export function AiMobileContent() {
   const { isAdmin, isLoggedIn, userName, userEmail, logout, isLoggingOut } = useAuth();
@@ -424,6 +425,20 @@ export function AiMobileContent() {
                 <p className="text-[9px] text-muted-foreground mt-0.5">저장한 종목 · 링크</p>
               </div>
             </button>
+
+            {/* ETF통합검색 버튼 */}
+            <button
+              onClick={() => navigateTo("etf-search")}
+              className="flex flex-col items-center justify-center gap-2.5 p-4 rounded-2xl border-2 border-blue-200 dark:border-blue-800 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 hover:border-blue-400 dark:hover:border-blue-600 hover:shadow-lg transition-all duration-200 active:scale-95"
+            >
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-md">
+                <Search className="w-7 h-7 text-white" />
+              </div>
+              <div className="text-center">
+                <p className="text-xs font-bold text-foreground">ETF통합검색</p>
+                <p className="text-[9px] text-muted-foreground mt-0.5">ETF 검색 · 비교</p>
+              </div>
+            </button>
           </div>
 
           {/* 웨이크워드 상태 인디케이터 */}
@@ -604,6 +619,7 @@ export function AiMobileContent() {
     "domestic-news": { title: "주요뉴스", icon: <Newspaper className="w-4 h-4 text-white" />, color: "from-teal-500 to-emerald-600", spinColor: "text-teal-500" },
     "global-news": { title: "글로벌뉴스", icon: <Globe className="w-4 h-4 text-white" />, color: "from-violet-500 to-indigo-600", spinColor: "text-violet-500" },
     "bookmarks": { title: "즐겨찾기", icon: <Star className="w-4 h-4 text-white" />, color: "from-yellow-500 to-amber-600", spinColor: "text-yellow-500" },
+    "etf-search": { title: "ETF통합검색", icon: <Search className="w-4 h-4 text-white" />, color: "from-blue-500 to-indigo-600", spinColor: "text-blue-500" },
   };
 
   const cfg = subPageConfig[mode];
@@ -650,6 +666,7 @@ export function AiMobileContent() {
               {mode === "domestic-news" && <MarketNews />}
               {mode === "global-news" && <MobileGlobalNews />}
               {mode === "bookmarks" && <Bookmarks />}
+              {mode === "etf-search" && <EtfSearch isAdmin={isAdmin} />}
             </div>
           </Suspense>
         </div>
