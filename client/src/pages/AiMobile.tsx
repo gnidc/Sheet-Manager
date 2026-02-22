@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, lazy, Suspense } from "react";
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import AiAgent from "@/components/AiAgent";
@@ -18,28 +18,32 @@ export function AiMobileContent() {
   const { isAdmin, isLoggedIn, userName, userEmail, logout, isLoggingOut } = useAuth();
   const [installPrompt, setInstallPrompt] = useState<any>(null);
   const [mode, setMode] = useState<MobileMode>("select");
+  const modeRef = useRef<MobileMode>("select");
+
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
 
   const navigateTo = useCallback((newMode: MobileMode) => {
-    if (newMode !== "select") {
-      window.history.pushState({ mode: newMode }, "", `#${newMode}`);
-    }
     setMode(newMode);
   }, []);
 
   const goBack = useCallback(() => {
-    if (mode !== "select") {
-      window.history.back();
+    if (modeRef.current !== "select") {
+      setMode("select");
     }
-  }, [mode]);
+  }, []);
 
   useEffect(() => {
-    const handlePopState = (e: PopStateEvent) => {
-      if (e.state?.mode) {
-        setMode(e.state.mode);
-      } else {
+    window.history.pushState(null, "");
+
+    const handlePopState = () => {
+      window.history.pushState(null, "");
+      if (modeRef.current !== "select") {
         setMode("select");
       }
     };
+
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
