@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import AiAgent from "@/components/AiAgent";
 import { LoginDialog } from "@/components/LoginDialog";
-import { Bot, ArrowLeft, Smartphone, Download, BarChart3, Loader2, Zap, Key, TrendingUp, Globe, Newspaper } from "lucide-react";
+import { Bot, ArrowLeft, Smartphone, Download, BarChart3, Loader2, Zap, Key, TrendingUp, Globe, Newspaper, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const EtfComponents = lazy(() => import("@/components/EtfComponents"));
@@ -11,8 +11,9 @@ const ApiManager = lazy(() => import("@/components/ApiManager"));
 const DomesticMarket = lazy(() => import("@/components/DomesticMarket"));
 const GlobalMarket = lazy(() => import("@/components/GlobalMarket"));
 const MarketNews = lazy(() => import("@/components/MarketNews"));
+const Bookmarks = lazy(() => import("@/components/Bookmarks"));
 
-type MobileMode = "select" | "ai-agent" | "etf" | "api-manager" | "domestic-market" | "global-market" | "domestic-news" | "global-news";
+type MobileMode = "select" | "ai-agent" | "etf" | "api-manager" | "domestic-market" | "global-market" | "domestic-news" | "global-news" | "bookmarks";
 
 export function AiMobileContent() {
   const { isAdmin, isLoggedIn, userName, userEmail, logout, isLoggingOut } = useAuth();
@@ -288,6 +289,20 @@ export function AiMobileContent() {
                 <p className="text-[9px] text-muted-foreground mt-0.5">해외 시장 뉴스</p>
               </div>
             </button>
+
+            {/* 즐겨찾기 버튼 */}
+            <button
+              onClick={() => navigateTo("bookmarks")}
+              className="flex flex-col items-center justify-center gap-2.5 p-4 rounded-2xl border-2 border-yellow-200 dark:border-yellow-800 bg-gradient-to-br from-yellow-50 to-amber-50 dark:from-yellow-950/30 dark:to-amber-950/30 hover:border-yellow-400 dark:hover:border-yellow-600 hover:shadow-lg transition-all duration-200 active:scale-95"
+            >
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-yellow-500 to-amber-600 flex items-center justify-center shadow-md">
+                <Star className="w-7 h-7 text-white" />
+              </div>
+              <div className="text-center">
+                <p className="text-xs font-bold text-foreground">즐겨찾기</p>
+                <p className="text-[9px] text-muted-foreground mt-0.5">저장한 종목 · 링크</p>
+              </div>
+            </button>
           </div>
         </div>
       </div>
@@ -435,6 +450,7 @@ export function AiMobileContent() {
     "global-market": { title: "해외증시", icon: <Globe className="w-4 h-4 text-white" />, color: "from-sky-500 to-cyan-600", spinColor: "text-sky-500" },
     "domestic-news": { title: "주요뉴스", icon: <Newspaper className="w-4 h-4 text-white" />, color: "from-teal-500 to-emerald-600", spinColor: "text-teal-500" },
     "global-news": { title: "글로벌뉴스", icon: <Globe className="w-4 h-4 text-white" />, color: "from-violet-500 to-indigo-600", spinColor: "text-violet-500" },
+    "bookmarks": { title: "즐겨찾기", icon: <Star className="w-4 h-4 text-white" />, color: "from-yellow-500 to-amber-600", spinColor: "text-yellow-500" },
   };
 
   const cfg = subPageConfig[mode];
@@ -480,6 +496,7 @@ export function AiMobileContent() {
               {mode === "global-market" && <GlobalMarket />}
               {mode === "domestic-news" && <MarketNews />}
               {mode === "global-news" && <MobileGlobalNews />}
+              {mode === "bookmarks" && <Bookmarks />}
             </div>
           </Suspense>
         </div>
