@@ -84,10 +84,12 @@ export default function Home() {
   const totalUsers = adminUsers?.length ?? 0;
   const activeUsers = adminStats?.uniqueVisitors ?? 0;
 
-  // 탭 전환을 startTransition으로 감싸 UI 블로킹 방지
+  // 탭 전환: requestAnimationFrame + startTransition으로 INP 최적화
   const handleTabChange = useCallback((tab: string) => {
-    startTransition(() => {
-      setActiveTab(tab);
+    requestAnimationFrame(() => {
+      startTransition(() => {
+        setActiveTab(tab);
+      });
     });
   }, [startTransition]);
 

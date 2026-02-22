@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
+import { useToast } from "@/hooks/use-toast";
 import AiAgent from "@/components/AiAgent";
 import { LoginDialog } from "@/components/LoginDialog";
-import { Bot, ArrowLeft, Smartphone, Download, BarChart3, Loader2, Zap, Key, TrendingUp, Globe, Newspaper, Star } from "lucide-react";
+import { Bot, ArrowLeft, Download, BarChart3, Loader2, Zap, Key, TrendingUp, Globe, Newspaper, Star, Mic, Settings2, Info, ExternalLink, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 const EtfComponents = lazy(() => import("@/components/EtfComponents"));
 const ApiManager = lazy(() => import("@/components/ApiManager"));
@@ -17,9 +19,15 @@ type MobileMode = "select" | "ai-agent" | "etf" | "api-manager" | "domestic-mark
 
 export function AiMobileContent() {
   const { isAdmin, isLoggedIn, userName, userEmail, logout, isLoggingOut } = useAuth();
+  const { toast } = useToast();
   const [installPrompt, setInstallPrompt] = useState<any>(null);
   const [mode, setMode] = useState<MobileMode>("select");
   const modeRef = useRef<MobileMode>("select");
+  const [voiceActivated, setVoiceActivated] = useState(false);
+  const [wakeWordEnabled, setWakeWordEnabled] = useState(() => localStorage.getItem("wakeword_enabled") === "true");
+  const [wakeWordListening, setWakeWordListening] = useState(false);
+  const wakeRecognitionRef = useRef<any>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     modeRef.current = mode;
@@ -32,21 +40,100 @@ export function AiMobileContent() {
   const goBack = useCallback(() => {
     if (modeRef.current !== "select") {
       setMode("select");
+      setVoiceActivated(false);
     }
   }, []);
 
   useEffect(() => {
     window.history.pushState(null, "");
-
     const handlePopState = () => {
       window.history.pushState(null, "");
       if (modeRef.current !== "select") {
         setMode("select");
       }
     };
-
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  // 딥링크: URL 해시로 자동 진입
+  useEffect(() => {
+    const hash = window.location.hash.replace("#", "");
+    if (hash === "ai-agent") {
+      setMode("ai-agent");
+      setVoiceActivated(true);
+    }
+  }, []);
+
+  // 웨이크워드 감지: 메인 화면에서 "헤이 라마" 인식
+  useEffect(() => {
+    if (!wakeWordEnabled || mode !== "select" || !isLoggedIn) {
+      if (wakeRecognitionRef.current) {
+        try { wakeRecognitionRef.current.stop(); } catch {}
+        setWakeWordListening(false);
+      }
+      return;
+    }
+
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = "ko-KR";
+    recognition.interimResults = false;
+    recognition.continuous = false;
+    recognition.maxAlternatives = 3;
+
+    const startListening = () => {
+      try {
+        recognition.start();
+        setWakeWordListening(true);
+      } catch { setWakeWordListening(false); }
+    };
+
+    recognition.onresult = (event: any) => {
+      for (let i = 0; i < event.results.length; i++) {
+        for (let j = 0; j < event.results[i].length; j++) {
+          const transcript = event.results[i][j].transcript.toLowerCase().replace(/\s+/g, "");
+          if (transcript.includes("헤이라마") || transcript.includes("해이라마") || transcript.includes("헤이나마") || transcript.includes("hey라마") || transcript.includes("헤일라마")) {
+            toast({ title: "🎙️ \"헤이 라마\" 감지!", description: "AI Agent로 이동합니다", duration: 2000 });
+            setVoiceActivated(true);
+            setMode("ai-agent");
+            return;
+          }
+        }
+      }
+    };
+
+    recognition.onend = () => {
+      setWakeWordListening(false);
+      if (modeRef.current === "select" && wakeWordEnabled) {
+        setTimeout(startListening, 300);
+      }
+    };
+
+    recognition.onerror = (e: any) => {
+      setWakeWordListening(false);
+      if (e.error !== "aborted" && e.error !== "no-speech" && modeRef.current === "select") {
+        setTimeout(startListening, 2000);
+      } else if (e.error === "no-speech" && modeRef.current === "select") {
+        setTimeout(startListening, 300);
+      }
+    };
+
+    wakeRecognitionRef.current = recognition;
+    startListening();
+
+    return () => {
+      try { recognition.stop(); } catch {}
+      wakeRecognitionRef.current = null;
+      setWakeWordListening(false);
+    };
+  }, [wakeWordEnabled, mode, isLoggedIn, toast]);
+
+  const toggleWakeWord = useCallback((enabled: boolean) => {
+    setWakeWordEnabled(enabled);
+    localStorage.setItem("wakeword_enabled", String(enabled));
   }, []);
 
   // 모바일 viewport 최적화 + PWA 등록
@@ -162,7 +249,15 @@ export function AiMobileContent() {
                 앱 설치
               </Button>
             )}
-            <Smartphone className="w-3.5 h-3.5 text-blue-500" />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 w-7 p-0"
+              onClick={() => setSettingsOpen(true)}
+              title="음성 설정"
+            >
+              <Settings2 className="w-3.5 h-3.5 text-muted-foreground" />
+            </Button>
             <Button
               variant="ghost"
               size="sm"
@@ -304,7 +399,39 @@ export function AiMobileContent() {
               </div>
             </button>
           </div>
+
+          {/* 웨이크워드 상태 인디케이터 */}
+          {wakeWordEnabled && (
+            <div className="flex items-center justify-center gap-2 py-3 mx-auto max-w-md">
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800">
+                {wakeWordListening ? (
+                  <>
+                    <div className="relative flex h-2.5 w-2.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-purple-500" />
+                    </div>
+                    <span className="text-[10px] text-purple-600 dark:text-purple-400 font-medium">
+                      "헤이 라마" 대기 중...
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <Mic className="w-3 h-3 text-purple-400" />
+                    <span className="text-[10px] text-muted-foreground">웨이크워드 연결 중...</span>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
         </div>
+
+        {/* 음성 설정 다이얼로그 */}
+        <VoiceSettingsDialog
+          open={settingsOpen}
+          onOpenChange={setSettingsOpen}
+          wakeWordEnabled={wakeWordEnabled}
+          onToggleWakeWord={toggleWakeWord}
+        />
       </div>
     );
   }
@@ -343,7 +470,7 @@ export function AiMobileContent() {
         </header>
 
         <div className="flex-1 flex flex-col overflow-hidden">
-          <AiAgent isAdmin={isAdmin} compact />
+          <AiAgent isAdmin={isAdmin} compact autoStartVoice={voiceActivated} />
         </div>
       </div>
     );
@@ -553,6 +680,117 @@ function MobileGlobalNews() {
         <div className="text-center py-8 text-sm text-muted-foreground">뉴스를 불러올 수 없습니다</div>
       )}
     </div>
+  );
+}
+
+function VoiceSettingsDialog({ open, onOpenChange, wakeWordEnabled, onToggleWakeWord }: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  wakeWordEnabled: boolean;
+  onToggleWakeWord: (enabled: boolean) => void;
+}) {
+  const deepLink = `${window.location.origin}/mobile#ai-agent`;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-sm mx-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <Volume2 className="w-4 h-4 text-purple-500" />
+            음성 호출 설정
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          {/* 웨이크워드 토글 */}
+          <div className="p-3 rounded-lg border bg-muted/30">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Mic className="w-4 h-4 text-purple-500" />
+                <div>
+                  <p className="text-sm font-medium">"헤이 라마" 웨이크워드</p>
+                  <p className="text-[10px] text-muted-foreground">메인 화면에서 음성으로 AI Agent 실행</p>
+                </div>
+              </div>
+              <Button
+                variant={wakeWordEnabled ? "default" : "outline"}
+                size="sm"
+                className="h-7 text-[10px] px-3"
+                onClick={() => onToggleWakeWord(!wakeWordEnabled)}
+              >
+                {wakeWordEnabled ? "ON" : "OFF"}
+              </Button>
+            </div>
+            {wakeWordEnabled && (
+              <p className="text-[10px] text-purple-600 dark:text-purple-400 mt-2 bg-purple-50 dark:bg-purple-950/30 p-2 rounded">
+                메인 화면에서 <strong>"헤이 라마"</strong>라고 말하면 AI Agent가 자동으로 실행되고 음성인식이 시작됩니다.
+              </p>
+            )}
+          </div>
+
+          {/* 외부 음성비서 설정 가이드 */}
+          <div className="p-3 rounded-lg border bg-muted/30">
+            <div className="flex items-center gap-2 mb-2">
+              <Info className="w-4 h-4 text-blue-500" />
+              <p className="text-sm font-medium">외부 음성비서 연동</p>
+            </div>
+            <p className="text-[10px] text-muted-foreground mb-2">
+              앱이 닫혀 있을 때도 음성으로 실행하려면 휴대폰의 음성비서에 아래 URL을 등록하세요.
+            </p>
+            <div className="flex items-center gap-1.5 p-2 bg-background rounded border text-[10px] font-mono break-all">
+              {deepLink}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-5 w-5 p-0 shrink-0"
+                onClick={() => {
+                  navigator.clipboard.writeText(deepLink);
+                }}
+                title="복사"
+              >
+                <ExternalLink className="w-3 h-3" />
+              </Button>
+            </div>
+            <div className="mt-3 space-y-2">
+              <details className="group">
+                <summary className="text-[11px] font-medium cursor-pointer flex items-center gap-1 text-blue-600 dark:text-blue-400">
+                  <span className="group-open:rotate-90 transition-transform">▶</span>
+                  Google Assistant (Android)
+                </summary>
+                <ol className="text-[10px] text-muted-foreground mt-1 ml-4 space-y-0.5 list-decimal">
+                  <li>Google 앱 → 설정 → Google 어시스턴트</li>
+                  <li>루틴 → 새 루틴 추가</li>
+                  <li>트리거: "헤이 라마"</li>
+                  <li>작업: "웹사이트 열기" → 위 URL 입력</li>
+                </ol>
+              </details>
+              <details className="group">
+                <summary className="text-[11px] font-medium cursor-pointer flex items-center gap-1 text-blue-600 dark:text-blue-400">
+                  <span className="group-open:rotate-90 transition-transform">▶</span>
+                  Samsung Bixby
+                </summary>
+                <ol className="text-[10px] text-muted-foreground mt-1 ml-4 space-y-0.5 list-decimal">
+                  <li>Bixby 루틴 앱 실행</li>
+                  <li>"+" → 조건: 음성 명령 "헤이 라마"</li>
+                  <li>실행: "앱 열기" → 브라우저로 위 URL 열기</li>
+                </ol>
+              </details>
+              <details className="group">
+                <summary className="text-[11px] font-medium cursor-pointer flex items-center gap-1 text-blue-600 dark:text-blue-400">
+                  <span className="group-open:rotate-90 transition-transform">▶</span>
+                  Siri (iPhone)
+                </summary>
+                <ol className="text-[10px] text-muted-foreground mt-1 ml-4 space-y-0.5 list-decimal">
+                  <li>단축어 앱 → "+" → 새 단축어</li>
+                  <li>"URL 열기" 액션 추가 → 위 URL 입력</li>
+                  <li>단축어 이름: "헤이 라마"</li>
+                  <li>"Siri야 헤이 라마"로 실행</li>
+                </ol>
+              </details>
+            </div>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

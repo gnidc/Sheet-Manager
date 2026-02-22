@@ -156,7 +156,7 @@ const TAB_NAMES: Record<string, string> = {
   "/trading": "⚡ 매매A(Active)",
 };
 
-export default function AiAgent({ isAdmin, onNavigate, compact = false }: { isAdmin: boolean; onNavigate?: (tab: string) => void; compact?: boolean }) {
+export default function AiAgent({ isAdmin, onNavigate, compact = false, autoStartVoice = false }: { isAdmin: boolean; onNavigate?: (tab: string) => void; compact?: boolean; autoStartVoice?: boolean }) {
   const { isLoggedIn } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -315,6 +315,18 @@ export default function AiAgent({ isAdmin, onNavigate, compact = false }: { isAd
       }
     }
   }, [isListening]);
+
+  useEffect(() => {
+    if (autoStartVoice && speechSupported && recognitionRef.current && !isListening) {
+      const timer = setTimeout(() => {
+        try {
+          recognitionRef.current.start();
+          setIsListening(true);
+        } catch (e) { /* already started */ }
+      }, 800);
+      return () => clearTimeout(timer);
+    }
+  }, [autoStartVoice, speechSupported]);
 
   // API 키 조회
   const { data: aiConfig, isLoading: isConfigLoading } = useQuery<UserAiConfig>({
