@@ -1,14 +1,18 @@
 import { useState, useEffect, lazy, Suspense } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import AiAgent from "@/components/AiAgent";
 import { LoginDialog } from "@/components/LoginDialog";
-import { Bot, ArrowLeft, Smartphone, Download, BarChart3, Loader2, Zap, Key } from "lucide-react";
+import { Bot, ArrowLeft, Smartphone, Download, BarChart3, Loader2, Zap, Key, TrendingUp, Globe, Newspaper } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const EtfComponents = lazy(() => import("@/components/EtfComponents"));
 const ApiManager = lazy(() => import("@/components/ApiManager"));
+const DomesticMarket = lazy(() => import("@/components/DomesticMarket"));
+const GlobalMarket = lazy(() => import("@/components/GlobalMarket"));
+const MarketNews = lazy(() => import("@/components/MarketNews"));
 
-type MobileMode = "select" | "ai-agent" | "etf" | "api-manager";
+type MobileMode = "select" | "ai-agent" | "etf" | "api-manager" | "domestic-market" | "global-market" | "domestic-news" | "global-news";
 
 export function AiMobileContent() {
   const { isAdmin, isLoggedIn, userName, userEmail, logout, isLoggingOut } = useAuth();
@@ -142,8 +146,8 @@ export function AiMobileContent() {
         </header>
 
         {/* 선택 카드 영역 */}
-        <div className="flex-1 flex items-center justify-center p-6">
-          <div className="grid grid-cols-2 gap-3 w-full max-w-md">
+        <div className="flex-1 overflow-y-auto p-4">
+          <div className="grid grid-cols-2 gap-3 w-full max-w-md mx-auto">
             {/* AI Agent 버튼 */}
             <button
               onClick={() => setMode("ai-agent")}
@@ -197,6 +201,62 @@ export function AiMobileContent() {
               <div className="text-center">
                 <p className="text-xs font-bold text-foreground">API 관리</p>
                 <p className="text-[9px] text-muted-foreground mt-0.5">API 키 등록 · 전환</p>
+              </div>
+            </button>
+
+            {/* 국내증시 버튼 */}
+            <button
+              onClick={() => setMode("domestic-market")}
+              className="flex flex-col items-center justify-center gap-2.5 p-4 rounded-2xl border-2 border-rose-200 dark:border-rose-800 bg-gradient-to-br from-rose-50 to-pink-50 dark:from-rose-950/30 dark:to-pink-950/30 hover:border-rose-400 dark:hover:border-rose-600 hover:shadow-lg transition-all duration-200 active:scale-95"
+            >
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-rose-500 to-pink-600 flex items-center justify-center shadow-md">
+                <TrendingUp className="w-7 h-7 text-white" />
+              </div>
+              <div className="text-center">
+                <p className="text-xs font-bold text-foreground">국내증시</p>
+                <p className="text-[9px] text-muted-foreground mt-0.5">코스피 · 코스닥 · 업종</p>
+              </div>
+            </button>
+
+            {/* 해외증시 버튼 */}
+            <button
+              onClick={() => setMode("global-market")}
+              className="flex flex-col items-center justify-center gap-2.5 p-4 rounded-2xl border-2 border-sky-200 dark:border-sky-800 bg-gradient-to-br from-sky-50 to-cyan-50 dark:from-sky-950/30 dark:to-cyan-950/30 hover:border-sky-400 dark:hover:border-sky-600 hover:shadow-lg transition-all duration-200 active:scale-95"
+            >
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-sky-500 to-cyan-600 flex items-center justify-center shadow-md">
+                <Globe className="w-7 h-7 text-white" />
+              </div>
+              <div className="text-center">
+                <p className="text-xs font-bold text-foreground">해외증시</p>
+                <p className="text-[9px] text-muted-foreground mt-0.5">미국 · 유럽 · 아시아</p>
+              </div>
+            </button>
+
+            {/* 주요뉴스 버튼 */}
+            <button
+              onClick={() => setMode("domestic-news")}
+              className="flex flex-col items-center justify-center gap-2.5 p-4 rounded-2xl border-2 border-teal-200 dark:border-teal-800 bg-gradient-to-br from-teal-50 to-emerald-50 dark:from-teal-950/30 dark:to-emerald-950/30 hover:border-teal-400 dark:hover:border-teal-600 hover:shadow-lg transition-all duration-200 active:scale-95"
+            >
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-teal-500 to-emerald-600 flex items-center justify-center shadow-md">
+                <Newspaper className="w-7 h-7 text-white" />
+              </div>
+              <div className="text-center">
+                <p className="text-xs font-bold text-foreground">주요뉴스</p>
+                <p className="text-[9px] text-muted-foreground mt-0.5">국내 시장 뉴스</p>
+              </div>
+            </button>
+
+            {/* 주요글로벌뉴스 버튼 */}
+            <button
+              onClick={() => setMode("global-news")}
+              className="flex flex-col items-center justify-center gap-2.5 p-4 rounded-2xl border-2 border-violet-200 dark:border-violet-800 bg-gradient-to-br from-violet-50 to-indigo-50 dark:from-violet-950/30 dark:to-indigo-950/30 hover:border-violet-400 dark:hover:border-violet-600 hover:shadow-lg transition-all duration-200 active:scale-95"
+            >
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-md">
+                <Globe className="w-7 h-7 text-white" />
+              </div>
+              <div className="text-center">
+                <p className="text-xs font-bold text-foreground">글로벌뉴스</p>
+                <p className="text-[9px] text-muted-foreground mt-0.5">해외 시장 뉴스</p>
               </div>
             </button>
           </div>
@@ -341,7 +401,113 @@ export function AiMobileContent() {
     );
   }
 
+  const subPageConfig: Record<string, { title: string; icon: React.ReactNode; color: string; spinColor: string }> = {
+    "domestic-market": { title: "국내증시", icon: <TrendingUp className="w-4 h-4 text-white" />, color: "from-rose-500 to-pink-600", spinColor: "text-rose-500" },
+    "global-market": { title: "해외증시", icon: <Globe className="w-4 h-4 text-white" />, color: "from-sky-500 to-cyan-600", spinColor: "text-sky-500" },
+    "domestic-news": { title: "주요뉴스", icon: <Newspaper className="w-4 h-4 text-white" />, color: "from-teal-500 to-emerald-600", spinColor: "text-teal-500" },
+    "global-news": { title: "글로벌뉴스", icon: <Globe className="w-4 h-4 text-white" />, color: "from-violet-500 to-indigo-600", spinColor: "text-violet-500" },
+  };
+
+  const cfg = subPageConfig[mode];
+  if (cfg) {
+    return (
+      <div
+        className="flex flex-col bg-background"
+        style={{ height: "calc(var(--vh, 1vh) * 100)" }}
+      >
+        <header className="flex items-center justify-between px-3 py-2 border-b bg-background/95 backdrop-blur-sm shrink-0">
+          <div className="flex items-center gap-2">
+            <button onClick={() => setMode("select")} className="text-muted-foreground hover:text-foreground">
+              <ArrowLeft className="w-4 h-4" />
+            </button>
+            <div className={`w-7 h-7 rounded-lg bg-gradient-to-br ${cfg.color} flex items-center justify-center`}>
+              {cfg.icon}
+            </div>
+            <div>
+              <h1 className="text-sm font-bold leading-tight">{cfg.title}</h1>
+              <p className="text-[10px] text-muted-foreground leading-tight">{userName || userEmail || "User"}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-[10px] px-2 text-muted-foreground"
+              onClick={() => logout()}
+              disabled={isLoggingOut}
+            >
+              로그아웃
+            </Button>
+          </div>
+        </header>
+        <div className="flex-1 overflow-y-auto">
+          <Suspense fallback={
+            <div className="flex items-center justify-center h-full">
+              <Loader2 className={`w-8 h-8 animate-spin ${cfg.spinColor}`} />
+            </div>
+          }>
+            <div className="p-2">
+              {mode === "domestic-market" && <DomesticMarket />}
+              {mode === "global-market" && <GlobalMarket />}
+              {mode === "domestic-news" && <MarketNews />}
+              {mode === "global-news" && <MobileGlobalNews />}
+            </div>
+          </Suspense>
+        </div>
+      </div>
+    );
+  }
+
   return null;
+}
+
+function MobileGlobalNews() {
+  const { data, isLoading } = useQuery<{ news: { title: string; url: string; date: string }[]; updatedAt: string }>({
+    queryKey: ["/api/markets/global/news"],
+    queryFn: async () => {
+      const res = await fetch("/api/markets/global/news");
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+    staleTime: 300000,
+  });
+  const news = data?.news || [];
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between px-1">
+        <h2 className="text-sm font-bold flex items-center gap-1.5">
+          <Globe className="w-4 h-4 text-violet-500" />
+          최신 글로벌 뉴스
+        </h2>
+        {data?.updatedAt && <span className="text-[10px] text-muted-foreground">{data.updatedAt}</span>}
+      </div>
+      {isLoading && news.length === 0 ? (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="w-6 h-6 animate-spin text-violet-500" />
+        </div>
+      ) : news.length > 0 ? (
+        <div className="space-y-0.5">
+          {news.map((item, i) => (
+            <a
+              key={i}
+              href={item.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-start gap-2 py-2 px-2 rounded-lg hover:bg-muted/40 transition-colors"
+            >
+              <span className="text-xs text-muted-foreground font-mono mt-0.5 shrink-0 w-4 text-right">{i + 1}</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm leading-snug line-clamp-2">{item.title}</p>
+                {item.date && <span className="text-[10px] text-muted-foreground mt-0.5 block">{item.date}</span>}
+              </div>
+            </a>
+          ))}
+        </div>
+      ) : (
+        <div className="text-center py-8 text-sm text-muted-foreground">뉴스를 불러올 수 없습니다</div>
+      )}
+    </div>
+  );
 }
 
 export default function AiMobile() {
