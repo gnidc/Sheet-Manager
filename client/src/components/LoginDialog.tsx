@@ -30,6 +30,12 @@ declare global {
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 
+function isInAppBrowser(): boolean {
+  const ua = navigator.userAgent || navigator.vendor || "";
+  return /NAVER|KAKAOTALK|Line|Instagram|FBAN|FBAV|Twitter|Snapchat|DaumApps|everytimeApp|SamsungBrowser\/.*CrossApp/i.test(ua)
+    || (/wv\)/.test(ua) && /Android/.test(ua));
+}
+
 // Google 로고 SVG
 function GoogleLogo({ className }: { className?: string }) {
   return (
@@ -72,10 +78,28 @@ export function LoginDialog() {
     rememberMeRef.current = rememberMe;
   }, [rememberMe]);
 
+  const inAppBrowser = isInAppBrowser();
+
+  const openInExternalBrowser = useCallback(() => {
+    const url = window.location.href;
+    if (/Android/i.test(navigator.userAgent)) {
+      window.location.href = `intent://${url.replace(/^https?:\/\//, "")}#Intent;scheme=https;end`;
+    } else {
+      window.open(url, "_system");
+    }
+    navigator.clipboard?.writeText(url);
+    toast({ title: "URL이 복사되었습니다", description: "Chrome 또는 Safari에서 붙여넣기 해주세요." });
+  }, [toast]);
+
   // Google OAuth 팝업 로그인 (INP 최적화: 팝업 열기 후 리스너는 rAF로 지연)
   const triggerGoogleLogin = useCallback(() => {
     if (!GOOGLE_CLIENT_ID) {
       console.warn("[Google Login] VITE_GOOGLE_CLIENT_ID is not set. Set it in Vercel (or build) env and redeploy.");
+      return;
+    }
+
+    if (inAppBrowser) {
+      openInExternalBrowser();
       return;
     }
 
@@ -309,6 +333,27 @@ export function LoginDialog() {
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
+            {/* 인앱 브라우저 경고 */}
+            {inAppBrowser && (
+              <div className="p-3 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-700 space-y-2">
+                <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                  ⚠️ 인앱 브라우저에서는 Google 로그인이 제한됩니다
+                </p>
+                <p className="text-xs text-amber-700 dark:text-amber-400">
+                  네이버, 카카오톡 등의 앱 내 브라우저에서는 Google 보안 정책에 의해 로그인이 차단됩니다.
+                  <strong> Chrome 또는 Safari</strong>에서 열어주세요.
+                </p>
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="w-full gap-2 bg-amber-600 hover:bg-amber-700 text-white"
+                  onClick={openInExternalBrowser}
+                >
+                  외부 브라우저로 열기 (URL 복사)
+                </Button>
+              </div>
+            )}
+
             {/* Google 로그인 버튼 */}
             {GOOGLE_CLIENT_ID ? (
               <div className="flex flex-col items-center gap-3">

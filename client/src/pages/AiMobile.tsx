@@ -186,6 +186,9 @@ export function AiMobileContent() {
     };
   }, []);
 
+  const isInApp = /NAVER|KAKAOTALK|Line|Instagram|FBAN|FBAV|Twitter|Snapchat|DaumApps|everytimeApp|SamsungBrowser\/.*CrossApp/i.test(navigator.userAgent)
+    || (/wv\)/.test(navigator.userAgent) && /Android/.test(navigator.userAgent));
+
   if (!isLoggedIn) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 dark:from-gray-950 dark:to-gray-900 p-4">
@@ -199,6 +202,29 @@ export function AiMobileContent() {
           <p className="text-sm text-muted-foreground">
             로그인 후 이용할 수 있습니다
           </p>
+          {isInApp && (
+            <div className="p-3 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/30 text-left space-y-1.5">
+              <p className="text-xs font-medium text-amber-800 dark:text-amber-300">
+                ⚠️ 인앱 브라우저에서는 Google 로그인이 제한됩니다
+              </p>
+              <p className="text-[10px] text-amber-700 dark:text-amber-400">
+                Chrome 또는 Safari에서 열어주세요.
+              </p>
+              <button
+                className="w-full text-[11px] font-medium text-white bg-amber-600 hover:bg-amber-700 rounded px-3 py-1.5"
+                onClick={() => {
+                  const url = window.location.href;
+                  if (/Android/i.test(navigator.userAgent)) {
+                    window.location.href = `intent://${url.replace(/^https?:\/\//, "")}#Intent;scheme=https;end`;
+                  } else {
+                    navigator.clipboard?.writeText(url);
+                  }
+                }}
+              >
+                외부 브라우저로 열기
+              </button>
+            </div>
+          )}
           <div className="flex justify-center">
             <LoginDialog />
           </div>
