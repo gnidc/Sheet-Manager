@@ -384,28 +384,7 @@ export default function SteemReport() {
   const [previewOpen, setPreviewOpen] = useState(false);
 
   const bodyRef = useRef<HTMLTextAreaElement>(null);
-  const initialLoadDone = useRef(false);
-
-  // ===== 컴포넌트 마운트 시 DB에서 최신 보고서 자동 로드 =====
-  useEffect(() => {
-    if (initialLoadDone.current) return;
-    initialLoadDone.current = true;
-    
-    (async () => {
-      setIsLoadingReport(true);
-      try {
-        const report = await fetchLatestReportFromDB();
-        if (report) {
-          setPostBody(report.text);
-          setPostTitle(getDefaultTitle(report.periodLabel));
-        }
-      } catch {
-        // 실패 시 빈 상태 유지
-      } finally {
-        setIsLoadingReport(false);
-      }
-    })();
-  }, []);
+  // 초기 로드 시 본문은 빈 상태 유지 (AI보고서 버튼으로 수동 로드)
 
   // ===== Steem Keychain 감지 =====
   useEffect(() => {

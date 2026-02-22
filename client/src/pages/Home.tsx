@@ -263,7 +263,7 @@ export default function Home() {
                   <DropdownMenuContent side="right" align="start" className="min-w-[140px]">
                     <DropdownMenuItem onClick={() => handleTabChange("markets-domestic")} className="gap-2 cursor-pointer">🇰🇷 국내증시</DropdownMenuItem>
                     <DropdownMenuItem onClick={() => handleTabChange("markets-global")} className="gap-2 cursor-pointer">🌍 해외증시</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => handleTabChange("markets-weekly")} className="gap-2 cursor-pointer">📊 주간통계</DropdownMenuItem>
+                    {isLoggedIn && <DropdownMenuItem onClick={() => handleTabChange("markets-weekly")} className="gap-2 cursor-pointer">📊 주간통계</DropdownMenuItem>}
                     <DropdownMenuItem onClick={() => handleTabChange("markets-etc")} className="gap-2 cursor-pointer">💹 ETC</DropdownMenuItem>
                     <DropdownMenuItem onClick={() => handleTabChange("markets-news")} className="gap-2 cursor-pointer">📰 주요뉴스</DropdownMenuItem>
                     <DropdownMenuItem onClick={() => handleTabChange("markets-research")} className="gap-2 cursor-pointer">📊 리서치</DropdownMenuItem>
@@ -278,7 +278,7 @@ export default function Home() {
                   items={[
                     { label: "🇰🇷 국내증시", value: "markets-domestic" },
                     { label: "🌍 해외증시", value: "markets-global" },
-                    { label: "📊 주간통계", value: "markets-weekly" },
+                    ...(isLoggedIn ? [{ label: "📊 주간통계", value: "markets-weekly" }] : []),
                     { label: "💹 ETC", value: "markets-etc" },
                     { label: "📰 주요뉴스", value: "markets-news" },
                     { label: "📊 리서치", value: "markets-research" },
@@ -298,8 +298,8 @@ export default function Home() {
                     </button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent side="right" align="start" className="min-w-[140px]">
-                    <DropdownMenuItem onClick={() => handleTabChange("stocks-domestic")} className="gap-2 cursor-pointer">🇰🇷 국내주식</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => handleTabChange("stocks-overseas")} className="gap-2 cursor-pointer">🌐 해외주식</DropdownMenuItem>
+                    {isLoggedIn && <DropdownMenuItem onClick={() => handleTabChange("stocks-domestic")} className="gap-2 cursor-pointer">🇰🇷 국내주식</DropdownMenuItem>}
+                    {isLoggedIn && <DropdownMenuItem onClick={() => handleTabChange("stocks-overseas")} className="gap-2 cursor-pointer">🌐 해외주식</DropdownMenuItem>}
                     <DropdownMenuItem onClick={() => handleTabChange("stocks-10x")} className="gap-2 cursor-pointer">🚀 10X</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -309,8 +309,8 @@ export default function Home() {
                   label="주식정보"
                   active={activeTab.startsWith("stocks-")}
                   items={[
-                    { label: "🇰🇷 국내주식", value: "stocks-domestic" },
-                    { label: "🌐 해외주식", value: "stocks-overseas" },
+                    ...(isLoggedIn ? [{ label: "🇰🇷 국내주식", value: "stocks-domestic" }] : []),
+                    ...(isLoggedIn ? [{ label: "🌐 해외주식", value: "stocks-overseas" }] : []),
                     { label: "🚀 10X", value: "stocks-10x" },
                   ]}
                   activeTab={activeTab}
@@ -463,7 +463,7 @@ export default function Home() {
                 <DropdownMenuContent align="center" className="min-w-[120px]">
                   <DropdownMenuItem onClick={() => handleTabChange("markets-domestic")} className="gap-2 cursor-pointer text-xs">🇰🇷 국내증시</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => handleTabChange("markets-global")} className="gap-2 cursor-pointer text-xs">🌍 해외증시</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleTabChange("markets-weekly")} className="gap-2 cursor-pointer text-xs">📊 주간통계</DropdownMenuItem>
+                  {isLoggedIn && <DropdownMenuItem onClick={() => handleTabChange("markets-weekly")} className="gap-2 cursor-pointer text-xs">📊 주간통계</DropdownMenuItem>}
                   <DropdownMenuItem onClick={() => handleTabChange("markets-etc")} className="gap-2 cursor-pointer text-xs">💹 ETC</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => handleTabChange("markets-news")} className="gap-2 cursor-pointer text-xs">📰 뉴스</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => handleTabChange("markets-research")} className="gap-2 cursor-pointer text-xs">📊 리서치</DropdownMenuItem>
@@ -479,8 +479,8 @@ export default function Home() {
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="center" className="min-w-[120px]">
-                  <DropdownMenuItem onClick={() => handleTabChange("stocks-domestic")} className="gap-2 cursor-pointer text-xs">🇰🇷 국내주식</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleTabChange("stocks-overseas")} className="gap-2 cursor-pointer text-xs">🌐 해외주식</DropdownMenuItem>
+                  {isLoggedIn && <DropdownMenuItem onClick={() => handleTabChange("stocks-domestic")} className="gap-2 cursor-pointer text-xs">🇰🇷 국내주식</DropdownMenuItem>}
+                  {isLoggedIn && <DropdownMenuItem onClick={() => handleTabChange("stocks-overseas")} className="gap-2 cursor-pointer text-xs">🌐 해외주식</DropdownMenuItem>}
                   <DropdownMenuItem onClick={() => handleTabChange("stocks-10x")} className="gap-2 cursor-pointer text-xs">🚀 10X</DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -623,16 +623,24 @@ export default function Home() {
 
           {/* 국내주식 */}
           <TabsContent value="stocks-domestic">
-            <Suspense fallback={<ContentSkeleton />}>
-              <DomesticStocks />
-            </Suspense>
+            {isLoggedIn ? (
+              <Suspense fallback={<ContentSkeleton />}>
+                <DomesticStocks />
+              </Suspense>
+            ) : (
+              <LoginRequiredMessage />
+            )}
           </TabsContent>
 
           {/* 해외주식 */}
           <TabsContent value="stocks-overseas">
-            <Suspense fallback={<ContentSkeleton />}>
-              <OverseasStocks />
-            </Suspense>
+            {isLoggedIn ? (
+              <Suspense fallback={<ContentSkeleton />}>
+                <OverseasStocks />
+              </Suspense>
+            ) : (
+              <LoginRequiredMessage />
+            )}
           </TabsContent>
 
           {/* 10X (Ten Bagger) */}
@@ -648,9 +656,13 @@ export default function Home() {
 
           {/* 주간통계 */}
           <TabsContent value="markets-weekly">
-            <Suspense fallback={<ContentSkeleton />}>
-              <WeeklyStats />
-            </Suspense>
+            {isLoggedIn ? (
+              <Suspense fallback={<ContentSkeleton />}>
+                <WeeklyStats />
+              </Suspense>
+            ) : (
+              <LoginRequiredMessage />
+            )}
           </TabsContent>
 
           {/* ETC (Commodity, Forex, Crypto, Bond) */}

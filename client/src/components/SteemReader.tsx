@@ -478,6 +478,34 @@ export default function SteemReader() {
 
   return (
     <div className="space-y-4">
+      {/* 스팀월드 / SteemIt 바로가기 */}
+      <div className="flex gap-2">
+        <Button
+          variant="outline"
+          className="flex-1 gap-2 border-blue-300 text-blue-700 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-400 dark:hover:bg-blue-950/30"
+          onClick={() => window.open("https://steemworld.org/@seraphim502", "_blank", "noopener,noreferrer")}
+        >
+          <ExternalLink className="h-4 w-4" />
+          스팀월드
+        </Button>
+        <Button
+          variant="outline"
+          className="flex-1 gap-2 border-green-300 text-green-700 hover:bg-green-50 dark:border-green-700 dark:text-green-400 dark:hover:bg-green-950/30"
+          onClick={() => window.open("https://steemit.com/@seraphim502", "_blank", "noopener,noreferrer")}
+        >
+          <ExternalLink className="h-4 w-4" />
+          SteemIt
+        </Button>
+        <Button
+          variant="outline"
+          className="flex-1 gap-2 border-purple-300 text-purple-700 hover:bg-purple-50 dark:border-purple-700 dark:text-purple-400 dark:hover:bg-purple-950/30"
+          onClick={() => window.open("https://www.steempro.com/@seraphim502", "_blank", "noopener,noreferrer")}
+        >
+          <ExternalLink className="h-4 w-4" />
+          SteemPro
+        </Button>
+      </div>
+
       {/* 사용자 ID 관리 + 보팅 설정 */}
       <Card>
         <CardHeader className="pb-3">
