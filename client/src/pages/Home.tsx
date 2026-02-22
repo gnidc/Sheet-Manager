@@ -180,28 +180,28 @@ export default function Home() {
                 M
               </a>
               <QnABoard />
-              {(isAdmin || isLoggedIn) && (
-                <>
-                  <Link href="/trading">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="gap-1 border-amber-300 text-amber-600 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-400 dark:hover:bg-amber-950 btn-hover-lift"
-                    >
-                      <Zap className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline text-xs">매매B(Backup)</span>
-                    </Button>
-                  </Link>
+              {isAdmin && (
+                <Link href="/trading">
                   <Button
                     variant="outline"
                     size="sm"
-                    className="gap-1 border-emerald-300 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-950 btn-hover-lift"
-                    onClick={() => window.open("https://lifefit2.vercel.app", "_blank", "noopener,noreferrer")}
+                    className="gap-1 border-amber-300 text-amber-600 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-400 dark:hover:bg-amber-950 btn-hover-lift"
                   >
                     <Zap className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline text-xs">매매A(Active)</span>
+                    <span className="hidden sm:inline text-xs">매매B(Backup)</span>
                   </Button>
-                </>
+                </Link>
+              )}
+              {(isAdmin || isLoggedIn) && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1 border-emerald-300 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-950 btn-hover-lift"
+                  onClick={() => window.open("https://lifefit2.vercel.app", "_blank", "noopener,noreferrer")}
+                >
+                  <Zap className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline text-xs">매매A(Active)</span>
+                </Button>
               )}
               <LoginDialog />
             </div>
@@ -298,8 +298,8 @@ export default function Home() {
                     </button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent side="right" align="start" className="min-w-[140px]">
-                    {isLoggedIn && <DropdownMenuItem onClick={() => handleTabChange("stocks-domestic")} className="gap-2 cursor-pointer">🇰🇷 국내주식</DropdownMenuItem>}
-                    {isLoggedIn && <DropdownMenuItem onClick={() => handleTabChange("stocks-overseas")} className="gap-2 cursor-pointer">🌐 해외주식</DropdownMenuItem>}
+                    <DropdownMenuItem onClick={() => handleTabChange("stocks-domestic")} className="gap-2 cursor-pointer">🇰🇷 국내주식</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleTabChange("stocks-overseas")} className="gap-2 cursor-pointer">🌐 해외주식</DropdownMenuItem>
                     <DropdownMenuItem onClick={() => handleTabChange("stocks-10x")} className="gap-2 cursor-pointer">🚀 10X</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -309,8 +309,8 @@ export default function Home() {
                   label="주식정보"
                   active={activeTab.startsWith("stocks-")}
                   items={[
-                    ...(isLoggedIn ? [{ label: "🇰🇷 국내주식", value: "stocks-domestic" }] : []),
-                    ...(isLoggedIn ? [{ label: "🌐 해외주식", value: "stocks-overseas" }] : []),
+                    { label: "🇰🇷 국내주식", value: "stocks-domestic" },
+                    { label: "🌐 해외주식", value: "stocks-overseas" },
                     { label: "🚀 10X", value: "stocks-10x" },
                   ]}
                   activeTab={activeTab}
@@ -479,8 +479,8 @@ export default function Home() {
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="center" className="min-w-[120px]">
-                  {isLoggedIn && <DropdownMenuItem onClick={() => handleTabChange("stocks-domestic")} className="gap-2 cursor-pointer text-xs">🇰🇷 국내주식</DropdownMenuItem>}
-                  {isLoggedIn && <DropdownMenuItem onClick={() => handleTabChange("stocks-overseas")} className="gap-2 cursor-pointer text-xs">🌐 해외주식</DropdownMenuItem>}
+                  <DropdownMenuItem onClick={() => handleTabChange("stocks-domestic")} className="gap-2 cursor-pointer text-xs">🇰🇷 국내주식</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleTabChange("stocks-overseas")} className="gap-2 cursor-pointer text-xs">🌐 해외주식</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => handleTabChange("stocks-10x")} className="gap-2 cursor-pointer text-xs">🚀 10X</DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
