@@ -18,6 +18,61 @@ const EtfSearch = lazy(() => import("@/components/EtfSearch"));
 
 type MobileMode = "select" | "ai-agent" | "etf" | "api-manager" | "domestic-market" | "global-market" | "domestic-news" | "global-news" | "bookmarks" | "etf-search";
 
+interface MenuItemConfig {
+  id: MobileMode | "external-trading";
+  label: string;
+  sub: string;
+  icon: typeof Bot;
+  borderColor: string;
+  bgGradient: string;
+  iconGradient: string;
+  adminOnly?: boolean;
+}
+
+const MENU_ITEMS: MenuItemConfig[] = [
+  { id: "etf", label: "실시간 ETF", sub: "ETF 시세 · AI 분석", icon: BarChart3, borderColor: "border-green-200 dark:border-green-800 hover:border-green-400 dark:hover:border-green-600", bgGradient: "from-green-50 to-emerald-50 dark:from-green-950/30 dark:to-emerald-950/30", iconGradient: "from-green-500 to-emerald-600" },
+  { id: "etf-search", label: "ETF통합검색", sub: "ETF 검색 · 비교", icon: Search, borderColor: "border-blue-200 dark:border-blue-800 hover:border-blue-400 dark:hover:border-blue-600", bgGradient: "from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30", iconGradient: "from-blue-500 to-indigo-600" },
+  { id: "domestic-market", label: "국내증시", sub: "코스피 · 코스닥 · 업종", icon: TrendingUp, borderColor: "border-rose-200 dark:border-rose-800 hover:border-rose-400 dark:hover:border-rose-600", bgGradient: "from-rose-50 to-pink-50 dark:from-rose-950/30 dark:to-pink-950/30", iconGradient: "from-rose-500 to-pink-600" },
+  { id: "global-market", label: "해외증시", sub: "미국 · 유럽 · 아시아", icon: Globe, borderColor: "border-sky-200 dark:border-sky-800 hover:border-sky-400 dark:hover:border-sky-600", bgGradient: "from-sky-50 to-cyan-50 dark:from-sky-950/30 dark:to-cyan-950/30", iconGradient: "from-sky-500 to-cyan-600" },
+  { id: "domestic-news", label: "주요뉴스", sub: "국내 시장 뉴스", icon: Newspaper, borderColor: "border-teal-200 dark:border-teal-800 hover:border-teal-400 dark:hover:border-teal-600", bgGradient: "from-teal-50 to-emerald-50 dark:from-teal-950/30 dark:to-emerald-950/30", iconGradient: "from-teal-500 to-emerald-600" },
+  { id: "global-news", label: "글로벌뉴스", sub: "해외 시장 뉴스", icon: Globe, borderColor: "border-violet-200 dark:border-violet-800 hover:border-violet-400 dark:hover:border-violet-600", bgGradient: "from-violet-50 to-indigo-50 dark:from-violet-950/30 dark:to-indigo-950/30", iconGradient: "from-violet-500 to-indigo-600" },
+  { id: "external-trading", label: "매매A(Active)", sub: "주문 · 잔고 · 전략", icon: Zap, borderColor: "border-amber-200 dark:border-amber-800 hover:border-amber-400 dark:hover:border-amber-600", bgGradient: "from-amber-50 to-orange-50 dark:from-amber-950/30 dark:to-orange-950/30", iconGradient: "from-amber-500 to-orange-600" },
+  { id: "ai-agent", label: "AI Agent", sub: "AI 투자 에이전트", icon: Bot, borderColor: "border-purple-200 dark:border-purple-800 hover:border-purple-400 dark:hover:border-purple-600", bgGradient: "from-purple-50 to-blue-50 dark:from-purple-950/30 dark:to-blue-950/30", iconGradient: "from-purple-500 to-blue-600" },
+  { id: "api-manager", label: "API 관리", sub: "API 키 등록 · 전환", icon: Key, borderColor: "border-orange-200 dark:border-orange-800 hover:border-orange-400 dark:hover:border-orange-600", bgGradient: "from-orange-50 to-red-50 dark:from-orange-950/30 dark:to-red-950/30", iconGradient: "from-orange-500 to-red-600" },
+  { id: "bookmarks", label: "즐겨찾기", sub: "저장한 종목 · 링크", icon: Star, borderColor: "border-yellow-200 dark:border-yellow-800 hover:border-yellow-400 dark:hover:border-yellow-600", bgGradient: "from-yellow-50 to-amber-50 dark:from-yellow-950/30 dark:to-amber-950/30", iconGradient: "from-yellow-500 to-amber-600" },
+];
+
+function MobileMenuGrid({ navigateTo, isAdmin }: { navigateTo: (mode: MobileMode) => void; isAdmin: boolean }) {
+  const items = MENU_ITEMS.filter(m => !m.adminOnly || isAdmin);
+
+  return (
+    <div className="grid grid-cols-2 gap-2 w-full max-w-md mx-auto">
+      {items.map((item) => {
+        const Icon = item.icon;
+        const handleClick = item.id === "external-trading"
+          ? () => window.open("https://lifefit2.vercel.app/trading", "_blank", "noopener,noreferrer")
+          : () => navigateTo(item.id as MobileMode);
+
+        return (
+          <button
+            key={item.id}
+            onClick={handleClick}
+            className={`flex flex-col items-center justify-center gap-1 py-2 px-1 rounded-xl border-2 ${item.borderColor} bg-gradient-to-br ${item.bgGradient} hover:shadow-lg transition-all duration-200 active:scale-95`}
+          >
+            <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${item.iconGradient} flex items-center justify-center shadow-md`}>
+              <Icon className="w-5 h-5 text-white" />
+            </div>
+            <div className="text-center">
+              <p className="text-[10px] font-bold text-foreground leading-tight">{item.label}</p>
+              <p className="text-[8px] text-muted-foreground leading-tight">{item.sub}</p>
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function AiMobileContent() {
   const { isAdmin, isLoggedIn, userName, userEmail, logout, isLoggingOut } = useAuth();
   const { toast } = useToast();
@@ -298,153 +353,13 @@ export function AiMobileContent() {
         </header>
 
         {/* 선택 카드 영역 */}
-        <div className="flex-1 overflow-y-auto p-4">
-          <div className="grid grid-cols-2 gap-3 w-full max-w-md mx-auto">
-            {/* AI Agent 버튼 */}
-            <button
-              onClick={() => navigateTo("ai-agent")}
-              className="flex flex-col items-center justify-center gap-2.5 p-4 rounded-2xl border-2 border-purple-200 dark:border-purple-800 bg-gradient-to-br from-purple-50 to-blue-50 dark:from-purple-950/30 dark:to-blue-950/30 hover:border-purple-400 dark:hover:border-purple-600 hover:shadow-lg transition-all duration-200 active:scale-95"
-            >
-              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-500 to-blue-600 flex items-center justify-center shadow-md">
-                <Bot className="w-7 h-7 text-white" />
-              </div>
-              <div className="text-center">
-                <p className="text-xs font-bold text-foreground">AI Agent</p>
-                <p className="text-[9px] text-muted-foreground mt-0.5">AI 투자 에이전트</p>
-              </div>
-            </button>
-
-            {/* 실시간ETF 버튼 */}
-            <button
-              onClick={() => navigateTo("etf")}
-              className="flex flex-col items-center justify-center gap-2.5 p-4 rounded-2xl border-2 border-green-200 dark:border-green-800 bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-950/30 dark:to-emerald-950/30 hover:border-green-400 dark:hover:border-green-600 hover:shadow-lg transition-all duration-200 active:scale-95"
-            >
-              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center shadow-md">
-                <BarChart3 className="w-7 h-7 text-white" />
-              </div>
-              <div className="text-center">
-                <p className="text-xs font-bold text-foreground">실시간 ETF</p>
-                <p className="text-[9px] text-muted-foreground mt-0.5">ETF 시세 · AI 분석</p>
-              </div>
-            </button>
-
-            {/* 자동매매 (매매A) 버튼 */}
-            <button
-              onClick={() => window.open("https://lifefit2.vercel.app/trading", "_blank", "noopener,noreferrer")}
-              className="flex flex-col items-center justify-center gap-2.5 p-4 rounded-2xl border-2 border-amber-200 dark:border-amber-800 bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-950/30 dark:to-orange-950/30 hover:border-amber-400 dark:hover:border-amber-600 hover:shadow-lg transition-all duration-200 active:scale-95"
-            >
-              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-md">
-                <Zap className="w-7 h-7 text-white" />
-              </div>
-              <div className="text-center">
-                <p className="text-xs font-bold text-foreground">매매A(Active)</p>
-                <p className="text-[9px] text-muted-foreground mt-0.5">주문 · 잔고 · 전략</p>
-              </div>
-            </button>
-
-            {/* API 관리 버튼 */}
-            <button
-              onClick={() => navigateTo("api-manager")}
-              className="flex flex-col items-center justify-center gap-2.5 p-4 rounded-2xl border-2 border-orange-200 dark:border-orange-800 bg-gradient-to-br from-orange-50 to-red-50 dark:from-orange-950/30 dark:to-red-950/30 hover:border-orange-400 dark:hover:border-orange-600 hover:shadow-lg transition-all duration-200 active:scale-95"
-            >
-              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center shadow-md">
-                <Key className="w-7 h-7 text-white" />
-              </div>
-              <div className="text-center">
-                <p className="text-xs font-bold text-foreground">API 관리</p>
-                <p className="text-[9px] text-muted-foreground mt-0.5">API 키 등록 · 전환</p>
-              </div>
-            </button>
-
-            {/* 국내증시 버튼 */}
-            <button
-              onClick={() => navigateTo("domestic-market")}
-              className="flex flex-col items-center justify-center gap-2.5 p-4 rounded-2xl border-2 border-rose-200 dark:border-rose-800 bg-gradient-to-br from-rose-50 to-pink-50 dark:from-rose-950/30 dark:to-pink-950/30 hover:border-rose-400 dark:hover:border-rose-600 hover:shadow-lg transition-all duration-200 active:scale-95"
-            >
-              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-rose-500 to-pink-600 flex items-center justify-center shadow-md">
-                <TrendingUp className="w-7 h-7 text-white" />
-              </div>
-              <div className="text-center">
-                <p className="text-xs font-bold text-foreground">국내증시</p>
-                <p className="text-[9px] text-muted-foreground mt-0.5">코스피 · 코스닥 · 업종</p>
-              </div>
-            </button>
-
-            {/* 해외증시 버튼 */}
-            <button
-              onClick={() => navigateTo("global-market")}
-              className="flex flex-col items-center justify-center gap-2.5 p-4 rounded-2xl border-2 border-sky-200 dark:border-sky-800 bg-gradient-to-br from-sky-50 to-cyan-50 dark:from-sky-950/30 dark:to-cyan-950/30 hover:border-sky-400 dark:hover:border-sky-600 hover:shadow-lg transition-all duration-200 active:scale-95"
-            >
-              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-sky-500 to-cyan-600 flex items-center justify-center shadow-md">
-                <Globe className="w-7 h-7 text-white" />
-              </div>
-              <div className="text-center">
-                <p className="text-xs font-bold text-foreground">해외증시</p>
-                <p className="text-[9px] text-muted-foreground mt-0.5">미국 · 유럽 · 아시아</p>
-              </div>
-            </button>
-
-            {/* 주요뉴스 버튼 */}
-            <button
-              onClick={() => navigateTo("domestic-news")}
-              className="flex flex-col items-center justify-center gap-2.5 p-4 rounded-2xl border-2 border-teal-200 dark:border-teal-800 bg-gradient-to-br from-teal-50 to-emerald-50 dark:from-teal-950/30 dark:to-emerald-950/30 hover:border-teal-400 dark:hover:border-teal-600 hover:shadow-lg transition-all duration-200 active:scale-95"
-            >
-              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-teal-500 to-emerald-600 flex items-center justify-center shadow-md">
-                <Newspaper className="w-7 h-7 text-white" />
-              </div>
-              <div className="text-center">
-                <p className="text-xs font-bold text-foreground">주요뉴스</p>
-                <p className="text-[9px] text-muted-foreground mt-0.5">국내 시장 뉴스</p>
-              </div>
-            </button>
-
-            {/* 주요글로벌뉴스 버튼 */}
-            <button
-              onClick={() => navigateTo("global-news")}
-              className="flex flex-col items-center justify-center gap-2.5 p-4 rounded-2xl border-2 border-violet-200 dark:border-violet-800 bg-gradient-to-br from-violet-50 to-indigo-50 dark:from-violet-950/30 dark:to-indigo-950/30 hover:border-violet-400 dark:hover:border-violet-600 hover:shadow-lg transition-all duration-200 active:scale-95"
-            >
-              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-md">
-                <Globe className="w-7 h-7 text-white" />
-              </div>
-              <div className="text-center">
-                <p className="text-xs font-bold text-foreground">글로벌뉴스</p>
-                <p className="text-[9px] text-muted-foreground mt-0.5">해외 시장 뉴스</p>
-              </div>
-            </button>
-
-            {/* 즐겨찾기 버튼 */}
-            <button
-              onClick={() => navigateTo("bookmarks")}
-              className="flex flex-col items-center justify-center gap-2.5 p-4 rounded-2xl border-2 border-yellow-200 dark:border-yellow-800 bg-gradient-to-br from-yellow-50 to-amber-50 dark:from-yellow-950/30 dark:to-amber-950/30 hover:border-yellow-400 dark:hover:border-yellow-600 hover:shadow-lg transition-all duration-200 active:scale-95"
-            >
-              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-yellow-500 to-amber-600 flex items-center justify-center shadow-md">
-                <Star className="w-7 h-7 text-white" />
-              </div>
-              <div className="text-center">
-                <p className="text-xs font-bold text-foreground">즐겨찾기</p>
-                <p className="text-[9px] text-muted-foreground mt-0.5">저장한 종목 · 링크</p>
-              </div>
-            </button>
-
-            {/* ETF통합검색 버튼 */}
-            <button
-              onClick={() => navigateTo("etf-search")}
-              className="flex flex-col items-center justify-center gap-2.5 p-4 rounded-2xl border-2 border-blue-200 dark:border-blue-800 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 hover:border-blue-400 dark:hover:border-blue-600 hover:shadow-lg transition-all duration-200 active:scale-95"
-            >
-              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-md">
-                <Search className="w-7 h-7 text-white" />
-              </div>
-              <div className="text-center">
-                <p className="text-xs font-bold text-foreground">ETF통합검색</p>
-                <p className="text-[9px] text-muted-foreground mt-0.5">ETF 검색 · 비교</p>
-              </div>
-            </button>
-          </div>
+        <div className="flex-1 flex flex-col justify-center p-3">
+          <MobileMenuGrid navigateTo={navigateTo} isAdmin={isAdmin} />
 
           {/* 웨이크워드 상태 인디케이터 */}
           {wakeWordEnabled && (
-            <div className="flex items-center justify-center gap-2 py-3 mx-auto max-w-md">
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800">
+            <div className="flex items-center justify-center gap-2 pt-2 mx-auto max-w-md">
+              <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800">
                 {wakeWordListening ? (
                   <>
                     <div className="relative flex h-2.5 w-2.5">
