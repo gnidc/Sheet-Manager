@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from "react";
+import { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import AiAgent from "@/components/AiAgent";
@@ -18,6 +18,31 @@ export function AiMobileContent() {
   const { isAdmin, isLoggedIn, userName, userEmail, logout, isLoggingOut } = useAuth();
   const [installPrompt, setInstallPrompt] = useState<any>(null);
   const [mode, setMode] = useState<MobileMode>("select");
+
+  const navigateTo = useCallback((newMode: MobileMode) => {
+    if (newMode !== "select") {
+      window.history.pushState({ mode: newMode }, "", `#${newMode}`);
+    }
+    setMode(newMode);
+  }, []);
+
+  const goBack = useCallback(() => {
+    if (mode !== "select") {
+      window.history.back();
+    }
+  }, [mode]);
+
+  useEffect(() => {
+    const handlePopState = (e: PopStateEvent) => {
+      if (e.state?.mode) {
+        setMode(e.state.mode);
+      } else {
+        setMode("select");
+      }
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   // 모바일 viewport 최적화 + PWA 등록
   useEffect(() => {
@@ -150,7 +175,7 @@ export function AiMobileContent() {
           <div className="grid grid-cols-2 gap-3 w-full max-w-md mx-auto">
             {/* AI Agent 버튼 */}
             <button
-              onClick={() => setMode("ai-agent")}
+              onClick={() => navigateTo("ai-agent")}
               className="flex flex-col items-center justify-center gap-2.5 p-4 rounded-2xl border-2 border-purple-200 dark:border-purple-800 bg-gradient-to-br from-purple-50 to-blue-50 dark:from-purple-950/30 dark:to-blue-950/30 hover:border-purple-400 dark:hover:border-purple-600 hover:shadow-lg transition-all duration-200 active:scale-95"
             >
               <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-500 to-blue-600 flex items-center justify-center shadow-md">
@@ -164,7 +189,7 @@ export function AiMobileContent() {
 
             {/* 실시간ETF 버튼 */}
             <button
-              onClick={() => setMode("etf")}
+              onClick={() => navigateTo("etf")}
               className="flex flex-col items-center justify-center gap-2.5 p-4 rounded-2xl border-2 border-green-200 dark:border-green-800 bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-950/30 dark:to-emerald-950/30 hover:border-green-400 dark:hover:border-green-600 hover:shadow-lg transition-all duration-200 active:scale-95"
             >
               <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center shadow-md">
@@ -192,7 +217,7 @@ export function AiMobileContent() {
 
             {/* API 관리 버튼 */}
             <button
-              onClick={() => setMode("api-manager")}
+              onClick={() => navigateTo("api-manager")}
               className="flex flex-col items-center justify-center gap-2.5 p-4 rounded-2xl border-2 border-orange-200 dark:border-orange-800 bg-gradient-to-br from-orange-50 to-red-50 dark:from-orange-950/30 dark:to-red-950/30 hover:border-orange-400 dark:hover:border-orange-600 hover:shadow-lg transition-all duration-200 active:scale-95"
             >
               <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center shadow-md">
@@ -206,7 +231,7 @@ export function AiMobileContent() {
 
             {/* 국내증시 버튼 */}
             <button
-              onClick={() => setMode("domestic-market")}
+              onClick={() => navigateTo("domestic-market")}
               className="flex flex-col items-center justify-center gap-2.5 p-4 rounded-2xl border-2 border-rose-200 dark:border-rose-800 bg-gradient-to-br from-rose-50 to-pink-50 dark:from-rose-950/30 dark:to-pink-950/30 hover:border-rose-400 dark:hover:border-rose-600 hover:shadow-lg transition-all duration-200 active:scale-95"
             >
               <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-rose-500 to-pink-600 flex items-center justify-center shadow-md">
@@ -220,7 +245,7 @@ export function AiMobileContent() {
 
             {/* 해외증시 버튼 */}
             <button
-              onClick={() => setMode("global-market")}
+              onClick={() => navigateTo("global-market")}
               className="flex flex-col items-center justify-center gap-2.5 p-4 rounded-2xl border-2 border-sky-200 dark:border-sky-800 bg-gradient-to-br from-sky-50 to-cyan-50 dark:from-sky-950/30 dark:to-cyan-950/30 hover:border-sky-400 dark:hover:border-sky-600 hover:shadow-lg transition-all duration-200 active:scale-95"
             >
               <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-sky-500 to-cyan-600 flex items-center justify-center shadow-md">
@@ -234,7 +259,7 @@ export function AiMobileContent() {
 
             {/* 주요뉴스 버튼 */}
             <button
-              onClick={() => setMode("domestic-news")}
+              onClick={() => navigateTo("domestic-news")}
               className="flex flex-col items-center justify-center gap-2.5 p-4 rounded-2xl border-2 border-teal-200 dark:border-teal-800 bg-gradient-to-br from-teal-50 to-emerald-50 dark:from-teal-950/30 dark:to-emerald-950/30 hover:border-teal-400 dark:hover:border-teal-600 hover:shadow-lg transition-all duration-200 active:scale-95"
             >
               <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-teal-500 to-emerald-600 flex items-center justify-center shadow-md">
@@ -248,7 +273,7 @@ export function AiMobileContent() {
 
             {/* 주요글로벌뉴스 버튼 */}
             <button
-              onClick={() => setMode("global-news")}
+              onClick={() => navigateTo("global-news")}
               className="flex flex-col items-center justify-center gap-2.5 p-4 rounded-2xl border-2 border-violet-200 dark:border-violet-800 bg-gradient-to-br from-violet-50 to-indigo-50 dark:from-violet-950/30 dark:to-indigo-950/30 hover:border-violet-400 dark:hover:border-violet-600 hover:shadow-lg transition-all duration-200 active:scale-95"
             >
               <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-md">
@@ -274,7 +299,7 @@ export function AiMobileContent() {
       >
         <header className="flex items-center justify-between px-3 py-2 border-b bg-background/95 backdrop-blur-sm shrink-0">
           <div className="flex items-center gap-2">
-            <button onClick={() => setMode("select")} className="text-muted-foreground hover:text-foreground">
+            <button onClick={goBack} className="text-muted-foreground hover:text-foreground">
               <ArrowLeft className="w-4 h-4" />
             </button>
             <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-purple-500 to-blue-600 flex items-center justify-center">
@@ -314,7 +339,7 @@ export function AiMobileContent() {
       >
         <header className="flex items-center justify-between px-3 py-2 border-b bg-background/95 backdrop-blur-sm shrink-0">
           <div className="flex items-center gap-2">
-            <button onClick={() => setMode("select")} className="text-muted-foreground hover:text-foreground">
+            <button onClick={goBack} className="text-muted-foreground hover:text-foreground">
               <ArrowLeft className="w-4 h-4" />
             </button>
             <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center">
@@ -362,7 +387,7 @@ export function AiMobileContent() {
       >
         <header className="flex items-center justify-between px-3 py-2 border-b bg-background/95 backdrop-blur-sm shrink-0">
           <div className="flex items-center gap-2">
-            <button onClick={() => setMode("select")} className="text-muted-foreground hover:text-foreground">
+            <button onClick={goBack} className="text-muted-foreground hover:text-foreground">
               <ArrowLeft className="w-4 h-4" />
             </button>
             <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center">
@@ -417,7 +442,7 @@ export function AiMobileContent() {
       >
         <header className="flex items-center justify-between px-3 py-2 border-b bg-background/95 backdrop-blur-sm shrink-0">
           <div className="flex items-center gap-2">
-            <button onClick={() => setMode("select")} className="text-muted-foreground hover:text-foreground">
+            <button onClick={goBack} className="text-muted-foreground hover:text-foreground">
               <ArrowLeft className="w-4 h-4" />
             </button>
             <div className={`w-7 h-7 rounded-lg bg-gradient-to-br ${cfg.color} flex items-center justify-center`}>
