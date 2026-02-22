@@ -650,7 +650,7 @@ export default function AiAgent({ isAdmin, onNavigate, compact = false }: { isAd
   }
 
   return (
-    <div className={compact ? "flex flex-col h-full" : "space-y-4"}>
+    <div className={compact ? "flex flex-col h-full" : "flex flex-col gap-4 h-[calc(100vh-12rem)]"}>
       {/* 헤더 */}
       {compact ? (
         /* 모바일 컴팩트 헤더 */
@@ -671,7 +671,7 @@ export default function AiAgent({ isAdmin, onNavigate, compact = false }: { isAd
           </div>
         </div>
       ) : (
-      <div className="flex items-center justify-between flex-wrap gap-2">
+      <div className="flex items-center justify-between flex-wrap gap-2 shrink-0">
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-2">
             <Bot className="h-5 w-5 text-purple-500" />
@@ -713,7 +713,7 @@ export default function AiAgent({ isAdmin, onNavigate, compact = false }: { isAd
 
       {/* API 키 미등록 안내 */}
       {!hasApiKey && !isConfigLoading && (
-        <Card className="border-yellow-200 dark:border-yellow-800 bg-yellow-50/50 dark:bg-yellow-950/20">
+        <Card className="border-yellow-200 dark:border-yellow-800 bg-yellow-50/50 dark:bg-yellow-950/20 shrink-0">
           <CardContent className="p-4">
             <div className="flex items-start gap-3">
               <Key className="h-8 w-8 text-yellow-500 shrink-0 mt-0.5" />
@@ -739,7 +739,7 @@ export default function AiAgent({ isAdmin, onNavigate, compact = false }: { isAd
 
       {/* 프롬프트 관리 패널 */}
       {showPromptManager && (
-        <Card>
+        <Card className="shrink-0 max-h-[30vh] overflow-y-auto">
           <CardHeader className="py-3 px-4">
             <CardTitle className="text-sm flex items-center justify-between">
               <span className="flex items-center gap-1.5">
@@ -836,7 +836,7 @@ export default function AiAgent({ isAdmin, onNavigate, compact = false }: { isAd
 
       {/* 대화창 */}
       {hasApiKey && (
-        <Card className={`border-purple-200 dark:border-purple-800 ${compact ? "flex-1 flex flex-col overflow-hidden border-0 rounded-none shadow-none" : ""}`}>
+        <Card className={`border-purple-200 dark:border-purple-800 ${compact ? "flex-1 flex flex-col overflow-hidden border-0 rounded-none shadow-none" : "flex-1 flex flex-col overflow-hidden min-h-0"}`}>
           <CardHeader className="py-2 px-4 border-b shrink-0">
             <CardTitle className="text-sm flex items-center gap-1.5">
               <MessageSquare className="h-4 w-4 text-purple-500" />
@@ -881,9 +881,9 @@ export default function AiAgent({ isAdmin, onNavigate, compact = false }: { isAd
               </div>
             </CardTitle>
           </CardHeader>
-          <CardContent className={`p-0 ${compact ? "flex-1 flex flex-col overflow-hidden" : ""}`}>
+          <CardContent className="p-0 flex-1 flex flex-col overflow-hidden">
             {/* 대화 메시지 영역 */}
-            <div className={`${compact ? "flex-1" : "h-[450px]"} overflow-y-auto p-4 space-y-3`}>
+            <div className="flex-1 overflow-y-auto p-4 space-y-3 min-h-0">
               {chatMessages.length === 0 && (
                 <div className="flex flex-col items-center justify-center h-full text-center space-y-3 text-muted-foreground">
                   <div className="relative">
@@ -1049,7 +1049,7 @@ export default function AiAgent({ isAdmin, onNavigate, compact = false }: { isAd
 
       {/* Agent 실행 결과 패널 */}
       {showAgentResult && agentResults.length > 0 && (
-        <Card className="border-green-200 dark:border-green-800">
+        <Card className="border-green-200 dark:border-green-800 shrink-0 max-h-[35vh] overflow-y-auto">
           <CardHeader className="py-2 px-4 border-b">
             <CardTitle className="text-sm flex items-center justify-between">
               <span className="flex items-center gap-1.5">
