@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
@@ -97,6 +97,32 @@ export function QnABoard() {
 
   const { isAdmin, isLoggedIn, userId } = useAuth();
   const { toast } = useToast();
+  const [hasNewPosts, setHasNewPosts] = useState(false);
+
+  const QNA_LAST_SEEN_KEY = "qna_last_seen_time";
+
+  const { data: latestPosts = [] } = useQuery<QnaPost[]>({
+    queryKey: ["/api/qna/posts", "notification-check"],
+    queryFn: () => apiRequest("GET", "/api/qna/posts").then((r) => r.json()),
+    enabled: isAdmin && !open,
+    refetchInterval: 60000,
+    staleTime: 30000,
+  });
+
+  useEffect(() => {
+    if (!isAdmin || open || latestPosts.length === 0) return;
+    const lastSeen = localStorage.getItem(QNA_LAST_SEEN_KEY);
+    const lastSeenTime = lastSeen ? new Date(lastSeen).getTime() : 0;
+    const hasNew = latestPosts.some(
+      (post) => new Date(post.createdAt).getTime() > lastSeenTime
+    );
+    setHasNewPosts(hasNew);
+  }, [isAdmin, open, latestPosts]);
+
+  const markAsSeen = useCallback(() => {
+    localStorage.setItem(QNA_LAST_SEEN_KEY, new Date().toISOString());
+    setHasNewPosts(false);
+  }, []);
 
   // 게시글 목록
   const { data: posts = [], isLoading: postsLoading } = useQuery<QnaPost[]>({
@@ -215,11 +241,17 @@ export function QnABoard() {
   };
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) { setView("list"); setSelectedPostId(null); } }}>
+    <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (o && isAdmin) { markAsSeen(); } if (!o) { setView("list"); setSelectedPostId(null); } }}>
       <DialogTrigger asChild>
-        <Button variant="outline" className="gap-2 border-emerald-300 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-950">
+        <Button variant="outline" className="relative gap-2 border-emerald-300 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-950">
           <MessageCircle className="w-4 h-4" />
           <span className="hidden sm:inline">Q&A</span>
+          {isAdmin && hasNewPosts && (
+            <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
+              <span className="relative inline-flex h-3 w-3 rounded-full bg-red-500" />
+            </span>
+          )}
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">

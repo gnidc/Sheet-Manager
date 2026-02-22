@@ -1349,7 +1349,24 @@ function PromptItem({
   );
 }
 
-// Agent Action 배지 컴포넌트
+const DATA_TYPE_NAV_MAP: Record<string, string> = {
+  balance: "/trading",
+  orders: "/trading",
+  order_result: "/trading",
+  market_indices: "markets-domestic",
+  global_indices: "markets-global",
+  exchange_rates: "markets-global",
+  etf_top_gainers: "etf-components",
+  etf_components: "etf-components",
+  sectors: "markets-domestic",
+  top_stocks: "markets-domestic",
+  watchlist: "watchlist-etf",
+  watchlist_etf: "watchlist-etf",
+  research: "markets-research",
+  stock_news: "markets-domestic",
+  market_news: "markets-domestic",
+};
+
 function AgentActionBadge({ action, onNavigate }: { action: AgentActionResult; onNavigate?: (tab: string) => void }) {
   const getActionInfo = () => {
     switch (action.type) {
@@ -1357,7 +1374,7 @@ function AgentActionBadge({ action, onNavigate }: { action: AgentActionResult; o
         return { icon: <ArrowRight className="h-3 w-3" />, label: `${TAB_NAMES[action.target || ""] || action.target} 이동`, color: "bg-blue-100 text-blue-700 dark:bg-blue-950/30 dark:text-blue-400 border-blue-200" };
       case "open_window":
         return { icon: <ExternalLink className="h-3 w-3" />, label: "새 창 열기", color: "bg-indigo-100 text-indigo-700 dark:bg-indigo-950/30 dark:text-indigo-400 border-indigo-200" };
-      case "data":
+      case "data": {
         const dataLabel = {
           search_results: "🔍 종목 검색",
           stock_price: "💹 현재가",
@@ -1377,7 +1394,10 @@ function AgentActionBadge({ action, onNavigate }: { action: AgentActionResult; o
           research: "📑 리서치",
           etf_components: "📊 ETF 구성",
         }[action.dataType || ""] || "📊 데이터";
-        return { icon: <BarChart3 className="h-3 w-3" />, label: dataLabel, color: "bg-green-100 text-green-700 dark:bg-green-950/30 dark:text-green-400 border-green-200" };
+        const navTarget = DATA_TYPE_NAV_MAP[action.dataType || ""];
+        const suffix = navTarget ? ` → ${TAB_NAMES[navTarget] || navTarget}` : "";
+        return { icon: <BarChart3 className="h-3 w-3" />, label: dataLabel + suffix, color: "bg-green-100 text-green-700 dark:bg-green-950/30 dark:text-green-400 border-green-200 cursor-pointer" };
+      }
       case "confirm_required":
         return { icon: <AlertTriangle className="h-3 w-3" />, label: "⚠️ 확인 필요", color: "bg-amber-100 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400 border-amber-200" };
       case "error":
@@ -1386,21 +1406,45 @@ function AgentActionBadge({ action, onNavigate }: { action: AgentActionResult; o
         return { icon: <Zap className="h-3 w-3" />, label: "실행됨", color: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400 border-gray-200" };
     }
   };
+
+  const handleClick = () => {
+    switch (action.type) {
+      case "navigate":
+        if (action.target) {
+          if (action.target === "/trading") {
+            window.open("https://lifefit2.vercel.app/trading", "_blank", "noopener,noreferrer");
+          } else if (action.target.startsWith("/")) {
+            window.location.href = action.target;
+          } else if (onNavigate) {
+            onNavigate(action.target);
+          }
+        }
+        break;
+      case "open_window":
+        if (action.url) {
+          window.open(action.url, "_blank", "noopener,noreferrer");
+        }
+        break;
+      case "data": {
+        const navTarget = DATA_TYPE_NAV_MAP[action.dataType || ""];
+        if (navTarget) {
+          if (navTarget.startsWith("/")) {
+            window.open("https://lifefit2.vercel.app/trading", "_blank", "noopener,noreferrer");
+          } else if (onNavigate) {
+            onNavigate(navTarget);
+          }
+        }
+        break;
+      }
+    }
+  };
   
   const info = getActionInfo();
   
   return (
     <button
       className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border ${info.color} transition-opacity hover:opacity-80`}
-      onClick={() => {
-        if (action.type === "navigate" && action.target && onNavigate) {
-          if (action.target.startsWith("/")) {
-            window.location.href = action.target;
-          } else {
-            onNavigate(action.target);
-          }
-        }
-      }}
+      onClick={handleClick}
     >
       {info.icon}
       <span>{info.label}</span>
